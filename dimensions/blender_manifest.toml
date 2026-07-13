@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
-id = "cad_dimensions"
+id = "dimensions"
 version = "0.1.0"
-name = "CAD Dimensions"
-tagline = "Persistent vertex-linked CAD dimensions for Blender"
+name = "Dimensions"
+tagline = "Persistent vertex-linked dimensions for Blender"
 maintainer = "Joseph Mayer"
 type = "add-on"
 

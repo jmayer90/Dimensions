@@ -30,7 +30,7 @@ def create_dimension_object(context, name="DIM Dimension"):
 
     collection.objects.link(dimension_object)
 
-    if hasattr(dimension_object, "cad_dimension"):
-        dimension_object.cad_dimension.enabled = True
+    if hasattr(dimension_object, "dimension_props"):
+        dimension_object.dimension_props.enabled = True
 
     return dimension_object
