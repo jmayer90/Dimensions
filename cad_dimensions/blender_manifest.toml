@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "cad_dimensions"
+version = "0.1.0"
+name = "CAD Dimensions"
+tagline = "Persistent vertex-linked CAD dimensions for Blender"
+maintainer = "Joseph Mayer"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
