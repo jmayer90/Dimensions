@@ -5,6 +5,7 @@ from .constants import (
     DEFAULT_EMPTY_DISPLAY_TYPE,
     DIMENSION_COLLECTION_NAME,
 )
+from .properties import apply_scene_style_to_dimension
 
 
 def get_or_create_dimension_collection(context):
@@ -32,5 +33,8 @@ def create_dimension_object(context, name="DIM Dimension"):
 
     if hasattr(dimension_object, "dimension_props"):
         dimension_object.dimension_props.enabled = True
+        settings = getattr(context.scene, "dimensions_settings", None)
+        if settings is not None:
+            apply_scene_style_to_dimension(settings, dimension_object.dimension_props)
 
     return dimension_object

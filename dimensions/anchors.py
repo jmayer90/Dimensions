@@ -25,14 +25,17 @@ def resolve_anchor(anchor):
     mesh = obj.data
     vertex_index = anchor.vertex_index
 
-    if 0 <= vertex_index < len(mesh.vertices):
-        local_co = mesh.vertices[vertex_index].co
-        return obj.matrix_world @ local_co, "LINKED"
+    if obj.mode == "EDIT":
+        import bmesh
+        bm = bmesh.from_edit_mesh(mesh)
+        bm.verts.ensure_lookup_table()
+        if 0 <= vertex_index < len(bm.verts):
+            local_co = bm.verts[vertex_index].co.copy()
+            return obj.matrix_world @ local_co, "LINKED"
+    else:
+        if 0 <= vertex_index < len(mesh.vertices):
+            local_co = mesh.vertices[vertex_index].co
+            return obj.matrix_world @ local_co, "LINKED"
 
     fallback_local = Vector(anchor.fallback_local_co)
     return obj.matrix_world @ fallback_local, "DETACHED"
-
-
-def get_anchor_status(anchor):
-    _, status = resolve_anchor(anchor)
-    return status

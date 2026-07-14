@@ -7,14 +7,40 @@ def get_display_settings(context):
     return getattr(context.scene, "dimensions_settings", None)
 
 
+def get_configured_unit_style(context):
+    settings = get_display_settings(context)
+    if settings is None:
+        return "BLENDER"
+
+    unit_system = context.scene.unit_settings.system
+    if unit_system == "METRIC":
+        return settings.metric_unit_style
+
+    if unit_system == "IMPERIAL":
+        return settings.imperial_unit_style
+
+    return settings.unit_style
+
+
 def blender_units_to_inches(context, value):
+    return blender_units_to_meters(context, value) / 0.0254
+
+
+def blender_units_to_meters(context, value):
     scale_length = context.scene.unit_settings.scale_length or 1.0
-    meters = value * scale_length
-    return meters / 0.0254
+    return value * scale_length
 
 
 def infer_unit_style(context):
     unit_settings = context.scene.unit_settings
+
+    if unit_settings.system == "METRIC":
+        explicit_metric_styles = {
+            "MILLIMETERS": "MILLIMETERS",
+            "CENTIMETERS": "CENTIMETERS",
+            "METERS": "METERS",
+        }
+        return explicit_metric_styles.get(unit_settings.length_unit, "METRIC_AUTO")
 
     if unit_settings.system != "IMPERIAL":
         return "BLENDER"
@@ -33,12 +59,24 @@ def format_length(context, value, precision=3):
     if settings is None:
         return _format_blender_units(context, value, precision)
 
-    style = settings.unit_style
+    style = get_configured_unit_style(context)
     if style == "AUTO":
         style = infer_unit_style(context)
 
     if style == "BLENDER":
         return _format_blender_units(context, value, precision)
+
+    if style == "METRIC_AUTO":
+        return format_metric_auto(context, value, precision)
+
+    if style == "MILLIMETERS":
+        return format_metric(context, value, precision, 1000.0, "mm")
+
+    if style == "CENTIMETERS":
+        return format_metric(context, value, precision, 100.0, "cm")
+
+    if style == "METERS":
+        return format_metric(context, value, precision, 1.0, "m")
 
     denominator = int(settings.imperial_denominator)
 
@@ -56,12 +94,17 @@ def format_length(context, value, precision=3):
 
 def _format_blender_units(context, value, precision):
     try:
+        unit_settings = context.scene.unit_settings
+        display_value = value
+        if unit_settings.system in {"METRIC", "IMPERIAL"}:
+            display_value = blender_units_to_meters(context, value)
+
         return bpy.utils.units.to_string(
-            context.scene.unit_settings.system,
+            unit_settings.system,
             "LENGTH",
-            value,
+            display_value,
             precision=precision,
-            split_unit=context.scene.unit_settings.use_separate,
+            split_unit=unit_settings.use_separate,
         )
     except Exception:
         return f"{value:.{precision}f}"
@@ -70,6 +113,24 @@ def _format_blender_units(context, value, precision):
 def format_inches_decimal(context, value, precision):
     inches = blender_units_to_inches(context, value)
     return f'{inches:.{precision}f}"'
+
+
+def format_metric(context, value, precision, units_per_meter, suffix):
+    metric_value = blender_units_to_meters(context, value) * units_per_meter
+    return f"{metric_value:.{precision}f} {suffix}"
+
+
+def format_metric_auto(context, value, precision):
+    meters = blender_units_to_meters(context, value)
+    magnitude = abs(meters)
+
+    if magnitude >= 1.0:
+        return format_metric(context, value, precision, 1.0, "m")
+
+    if magnitude >= 0.01:
+        return format_metric(context, value, precision, 100.0, "cm")
+
+    return format_metric(context, value, precision, 1000.0, "mm")
 
 
 def format_inches_fraction(context, value, denominator):

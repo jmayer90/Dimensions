@@ -13,12 +13,15 @@ def register_click_select():
         return
 
     _click_select_timer_active = True
-    bpy.app.timers.register(_ensure_click_select_running, first_interval=0.2)
+    if not bpy.app.timers.is_registered(_ensure_click_select_running):
+        bpy.app.timers.register(_ensure_click_select_running, first_interval=0.2)
 
 
 def unregister_click_select():
     global _click_select_timer_active
     _click_select_timer_active = False
+    if bpy.app.timers.is_registered(_ensure_click_select_running):
+        bpy.app.timers.unregister(_ensure_click_select_running)
     DIMENSIONS_OT_ClickSelectModal._running_areas.clear()
 
 
@@ -73,6 +76,10 @@ class DIMENSIONS_OT_ClickSelectModal(bpy.types.Operator):
         return {"RUNNING_MODAL"}
 
     def modal(self, context, event):
+        if not _click_select_timer_active:
+            self._cleanup()
+            return {"CANCELLED"}
+
         if context.area is None or context.area.type != "VIEW_3D":
             self._cleanup()
             return {"CANCELLED"}
@@ -93,11 +100,16 @@ class DIMENSIONS_OT_ClickSelectModal(bpy.types.Operator):
             if hit_object is None:
                 return {"PASS_THROUGH"}
 
-            for selected_object in context.selected_objects:
-                selected_object.select_set(False)
+            if event.shift:
+                hit_object.select_set(not hit_object.select_get())
+                if hit_object.select_get():
+                    context.view_layer.objects.active = hit_object
+            else:
+                for selected_object in context.selected_objects:
+                    selected_object.select_set(False)
+                hit_object.select_set(True)
+                context.view_layer.objects.active = hit_object
 
-            hit_object.select_set(True)
-            context.view_layer.objects.active = hit_object
             context.area.tag_redraw()
             return {"RUNNING_MODAL"}
 

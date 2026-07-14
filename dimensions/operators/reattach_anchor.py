@@ -88,6 +88,7 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             "state": f"REATTACH_{self.anchor_name}",
             "dimension_type": props.dimension_type,
             "offset_distance": props.offset_distance,
+            "offset_angle": props.offset_angle,
             "offset_plane_normal": tuple(props.offset_plane_normal),
         }
 

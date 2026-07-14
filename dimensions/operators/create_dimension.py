@@ -9,6 +9,7 @@ from ..drawing import (
     clear_preview_state,
     get_dimension_world_geometry,
     get_measure_world_points,
+    get_offset_basis,
     set_preview_state,
 )
 from ..snapping import find_nearest_face_vertex, get_mouse_ray
@@ -44,6 +45,19 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         if context.area is None or context.area.type != "VIEW_3D":
             clear_preview_state()
             return {"CANCELLED"}
+
+        if (
+            self.state == "SET_OFFSET"
+            and event.type in {"A", "X", "Y", "Z"}
+            and event.value == "PRESS"
+        ):
+            self.dimension_type = "ALIGNED" if event.type == "A" else event.type
+            self._configure_offset_plane(context)
+            self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
+            self._update_preview()
+            axis_label = "Auto" if self.dimension_type == "ALIGNED" else self.dimension_type
+            self.report({"INFO"}, f"Extension axis: {axis_label}")
+            return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
             if self.state in {"PICK_START", "PICK_END"}:
@@ -120,7 +134,11 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         if hit_point is None:
             return
 
-        offset_direction = plane_normal.cross(measure_vector.normalized())
+        _stable_plane_normal, offset_direction = get_offset_basis(
+            self.dimension_type,
+            measure_vector.normalized(),
+            plane_normal,
+        )
         if offset_direction.length < 1e-6:
             return
 
@@ -143,20 +161,38 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         measure_direction = measure_vector.normalized()
         view_direction = context.region_data.view_rotation @ Vector((0.0, 0.0, -1.0))
         view_direction.normalize()
+        stable_plane_normal, _offset_direction = get_offset_basis(
+            "ALIGNED",
+            measure_direction,
+            view_direction,
+        )
+        self.offset_plane_normal = stable_plane_normal
 
-        if abs(view_direction.dot(measure_direction)) < 0.98:
-            self.offset_plane_normal = view_direction
+    def _configure_offset_plane(self, context):
+        if self.dimension_type == "ALIGNED":
+            self._begin_offset_stage(context)
             return
 
-        fallback_axes = (
-            Vector((1.0, 0.0, 0.0)),
-            Vector((0.0, 1.0, 0.0)),
-            Vector((0.0, 0.0, 1.0)),
-        )
-        self.offset_plane_normal = min(
-            fallback_axes,
-            key=lambda axis: abs(axis.dot(measure_direction)),
-        )
+        start_world = self.start_snap["world_co"]
+        end_world = self.end_snap["world_co"]
+        measure_vector = end_world - start_world
+        if measure_vector.length < 1e-6:
+            return
+
+        measure_direction = measure_vector.normalized()
+        axis_direction = {
+            "X": Vector((1.0, 0.0, 0.0)),
+            "Y": Vector((0.0, 1.0, 0.0)),
+            "Z": Vector((0.0, 0.0, 1.0)),
+        }[self.dimension_type]
+        perpendicular_axis = axis_direction - measure_direction * axis_direction.dot(measure_direction)
+
+        if perpendicular_axis.length < 1e-6:
+            self._begin_offset_stage(context)
+            return
+
+        perpendicular_axis.normalize()
+        self.offset_plane_normal = measure_direction.cross(perpendicular_axis).normalized()
 
     def _create_dimension(self, context):
         dimension_object = create_dimension_object(context, "DIM Dimension")

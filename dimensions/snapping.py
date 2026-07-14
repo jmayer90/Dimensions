@@ -56,13 +56,34 @@ def find_nearest_face_vertex(
         return None
 
     obj = hit["object"]
-    polygon = obj.data.polygons[hit["face_index"]]
     mouse = Vector((mouse_x, mouse_y))
+
+    candidate_vertices = []
+    face_index = hit["face_index"]
+    
+    if 0 <= face_index < len(obj.data.polygons):
+        polygon = obj.data.polygons[face_index]
+        candidate_vertices = list(polygon.vertices)
+    else:
+        local_hit = obj.matrix_world.inverted() @ hit["location"]
+        try:
+            verts_sorted = sorted(
+                enumerate(obj.data.vertices),
+                key=lambda item: (item[1].co - local_hit).length_squared
+            )
+            candidate_vertices = [idx for idx, _ in verts_sorted[:8]]
+        except Exception:
+            candidate_vertices = []
+
+    if not candidate_vertices:
+        return None
 
     best = None
     best_distance = pixel_threshold
 
-    for vertex_index in polygon.vertices:
+    for vertex_index in candidate_vertices:
+        if vertex_index < 0 or vertex_index >= len(obj.data.vertices):
+            continue
         vertex = obj.data.vertices[vertex_index]
         world_co = obj.matrix_world @ vertex.co
         screen_co = view3d_utils.location_3d_to_region_2d(

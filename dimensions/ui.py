@@ -1,80 +1,171 @@
 import bpy
 
-from .anchors import get_anchor_status
 from .constants import SIDEBAR_CATEGORY
-from .properties import get_anchor_vertex_count, is_dimension_object
+from .properties import is_dimension_object
+from .units import get_configured_unit_style
 
 
-class CADDIM_PT_MainPanel(bpy.types.Panel):
-    bl_label = "Dimensions"
-    bl_idname = "CADDIM_PT_main_panel"
+class CADDIM_PT_PanelBase:
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = SIDEBAR_CATEGORY
 
+
+class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
+    bl_label = "Dimensions"
+    bl_idname = "CADDIM_PT_main_panel"
+
+    def draw(self, _context):
+        self.layout.operator("dimensions.create_dimension", icon="DRIVER_DISTANCE")
+
+
+class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
+    bl_label = "Global Dimension Settings"
+    bl_idname = "CADDIM_PT_global_settings"
+    bl_parent_id = CADDIM_PT_MainPanel.bl_idname
+    bl_order = 1
+
     def draw(self, context):
         layout = self.layout
-        scene_settings = context.scene.dimensions_settings
+        settings = context.scene.dimensions_settings
+        layout.use_property_split = True
+        layout.use_property_decorate = False
 
-        layout.operator("dimensions.create_dimension", icon="DRIVER_DISTANCE")
+        unit_system = context.scene.unit_settings.system
+        if unit_system == "METRIC":
+            layout.prop(settings, "metric_unit_style", text="Unit Style")
+        elif unit_system == "IMPERIAL":
+            layout.prop(settings, "imperial_unit_style", text="Unit Style")
+        else:
+            layout.prop(settings, "unit_style")
 
-        display_box = layout.box()
-        display_box.label(text="Display")
-        display_box.prop(scene_settings, "unit_style")
-        if scene_settings.unit_style in {"FEET_INCHES", "INCH_FRACTION"}:
-            display_box.prop(scene_settings, "imperial_denominator")
-        display_box.prop(scene_settings, "show_selected_object_overlay")
-        if scene_settings.show_selected_object_overlay:
-            display_box.prop(scene_settings, "show_overlay_object_name")
-        display_box.prop(scene_settings, "enable_click_select")
+        configured_style = get_configured_unit_style(context)
+        if unit_system == "IMPERIAL" and configured_style in {
+            "AUTO",
+            "FEET_INCHES",
+            "INCH_FRACTION",
+        }:
+            layout.prop(settings, "imperial_denominator")
+        layout.prop(settings, "precision")
+        layout.prop(settings, "text_placement")
+        layout.prop(settings, "enable_click_select")
 
+
+class CADDIM_PT_MeshSizeHUD(CADDIM_PT_PanelBase, bpy.types.Panel):
+    bl_label = "Selected Mesh Size HUD"
+    bl_idname = "CADDIM_PT_mesh_size_hud"
+    bl_parent_id = CADDIM_PT_MainPanel.bl_idname
+    bl_order = 0
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        settings = context.scene.dimensions_settings
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        layout.prop(settings, "show_selected_object_overlay", text="Enabled")
+        if settings.show_selected_object_overlay:
+            layout.prop(settings, "show_overlay_object_name")
+            layout.prop(settings, "hud_corner")
+            layout.prop(settings, "hud_padding_horizontal")
+            layout.prop(settings, "hud_padding_vertical")
+
+
+class CADDIM_PT_GlobalStyle(CADDIM_PT_PanelBase, bpy.types.Panel):
+    bl_label = "Global Dimension Style"
+    bl_idname = "CADDIM_PT_global_style"
+    bl_parent_id = CADDIM_PT_MainPanel.bl_idname
+    bl_order = 2
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        settings = context.scene.dimensions_settings
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        layout.prop(settings, "dimension_color")
+        layout.prop(settings, "selected_dimension_color")
+        layout.prop(settings, "dimension_line_width")
+        layout.prop(settings, "dimension_text_size")
+        layout.prop(settings, "dimension_arrow_size")
+        layout.operator("dimensions.apply_global_style_to_all", icon="FILE_REFRESH")
+
+
+class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
+    bl_label = "Selected Dimension (Local)"
+    bl_idname = "CADDIM_PT_selected_dimension"
+    bl_parent_id = CADDIM_PT_MainPanel.bl_idname
+    bl_order = 3
+
+    def draw(self, context):
+        layout = self.layout
         active_object = context.view_layer.objects.active
+
         if not is_dimension_object(active_object):
-            layout.separator()
-            layout.label(text="Select a dimension to inspect it.")
+            layout.label(text="No dimension selected.")
+            layout.label(text="Settings here affect one dimension only.")
             return
 
         props = active_object.dimension_props
-
-        layout.separator()
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        layout.label(text="Changes below affect only this dimension.")
         layout.prop(active_object, "name", text="Name")
         layout.prop(props, "dimension_type")
         layout.prop(props, "offset_distance")
-        layout.prop(props, "precision")
+        layout.prop(props, "offset_angle")
+        layout.prop(props, "custom_text")
+        if props.custom_text:
+            layout.prop(props, "custom_text_position")
         layout.prop(props, "visible")
-        layout.prop(props, "locked")
-        layout.prop(props, "color")
-        layout.prop(props, "selected_color")
+
+        style_box = layout.box()
+        style_box.label(text="Local Style")
+        style_box.prop(props, "color")
+        style_box.prop(props, "selected_color")
+        style_box.prop(props, "line_width")
+        style_box.prop(props, "text_size")
+        style_box.prop(props, "arrow_size")
+        style_box.operator("dimensions.reset_style_to_global", icon="LOOP_BACK")
 
         start_box = layout.box()
         start_box.label(text="Start Anchor")
         start_box.prop(props.start, "target_object", text="Object")
         start_row = start_box.row(align=True)
-        start_row.prop(props.start, "vertex_index")
-        start_pick = start_row.operator("dimensions.reattach_anchor", text="", icon="EYEDROPPER")
+        start_row.label(text="Vertex Index")
+        start_pick = start_row.operator(
+            "dimensions.reattach_anchor",
+            text=_vertex_picker_text(props.start),
+            icon="EYEDROPPER",
+        )
         start_pick.anchor_name = "START"
-        start_box.label(text=_vertex_range_text(props.start))
-        start_box.label(text=f"Status: {get_anchor_status(props.start)}")
 
         end_box = layout.box()
         end_box.label(text="End Anchor")
         end_box.prop(props.end, "target_object", text="Object")
         end_row = end_box.row(align=True)
-        end_row.prop(props.end, "vertex_index")
-        end_pick = end_row.operator("dimensions.reattach_anchor", text="", icon="EYEDROPPER")
+        end_row.label(text="Vertex Index")
+        end_pick = end_row.operator(
+            "dimensions.reattach_anchor",
+            text=_vertex_picker_text(props.end),
+            icon="EYEDROPPER",
+        )
         end_pick.anchor_name = "END"
-        end_box.label(text=_vertex_range_text(props.end))
-        end_box.label(text=f"Status: {get_anchor_status(props.end)}")
 
 
-def _vertex_range_text(anchor):
-    vertex_count = get_anchor_vertex_count(anchor)
-    if vertex_count <= 0:
-        return "Valid Vertices: none"
+def _vertex_picker_text(anchor):
+    if anchor.vertex_index < 0:
+        return "Pick Vertex"
 
-    return f"Valid Vertices: 0-{vertex_count - 1}"
+    return str(anchor.vertex_index)
 
 
 classes = (
     CADDIM_PT_MainPanel,
+    CADDIM_PT_MeshSizeHUD,
+    CADDIM_PT_GlobalSettings,
+    CADDIM_PT_GlobalStyle,
+    CADDIM_PT_SelectedDimension,
 )
