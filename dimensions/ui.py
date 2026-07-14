@@ -128,7 +128,9 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
         style_box.prop(props, "line_width")
         style_box.prop(props, "text_size")
         style_box.prop(props, "arrow_size")
-        style_box.operator("dimensions.reset_style_to_global", icon="LOOP_BACK")
+        style_actions = style_box.row(align=True)
+        style_actions.operator("dimensions.reset_style_to_global", icon="LOOP_BACK")
+        style_actions.operator("dimensions.copy_style_to_global", icon="DUPLICATE")
 
         start_box = layout.box()
         start_box.label(text="Start Anchor")

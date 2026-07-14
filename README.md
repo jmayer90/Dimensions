@@ -40,6 +40,8 @@ For distribution, build and validate the archive with Blender's extension comman
 5. Click to finish. Right-click or `Esc` cancels.
 6. Select the dimension Empty, or click the drawn annotation, to edit it in the sidebar.
 
+Alternatively, select **Add Dimension** from the Object Mode toolbar directly below Blender's Add Cube tool, then click in the viewport to begin the same workflow.
+
 The measurement line and value always remain aligned to the two selected anchors. **Extension Axis** controls how the annotation moves away from that edge:
 
 - **Auto:** choose the usable global axis closest to the natural placement direction from the current view.
@@ -58,6 +60,8 @@ Each dimension has a local **Offset Angle**. Zero degrees follows the selected e
 The dimension Empty follows the world-space midpoint of its rendered dimension line as anchors, referenced geometry, extension axis, offset, or offset angle change. This keeps the selectable scene object near its annotation without modifying scene data from the viewport draw callback.
 
 **Global Dimension Style** defines the color, selected color, line width, text size, and arrow size copied into new dimensions. **Set All Dimensions** copies those values to every existing dimension in the scene. Each selected dimension can customize the same values locally, and **Reset to Global** copies the current global style back to that dimension. Style values are copied rather than linked, so later global edits do not overwrite intentional local changes until one of those actions is used.
+
+**Copy to Global** performs the reverse operation: it copies the selected dimension's local style into the global defaults for future dimensions. It does not modify other existing dimensions unless **Set All Dimensions** is subsequently used.
 
 Use **Custom Text** in the selected dimension panel for an optional note. The note can sit above or below the measured value and participates in inline gaps, outside placement, readability spacing, and viewport hit-testing as one label block.
 
@@ -99,7 +103,7 @@ The next useful product work is a dimension-management list with bulk visibility
 dimensions/
 |-- blender_manifest.toml
 |-- anchors.py, collections.py, properties.py
-|-- drawing.py, snapping.py, units.py, ui.py
+|-- drawing.py, snapping.py, tools.py, units.py, ui.py
 `-- operators/
     |-- create_dimension.py
     |-- reattach_anchor.py

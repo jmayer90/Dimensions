@@ -391,6 +391,14 @@ def apply_scene_style_to_dimension(scene_settings, dimension_props):
     dimension_props.arrow_size = scene_settings.dimension_arrow_size
 
 
+def apply_dimension_style_to_scene(dimension_props, scene_settings):
+    scene_settings.dimension_color = tuple(dimension_props.color)
+    scene_settings.selected_dimension_color = tuple(dimension_props.selected_color)
+    scene_settings.dimension_line_width = dimension_props.line_width
+    scene_settings.dimension_text_size = dimension_props.text_size
+    scene_settings.dimension_arrow_size = dimension_props.arrow_size
+
+
 def register_properties():
     bpy.types.Object.dimension_props = bpy.props.PointerProperty(
         type=CADDIM_PG_Dimension,

@@ -1,6 +1,10 @@
 import bpy
 
-from ..properties import apply_scene_style_to_dimension, is_dimension_object
+from ..properties import (
+    apply_dimension_style_to_scene,
+    apply_scene_style_to_dimension,
+    is_dimension_object,
+)
 
 
 class CADDIM_OT_ResetStyleToGlobal(bpy.types.Operator):
@@ -43,7 +47,28 @@ class CADDIM_OT_ApplyGlobalStyleToAll(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class CADDIM_OT_CopyStyleToGlobal(bpy.types.Operator):
+    bl_idname = "dimensions.copy_style_to_global"
+    bl_label = "Copy to Global"
+    bl_description = "Use the selected dimension's local style as the new global style"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return is_dimension_object(context.view_layer.objects.active)
+
+    def execute(self, context):
+        dimension_object = context.view_layer.objects.active
+        apply_dimension_style_to_scene(
+            dimension_object.dimension_props,
+            context.scene.dimensions_settings,
+        )
+        self.report({"INFO"}, "Copied selected dimension style to global defaults")
+        return {"FINISHED"}
+
+
 classes = (
     CADDIM_OT_ResetStyleToGlobal,
     CADDIM_OT_ApplyGlobalStyleToAll,
+    CADDIM_OT_CopyStyleToGlobal,
 )
