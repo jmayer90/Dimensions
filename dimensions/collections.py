@@ -4,6 +4,7 @@ from .constants import (
     DEFAULT_EMPTY_DISPLAY_SIZE,
     DEFAULT_EMPTY_DISPLAY_TYPE,
     DIMENSION_COLLECTION_NAME,
+    GUIDE_COLLECTION_NAME,
 )
 from .properties import apply_scene_style_to_dimension
 
@@ -38,3 +39,23 @@ def create_dimension_object(context, name="DIM Dimension"):
             apply_scene_style_to_dimension(settings, dimension_object.dimension_props)
 
     return dimension_object
+
+
+def get_or_create_guide_collection(context):
+    collection = bpy.data.collections.get(GUIDE_COLLECTION_NAME)
+    if collection is None:
+        collection = bpy.data.collections.new(GUIDE_COLLECTION_NAME)
+    if context.scene.collection.children.get(collection.name) is None:
+        context.scene.collection.children.link(collection)
+    return collection
+
+
+def create_guide_object(context, name="GUIDE Construction Line"):
+    collection = get_or_create_guide_collection(context)
+    guide_object = bpy.data.objects.new(name, object_data=None)
+    guide_object.empty_display_type = DEFAULT_EMPTY_DISPLAY_TYPE
+    guide_object.empty_display_size = DEFAULT_EMPTY_DISPLAY_SIZE
+    guide_object.hide_render = True
+    collection.objects.link(guide_object)
+    guide_object.guide_props.enabled = True
+    return guide_object

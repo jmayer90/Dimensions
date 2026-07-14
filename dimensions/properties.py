@@ -5,6 +5,7 @@ import bpy
 from .constants import (
     DEFAULT_ARROW_SIZE,
     DEFAULT_LINE_WIDTH,
+    DEFAULT_GUIDE_LINE_WIDTH,
     DEFAULT_OFFSET_DISTANCE,
     DEFAULT_PRECISION,
     DEFAULT_TEXT_SIZE,
@@ -208,6 +209,24 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
     )
 
 
+class CADDIM_PG_Guide(bpy.types.PropertyGroup):
+    enabled: bpy.props.BoolProperty(name="Enabled", default=False)
+    start: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
+    end: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
+    axis: bpy.props.EnumProperty(
+        name="Direction",
+        items=[
+            ("ALIGNED", "Aligned", "Use the direction between the two anchors"),
+            ("X", "X Axis", "Use the global X axis through the start anchor"),
+            ("Y", "Y Axis", "Use the global Y axis through the start anchor"),
+            ("Z", "Z Axis", "Use the global Z axis through the start anchor"),
+        ],
+        default="ALIGNED",
+        update=update_dimension_display,
+    )
+    visible: bpy.props.BoolProperty(name="Visible", default=True, update=update_dimension_display)
+
+
 class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
     unit_style: bpy.props.EnumProperty(
         name="Unit Style",
@@ -378,9 +397,37 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
         update=update_dimension_display,
     )
 
+    show_construction_guides: bpy.props.BoolProperty(
+        name="Show Guides",
+        default=True,
+        update=update_dimension_display,
+    )
+
+    guide_color: bpy.props.FloatVectorProperty(
+        name="Guide Color",
+        subtype="COLOR",
+        size=4,
+        default=(0.22, 0.70, 1.0, 0.70),
+        min=0.0,
+        max=1.0,
+        update=update_dimension_display,
+    )
+
+    guide_line_width: bpy.props.FloatProperty(
+        name="Guide Line Width",
+        default=DEFAULT_GUIDE_LINE_WIDTH,
+        min=1.0,
+        max=5.0,
+        update=update_dimension_display,
+    )
+
 
 def is_dimension_object(obj):
     return bool(obj and hasattr(obj, "dimension_props") and obj.dimension_props.enabled)
+
+
+def is_guide_object(obj):
+    return bool(obj and hasattr(obj, "guide_props") and obj.guide_props.enabled)
 
 
 def apply_scene_style_to_dimension(scene_settings, dimension_props):
@@ -403,12 +450,15 @@ def register_properties():
     bpy.types.Object.dimension_props = bpy.props.PointerProperty(
         type=CADDIM_PG_Dimension,
     )
+    bpy.types.Object.guide_props = bpy.props.PointerProperty(type=CADDIM_PG_Guide)
     bpy.types.Scene.dimensions_settings = bpy.props.PointerProperty(
         type=CADDIM_PG_SceneSettings,
     )
 
 
 def unregister_properties():
+    if hasattr(bpy.types.Object, "guide_props"):
+        del bpy.types.Object.guide_props
     if hasattr(bpy.types.Object, "dimension_props"):
         del bpy.types.Object.dimension_props
     if hasattr(bpy.types.Scene, "dimensions_settings"):
@@ -418,5 +468,6 @@ def unregister_properties():
 classes = (
     CADDIM_PG_Anchor,
     CADDIM_PG_Dimension,
+    CADDIM_PG_Guide,
     CADDIM_PG_SceneSettings,
 )

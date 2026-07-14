@@ -15,12 +15,14 @@ from .constants import (
     DEFAULT_SELECTION_PIXEL_THRESHOLD,
     DEFAULT_TEXT_SIZE,
 )
-from .properties import is_dimension_object
+from .properties import is_dimension_object, is_guide_object
 from .units import format_length
 
 
 _draw_handler = None
 _preview_state = None
+_measure_state = None
+_guide_preview_state = None
 _location_sync_active = False
 _location_sync_scheduled = False
 _AXIS_CANDIDATES = (
@@ -53,6 +55,30 @@ def clear_preview_state():
     tag_redraw_all_view3d()
 
 
+def set_measure_state(state):
+    global _measure_state
+    _measure_state = state
+    tag_redraw_all_view3d()
+
+
+def clear_measure_state():
+    global _measure_state
+    _measure_state = None
+    tag_redraw_all_view3d()
+
+
+def set_guide_preview_state(state):
+    global _guide_preview_state
+    _guide_preview_state = state
+    tag_redraw_all_view3d()
+
+
+def clear_guide_preview_state():
+    global _guide_preview_state
+    _guide_preview_state = None
+    tag_redraw_all_view3d()
+
+
 def register_draw_handler():
     global _draw_handler
 
@@ -72,7 +98,7 @@ def register_draw_handler():
 
 
 def unregister_draw_handler():
-    global _draw_handler, _location_sync_scheduled
+    global _draw_handler, _location_sync_scheduled, _preview_state, _measure_state, _guide_preview_state
 
     if _dimension_location_sync_handler in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_dimension_location_sync_handler)
@@ -80,6 +106,9 @@ def unregister_draw_handler():
     if bpy.app.timers.is_registered(_run_scheduled_location_sync):
         bpy.app.timers.unregister(_run_scheduled_location_sync)
     _location_sync_scheduled = False
+    _preview_state = None
+    _measure_state = None
+    _guide_preview_state = None
 
     if _draw_handler is None:
         return
@@ -123,6 +152,13 @@ def sync_dimension_object_locations(scene):
     _location_sync_active = True
     try:
         for obj in scene.objects:
+            if is_guide_object(obj):
+                start_world, _status = resolve_anchor(obj.guide_props.start)
+                if start_world is not None and (obj.matrix_world.translation - start_world).length > 1e-6:
+                    matrix_world = obj.matrix_world.copy()
+                    matrix_world.translation = start_world
+                    obj.matrix_world = matrix_world
+                continue
             if not is_dimension_object(obj):
                 continue
 
@@ -317,6 +353,7 @@ def draw_dimensions():
     gpu.state.line_width_set(DEFAULT_LINE_WIDTH)
 
     try:
+        _draw_construction_guides(context, shader)
         for obj in context.scene.objects:
             if not is_dimension_object(obj):
                 continue
@@ -335,10 +372,139 @@ def draw_dimensions():
         if _preview_state is not None:
             _draw_preview(context, shader, _preview_state)
 
+        if _guide_preview_state is not None:
+            _draw_guide_preview(context, shader, _guide_preview_state)
+
+        if _measure_state is not None:
+            _draw_transient_measure(context, shader, _measure_state)
+
         _draw_selected_object_overlay(context)
     finally:
         gpu.state.line_width_set(1.0)
         gpu.state.blend_set("NONE")
+
+
+def _axis_endpoint(start_world, end_world, axis):
+    if axis == "X":
+        return Vector((end_world.x, start_world.y, start_world.z))
+    if axis == "Y":
+        return Vector((start_world.x, end_world.y, start_world.z))
+    if axis == "Z":
+        return Vector((start_world.x, start_world.y, end_world.z))
+    return end_world
+
+
+def _guide_direction(start_world, end_world, axis):
+    if axis == "X":
+        return Vector((1.0, 0.0, 0.0))
+    if axis == "Y":
+        return Vector((0.0, 1.0, 0.0))
+    if axis == "Z":
+        return Vector((0.0, 0.0, 1.0))
+    direction = end_world - start_world
+    return None if direction.length < 1e-6 else direction.normalized()
+
+
+def _draw_construction_guides(context, shader):
+    settings = getattr(context.scene, "dimensions_settings", None)
+    if settings is None or not settings.show_construction_guides:
+        return
+    for obj in context.scene.objects:
+        if not is_guide_object(obj) or not obj.guide_props.visible or not _object_visible_in_viewport(context, obj):
+            continue
+        start_world, _start_status = resolve_anchor(obj.guide_props.start)
+        end_world, _end_status = resolve_anchor(obj.guide_props.end)
+        if start_world is None or end_world is None:
+            continue
+        direction = _guide_direction(start_world, end_world, obj.guide_props.axis)
+        _draw_infinite_world_line(context, shader, start_world, direction, settings.guide_color, settings.guide_line_width)
+
+
+def _draw_guide_preview(context, shader, state):
+    hover = state.get("hover_screen")
+    if hover is not None:
+        _draw_marker(shader, hover, (0.3, 1.0, 0.3, 1.0))
+    start = state.get("start_world")
+    end = state.get("end_world")
+    if start is None or end is None:
+        return
+    settings = getattr(context.scene, "dimensions_settings", None)
+    color = tuple(settings.guide_color) if settings is not None else (0.22, 0.70, 1.0, 0.7)
+    width = settings.guide_line_width if settings is not None else 1.0
+    _draw_infinite_world_line(context, shader, start, _guide_direction(start, end, state.get("axis", "ALIGNED")), color, width)
+
+
+def _draw_infinite_world_line(context, shader, origin, direction, color, line_width):
+    if direction is None or direction.length < 1e-6:
+        return
+    origin_screen = _project_world_to_screen(context, origin)
+    direction_screen_point = _project_world_to_screen(context, origin + direction.normalized())
+    if origin_screen is None or direction_screen_point is None:
+        return
+    screen_direction = direction_screen_point - origin_screen
+    if screen_direction.length < 1e-4:
+        return
+    endpoints = _clip_infinite_screen_line(origin_screen, screen_direction, context.region.width, context.region.height)
+    if endpoints is None:
+        return
+    gpu.state.line_width_set(line_width)
+    batch = batch_for_shader(shader, "LINES", {"pos": endpoints})
+    shader.bind()
+    shader.uniform_float("color", color)
+    batch.draw(shader)
+
+
+def _clip_infinite_screen_line(origin, direction, width, height):
+    candidates = []
+    if abs(direction.x) > 1e-8:
+        for x in (0.0, float(width)):
+            factor = (x - origin.x) / direction.x
+            y = origin.y + factor * direction.y
+            if 0.0 <= y <= height:
+                candidates.append(Vector((x, y)))
+    if abs(direction.y) > 1e-8:
+        for y in (0.0, float(height)):
+            factor = (y - origin.y) / direction.y
+            x = origin.x + factor * direction.x
+            if 0.0 <= x <= width:
+                candidates.append(Vector((x, y)))
+    unique = []
+    for point in candidates:
+        if not any((point - other).length < 0.5 for other in unique):
+            unique.append(point)
+    if len(unique) < 2:
+        return None
+    return max(((a, b) for a in unique for b in unique), key=lambda pair: (pair[1] - pair[0]).length)
+
+
+def _draw_transient_measure(context, shader, state):
+    hover = state.get("hover_screen")
+    if hover is not None:
+        _draw_marker(shader, hover, (0.3, 1.0, 0.3, 1.0))
+    start = state.get("start_world")
+    raw_end = state.get("end_world")
+    if start is None or raw_end is None:
+        return
+    end = _axis_endpoint(start, raw_end, state.get("axis", "ALIGNED"))
+    start_screen = _project_world_to_screen(context, start)
+    end_screen = _project_world_to_screen(context, end)
+    if start_screen is None or end_screen is None or (end_screen - start_screen).length < 0.5:
+        return
+    settings = getattr(context.scene, "dimensions_settings", None)
+    precision = settings.precision if settings is not None else DEFAULT_PRECISION
+    text_size = settings.dimension_text_size if settings is not None else DEFAULT_TEXT_SIZE
+    color = (0.35, 1.0, 0.72, 1.0)
+    gpu.state.line_width_set(2.0)
+    batch = batch_for_shader(shader, "LINES", {"pos": [start_screen, end_screen]})
+    shader.bind()
+    shader.uniform_float("color", color)
+    batch.draw(shader)
+    _draw_marker(shader, start_screen, color)
+    _draw_marker(shader, end_screen, color)
+    direction = (end_screen - start_screen).normalized()
+    perpendicular = Vector((-direction.y, direction.x))
+    label_position = (start_screen + end_screen) * 0.5 + perpendicular * (text_size + 4.0)
+    _draw_text(format_length(context, (end - start).length, precision), label_position, color, text_size)
 
 
 def _draw_dimension_geometry(context, shader, geometry, color, precision):

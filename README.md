@@ -16,6 +16,8 @@ Version `0.1.0` contains a usable core prototype. It still needs Blender runtime
 - Place labels inline in a line break, above the line, or outside the end arrow.
 - Add optional per-dimension text above or below the measured value.
 - Optionally show Length / Width / Thickness for selected mesh objects in a viewport HUD.
+- Make transient two-point measurements without creating or saving scene objects.
+- Create persistent infinite construction guides in their own hideable collection.
 
 ## Install
 
@@ -41,6 +43,14 @@ For distribution, build and validate the archive with Blender's extension comman
 6. Select the dimension Empty, or click the drawn annotation, to edit it in the sidebar.
 
 Alternatively, select **Add Dimension** from the Object Mode toolbar directly below Blender's Add Cube tool, then click in the viewport to begin the same workflow.
+
+### Quick measure and construction guides
+
+Use **Measure** for a temporary answer. Click a start vertex, move to another vertex, and click to keep the result visible while the tool remains active. Click again to replace it with a new measurement. Press `A` for the direct aligned distance or `X`, `Y`, or `Z` to measure the projected difference on that global axis. `Backspace`/`Delete` clears the result; `Esc` clears and then exits. Transient measurements create no object and are not saved.
+
+Use **Add Construction Guide** for a persistent reference. Pick two vertices and press `A` for a guide aligned between them, or `X`, `Y`, or `Z` for an infinite global-axis guide through the first vertex. Guides are lightweight Empty objects in the `Construction Guides` collection and follow their linked anchors. The sidebar controls global guide visibility, color, line width, and **Clear All Guides**.
+
+The current first pass snaps to visible face vertices. Edge, midpoint, face, and intersection inference; typed distances; parallel offsets; guide planes; and direct line selection are planned follow-ups. See the living [Measure and Construction Guides plan](docs/MEASURE_GUIDES_PLAN.md).
 
 The measurement line and value always remain aligned to the two selected anchors. **Extension Axis** controls how the annotation moves away from that edge:
 
@@ -80,6 +90,7 @@ Current limitations:
 - Dimension overlays follow Blender viewport visibility, including an individual Empty's hide state and hidden or excluded parent collections/view layers.
 - A missing target object prevents that dimension from drawing. A detached vertex uses its fallback coordinate and reports its status in the sidebar, without a special viewport warning style.
 - There is no dimension list, bulk visibility controls, preferences panel, or custom keymap yet.
+- Construction guides currently support infinite aligned/global-axis lines and group controls, but not guide planes, offsets, or direct overlay selection.
 - The selected-object HUD sorts bounding-box extents largest-to-smallest; Length, Width, and Thickness are not fixed local-axis labels.
 
 ## Development
@@ -105,7 +116,7 @@ dimensions/
 |-- anchors.py, collections.py, properties.py
 |-- drawing.py, snapping.py, tools.py, units.py, ui.py
 `-- operators/
-    |-- create_dimension.py
+    |-- create_dimension.py, create_guide.py, measure.py
     |-- reattach_anchor.py
     |-- style.py
     `-- click_select.py

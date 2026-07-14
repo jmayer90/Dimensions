@@ -17,6 +17,9 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
 
     def draw(self, _context):
         self.layout.operator("dimensions.create_dimension", icon="DRIVER_DISTANCE")
+        row = self.layout.row(align=True)
+        row.operator("dimensions.measure", icon="DRIVER_DISTANCE")
+        row.operator("dimensions.create_guide", icon="EMPTY_AXIS")
 
 
 class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
@@ -97,7 +100,7 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Selected Dimension (Local)"
     bl_idname = "CADDIM_PT_selected_dimension"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 3
+    bl_order = 4
 
     def draw(self, context):
         layout = self.layout
@@ -157,6 +160,24 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
         end_pick.anchor_name = "END"
 
 
+class CADDIM_PT_ConstructionGuides(CADDIM_PT_PanelBase, bpy.types.Panel):
+    bl_label = "Construction Guides"
+    bl_idname = "CADDIM_PT_construction_guides"
+    bl_parent_id = CADDIM_PT_MainPanel.bl_idname
+    bl_order = 3
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        settings = context.scene.dimensions_settings
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        layout.prop(settings, "show_construction_guides")
+        layout.prop(settings, "guide_color")
+        layout.prop(settings, "guide_line_width")
+        layout.operator("dimensions.clear_guides", icon="TRASH")
+
+
 def _vertex_picker_text(anchor):
     if anchor.vertex_index < 0:
         return "Pick Vertex"
@@ -169,5 +190,6 @@ classes = (
     CADDIM_PT_MeshSizeHUD,
     CADDIM_PT_GlobalSettings,
     CADDIM_PT_GlobalStyle,
+    CADDIM_PT_ConstructionGuides,
     CADDIM_PT_SelectedDimension,
 )
