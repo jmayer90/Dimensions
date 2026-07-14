@@ -17,6 +17,11 @@ def poll_mesh_objects(_self, obj):
 
 
 def clamp_anchor_vertex_index(anchor):
+    if getattr(anchor, "anchor_type", "VERTEX") == "WORLD":
+        if anchor.vertex_index != -1:
+            anchor.vertex_index = -1
+        return
+
     obj = anchor.target_object
 
     if obj is None or obj.type != "MESH":
@@ -61,6 +66,15 @@ def _schedule_dimension_location_sync():
 
 
 class CADDIM_PG_Anchor(bpy.types.PropertyGroup):
+    anchor_type: bpy.props.EnumProperty(
+        name="Anchor Type",
+        items=[
+            ("VERTEX", "Vertex", "Anchor follows a mesh vertex"),
+            ("WORLD", "World Point", "Anchor is a fixed world coordinate"),
+        ],
+        default="VERTEX",
+    )
+
     target_object: bpy.props.PointerProperty(
         name="Object",
         type=bpy.types.Object,
@@ -76,6 +90,13 @@ class CADDIM_PG_Anchor(bpy.types.PropertyGroup):
 
     fallback_local_co: bpy.props.FloatVectorProperty(
         name="Fallback Local Coordinate",
+        size=3,
+        subtype="XYZ",
+        default=(0.0, 0.0, 0.0),
+    )
+
+    world_co: bpy.props.FloatVectorProperty(
+        name="World Coordinate",
         size=3,
         subtype="XYZ",
         default=(0.0, 0.0, 0.0),
@@ -391,8 +412,8 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
     )
 
     enable_click_select: bpy.props.BoolProperty(
-        name="Select Dimensions in Viewport",
-        description="Allow clicking a drawn dimension line or label to select its dimension object",
+        name="Select Annotations in Viewport",
+        description="Allow clicking a drawn dimension or guide to select its scene object",
         default=True,
         update=update_dimension_display,
     )

@@ -6,7 +6,7 @@ Version `0.1.0` contains a usable core prototype. It still needs Blender runtime
 
 ## Features
 
-- Create dimensions by picking two visible mesh vertices in Object Mode and placing an offset.
+- Create dimensions by picking visible mesh vertices, construction guides, or free-space points in Object Mode and placing an offset.
 - Measure true point-to-point distance and extend the annotation along an automatically chosen or explicit global X, Y, or Z direction.
 - Draw extension lines, arrowheads, and formatted values in the 3D Viewport.
 - Link anchors across one or two mesh objects and reattach either endpoint later.
@@ -16,8 +16,9 @@ Version `0.1.0` contains a usable core prototype. It still needs Blender runtime
 - Place labels inline in a line break, above the line, or outside the end arrow.
 - Add optional per-dimension text above or below the measured value.
 - Optionally show Length / Width / Thickness for selected mesh objects in a viewport HUD.
-- Make transient two-point measurements without creating or saving scene objects.
-- Create persistent infinite construction guides in their own hideable collection.
+- Make transient two-point measurements against mesh vertices, guides, or free-space points without creating or saving scene objects.
+- Create persistent construction guides in their own hideable collection and snap/select against them in the viewport.
+- Draw chained mesh line segments in Edit Mode with the same point snapping workflow.
 
 ## Install
 
@@ -42,15 +43,17 @@ For distribution, build and validate the archive with Blender's extension comman
 5. Click to finish. Right-click or `Esc` cancels.
 6. Select the dimension Empty, or click the drawn annotation, to edit it in the sidebar.
 
-Alternatively, select **Add Dimension** from the Object Mode toolbar directly below Blender's Add Cube tool, then click in the viewport to begin the same workflow.
+Alternatively, select **Add Dimension**, **Measure**, or **Add Construction Guide** from the left 3D Viewport toolbar, then click in the viewport to begin the same workflow. **Draw Mesh Line** appears in the left toolbar while editing a mesh.
 
 ### Quick measure and construction guides
 
-Use **Measure** for a temporary answer. Click a start vertex, move to another vertex, and click to keep the result visible while the tool remains active. Click again to replace it with a new measurement. Press `A` for the direct aligned distance or `X`, `Y`, or `Z` to measure the projected difference on that global axis. `Backspace`/`Delete` clears the result; `Esc` clears and then exits. Transient measurements create no object and are not saved.
+Use **Measure** for a temporary answer. Click a start point, move to another point, and click to keep the result visible while the tool remains active. Click again to replace it with a new measurement. Press `A` for the direct aligned distance or `X`, `Y`, or `Z` to measure the projected difference on that global axis. `Backspace`/`Delete` clears the result; `Esc` clears and then exits. Transient measurements create no object and are not saved.
 
-Use **Add Construction Guide** for a persistent reference. Pick two vertices and press `A` for a guide aligned between them, or `X`, `Y`, or `Z` for an infinite global-axis guide through the first vertex. Guides are lightweight Empty objects in the `Construction Guides` collection and follow their linked anchors. The sidebar controls global guide visibility, color, line width, and **Clear All Guides**.
+Use **Add Construction Guide** for a persistent reference. Pick two points and press `A` for an infinite guide aligned between them, or `X`, `Y`, or `Z` for an infinite global-axis guide through the first point. Guides are lightweight Empty objects in the `Construction Guides` collection and follow linked vertex anchors when vertex snaps are used. The sidebar controls global guide visibility, color, line width, and **Clear All Guides**.
 
-The current first pass snaps to visible mesh hits and base-mesh vertices, with a fallback for modifier/evaluated-geometry hits. Edge, midpoint, face, and intersection inference; free-space cursor points; typed distances; parallel offsets; guide planes; and direct line selection are planned follow-ups. See the living [Measure and Construction Guides plan](docs/MEASURE_GUIDES_PLAN.md) and [Interaction Toolkit Plan](docs/INTERACTION_TOOLKIT_PLAN.md).
+Use **Draw Mesh Line** in Edit Mode for geometry creation. Click a start point, click subsequent points to create chained edges, and press `X`, `Y`, or `Z` to constrain the next segment to a global axis. Numeric input while drawing a segment sets the segment length along the current direction. The tool can bind to existing vertices on the active edit mesh; other points create new vertices.
+
+The current first pass snaps to visible mesh hits, base-mesh vertices, edge projections, edge midpoints, face centers, face points, construction guides, and free-space cursor points, with a fallback for modifier/evaluated-geometry hits. Intersection inference; parallel/perpendicular constraints; guide planes; and richer mesh binding are planned follow-ups. See the living [Measure and Construction Guides plan](docs/MEASURE_GUIDES_PLAN.md) and [Interaction Toolkit Plan](docs/INTERACTION_TOOLKIT_PLAN.md).
 
 The measurement line and value always remain aligned to the two selected anchors. **Extension Axis** controls how the annotation moves away from that edge:
 
@@ -61,7 +64,7 @@ Changing **Extension Axis** after creation preserves the numeric offset. If the 
 
 Use the global **Text Placement** setting to apply **Inline (Gap)**, **Above Line**, or **Outside End** to every dimension in the scene. Inline labels automatically move outside when the projected line is too short to contain the text and arrowheads cleanly.
 
-Each anchor's **Vertex Index** control displays its current index as a picker button. Click the index to enter viewport reattachment mode, then click the replacement vertex; direct numeric index editing is intentionally disabled.
+Each anchor's picker displays the current vertex index or **World Point**. Click it to enter viewport reattachment mode, then click a replacement vertex, edge, midpoint, face, guide, or free-space point.
 
 The sidebar uses independently collapsible sections. **Global Dimension Settings** controls units, numeric precision, text placement, and whether drawn dimensions can be selected in the viewport. **Selected Mesh Size HUD** controls the optional corner readout, including its viewport corner and horizontal/vertical edge padding. **Selected Dimension (Local)** appears only for a selected dimension and changes that annotation alone. New dimensions use cyan-blue, with a lighter blue selected state; existing saved colors are preserved.
 
@@ -79,18 +82,18 @@ The visible **Unit Style** choices follow Blender's Scene Unit System: metric sc
 
 ## Data and limitations
 
-Each dimension is an Empty in the scene-level `Dimensions` collection. Its custom properties store two object pointers, base-mesh vertex indices, fallback local coordinates, extension-axis placement data, and display settings. Screen-space rendering keeps text and arrowheads a stable pixel size while zooming.
+Each dimension is an Empty in the scene-level `Dimensions` collection. Its custom properties store two anchors, which can be linked base-mesh vertices or fixed world coordinates, plus extension-axis placement data and display settings. Screen-space rendering keeps text and arrowheads a stable pixel size while zooming.
 
 Current limitations:
 
-- Creation and reattachment are Object Mode workflows; edit-mode picking is not supported.
-- Snapping considers vertices on the visible ray-cast face within a pixel threshold. It does not pick occluded or arbitrary nearby vertices.
+- Dimension creation and reattachment are Object Mode workflows; mesh line drawing is an Edit Mode workflow.
+- Snapping considers vertices on the visible ray-cast face, edge projections, edge midpoints, face centers, face hits, nearby base vertices for evaluated/modifier hits, construction guide projections, and free-space points. It does not yet support intersections or arbitrary nearby occluded vertices.
 - Anchors use base-mesh vertex indices, not modifier output or persistent vertex IDs. Topology changes can detach an anchor or make an index identify a different vertex.
 - Dimensions are viewport overlays and do not appear in final renders.
 - Dimension overlays follow Blender viewport visibility, including an individual Empty's hide state and hidden or excluded parent collections/view layers.
 - A missing target object prevents that dimension from drawing. A detached vertex uses its fallback coordinate, without a special viewport warning style.
 - There is no dimension list, bulk visibility controls, preferences panel, or custom keymap yet.
-- Construction guides currently support infinite aligned/global-axis lines and group controls, but not guide planes, offsets, or direct overlay selection.
+- Construction guides currently support infinite aligned/global-axis lines and group controls, but not guide planes, offsets, or per-guide styling.
 - The selected-object HUD sorts bounding-box extents largest-to-smallest; Length, Width, and Thickness are not fixed local-axis labels.
 
 ## Development
@@ -103,7 +106,7 @@ Before a release:
 2. Build and validate the extension with the supported Blender version.
 3. Test registration, unregistration, saving, and reopening in a clean Blender profile.
 4. Create dimensions within one object and across two objects; then move, rotate, scale, and edit referenced geometry.
-5. Verify Auto/X/Y/Z extension switching, keyboard constraints, offset editing, reattachment, click selection, unit formats, and broken references.
+5. Verify Auto/X/Y/Z extension switching, keyboard constraints, offset editing, guide snapping/selection, mesh line creation, reattachment, click selection, unit formats, and broken references.
 6. Add CI for Blender integration coverage and release validation.
 
 The next useful product work is a dimension-management list with bulk visibility actions, clearer broken-anchor warnings, and performance testing of the draw and click-selection loops in larger scenes.
@@ -116,7 +119,7 @@ dimensions/
 |-- anchors.py, collections.py, properties.py
 |-- drawing.py, snapping.py, tools.py, units.py, ui.py
 `-- operators/
-    |-- create_dimension.py, create_guide.py, measure.py
+    |-- create_dimension.py, create_guide.py, create_line.py, measure.py
     |-- reattach_anchor.py
     |-- style.py
     `-- click_select.py

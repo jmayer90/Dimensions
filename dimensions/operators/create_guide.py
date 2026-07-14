@@ -1,10 +1,9 @@
 import bpy
-from mathutils import Vector
 
-from ..anchors import set_anchor
+from ..anchors import set_anchor_from_snap
 from ..collections import create_guide_object
 from ..drawing import clear_guide_preview_state, set_guide_preview_state
-from ..snapping import find_nearest_face_vertex
+from ..snapping import find_nearest_snap_point
 
 
 class CADDIM_OT_CreateGuide(bpy.types.Operator):
@@ -17,9 +16,9 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             self.report({"ERROR"}, "Construction guides work in Object Mode from a 3D View")
             return {"CANCELLED"}
         self.axis = "ALIGNED"
-        self.start_snap = find_nearest_face_vertex(context, event.mouse_region_x, event.mouse_region_y)
-        self.hover_snap = self.start_snap
-        self.state = "PICK_END" if self.start_snap is not None else "PICK_START"
+        self.start_snap = None
+        self.hover_snap = None
+        self.state = "PICK_START"
         self._update_preview()
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
@@ -36,11 +35,27 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
-            self.hover_snap = find_nearest_face_vertex(context, event.mouse_region_x, event.mouse_region_y)
+            plane_point = self.start_snap["world_co"] if self.start_snap is not None else None
+            self.hover_snap = find_nearest_snap_point(
+                context,
+                event.mouse_region_x,
+                event.mouse_region_y,
+                include_free=True,
+                plane_point=plane_point,
+            )
             self._update_preview()
             return {"RUNNING_MODAL"}
 
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
+            if self.hover_snap is None:
+                plane_point = self.start_snap["world_co"] if self.start_snap is not None else None
+                self.hover_snap = find_nearest_snap_point(
+                    context,
+                    event.mouse_region_x,
+                    event.mouse_region_y,
+                    include_free=True,
+                    plane_point=plane_point,
+                )
             if self.hover_snap is None:
                 return {"RUNNING_MODAL"}
             if self.state == "PICK_START":
@@ -64,8 +79,8 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
 
     def _create(self, context, end_snap):
         obj = create_guide_object(context)
-        set_anchor(obj.guide_props.start, self.start_snap["object"], self.start_snap["vertex_index"])
-        set_anchor(obj.guide_props.end, end_snap["object"], end_snap["vertex_index"])
+        set_anchor_from_snap(obj.guide_props.start, self.start_snap)
+        set_anchor_from_snap(obj.guide_props.end, end_snap)
         obj.guide_props.axis = self.axis
         obj.location = self.start_snap["world_co"]
         self.report({"INFO"}, "Created construction guide")
@@ -74,6 +89,8 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         state = {"axis": self.axis}
         if self.hover_snap is not None:
             state["hover_screen"] = self.hover_snap["screen_co"]
+            state["hover_type"] = self.hover_snap.get("type", "WORLD")
+            state["hover_label"] = self.hover_snap.get("label", "Point")
         if self.start_snap is not None:
             state["start_world"] = self.start_snap["world_co"]
         if self.state == "PICK_END" and self.hover_snap is not None:
@@ -83,6 +100,8 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
     @staticmethod
     def _copy_snap(snap):
         return {
+            "type": snap.get("type", "VERTEX"),
+            "label": snap.get("label", "Point"),
             "object": snap["object"],
             "vertex_index": snap["vertex_index"],
             "world_co": snap["world_co"].copy(),

@@ -10,13 +10,38 @@ def set_anchor(anchor, obj, vertex_index):
 
     vertex = obj.data.vertices[vertex_index]
 
+    anchor.anchor_type = "VERTEX"
     anchor.target_object = obj
     anchor.vertex_index = vertex_index
     anchor.fallback_local_co = tuple(vertex.co)
+    anchor.world_co = tuple(obj.matrix_world @ vertex.co)
     anchor.status = "LINKED"
 
 
+def set_world_anchor(anchor, world_co):
+    anchor.anchor_type = "WORLD"
+    anchor.target_object = None
+    anchor.vertex_index = -1
+    anchor.fallback_local_co = (0.0, 0.0, 0.0)
+    anchor.world_co = tuple(world_co)
+    anchor.status = "LINKED"
+
+
+def set_anchor_from_snap(anchor, snap):
+    if snap is None:
+        raise ValueError("Snap target is required")
+
+    if snap.get("type") == "VERTEX" and snap.get("object") is not None:
+        set_anchor(anchor, snap["object"], snap["vertex_index"])
+        return
+
+    set_world_anchor(anchor, snap["world_co"])
+
+
 def resolve_anchor(anchor):
+    if getattr(anchor, "anchor_type", "VERTEX") == "WORLD":
+        return Vector(anchor.world_co), "LINKED"
+
     obj = anchor.target_object
 
     if obj is None or obj.type != "MESH":

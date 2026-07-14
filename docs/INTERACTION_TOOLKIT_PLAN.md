@@ -4,9 +4,9 @@ This plan captures the next design direction for Dimensions tools: measurement, 
 
 ## Current problems
 
-- After picking the first point, the active tool only updates cleanly when the cursor hovers another valid vertex. The preview feels disconnected because it disappears or stalls over empty space.
-- Persistent dimensions can only store object/vertex anchors. That is useful for linked CAD-style annotations, but too narrow for sketching, measuring, and guide workflows.
-- Snap behavior is currently vertex-centered. It needs a broader inference model without copying every behavior from a general-purpose snap add-on.
+- The first implementation now keeps Measure, Dimension, and Guide previews alive over free space and adds visible-face vertex, edge, midpoint, face-center, face-point, and guide snapping. The inference model still needs intersections, parallel/perpendicular locks, and guide planes.
+- Persistent dimensions can store vertex anchors or world-coordinate anchors. Object-local surface anchors are still future work.
+- Snap behavior now covers the basic point classes, but it still needs a broader inference model without copying every behavior from a general-purpose snap add-on.
 - Typed direction-and-distance workflows are missing, which blocks SketchUp-like deliberate construction.
 
 ## Target interaction model
@@ -14,7 +14,7 @@ This plan captures the next design direction for Dimensions tools: measurement, 
 Every point-picking tool should work with a common `ToolPoint` concept:
 
 - `VERTEX`: object plus base vertex index, with fallback local coordinate.
-- `OBJECT_POINT`: object plus local coordinate, used for face centers, edge midpoints, curve points, and arbitrary object-surface hits.
+- `OBJECT_POINT`: object plus local coordinate, used for face centers, edge midpoints, curve points, and arbitrary object-surface hits. This is not implemented yet.
 - `WORLD_POINT`: world coordinate only, used when the cursor is over empty space or when a typed/inferred point has no durable object link.
 
 During modal creation, tools should always have a preview end point. If no snap target is under the mouse, the end point should come from a stable construction plane, view plane, selected axis, guide plane, or inferred direction. Snapped points should override the free-space point when the cursor is close enough.
@@ -35,16 +35,17 @@ Additional Snap Line-style concepts to adapt:
 
 The practical first target is:
 
-1. Endpoint and vertex snaps.
-2. Edge midpoint snaps.
-3. Face center and object-origin snaps.
-4. Axis and parallel inference from the active start point.
-5. Typed distance along the active inferred direction.
-6. Intersection and guide-plane inference.
+1. Done: endpoint and vertex snaps.
+2. Done: edge projection and edge midpoint snaps.
+3. Done: face point and face center snaps.
+4. Next: object-origin snaps.
+5. Next: axis and parallel inference from the active start point.
+6. Next: typed distance along the active inferred direction.
+7. Next: intersection and guide-plane inference.
 
 ## Snap Line-style workflows
 
-These workflows should be added only after the shared point acquisition layer exists.
+These workflows build on the shared point acquisition layer.
 
 ### Measure, Dimension, and Guide preview
 
@@ -61,7 +62,7 @@ The result is a smooth preview that never disappears just because the cursor lea
 The guide tool should become the non-destructive version of Snap Line:
 
 1. Pick or infer a start point.
-2. Move the mouse to preview an infinite guide, finite guide, or construction segment.
+2. Move the mouse to preview an infinite guide or construction line.
 3. Press axis/inference keys to lock global, local, parallel, or perpendicular directions.
 4. Type a distance to place the endpoint precisely.
 5. Click to commit the guide without creating mesh geometry.
@@ -122,14 +123,14 @@ Keep this as a toolkit layer, probably separate from the drawing code:
 - `geometry_ops.py`: create vertices/edges and perform explicit merge/split operations for the future Geometry Line tool.
 - Modal operators: consume toolkit results and focus on workflow state.
 
-The next implementation slice should not create new mesh geometry yet. It should first make existing Dimension, Measure, and Guide tools preview smoothly over empty space and persist either snapped vertex anchors or world-coordinate anchors.
+The first implementation slice made Dimension, Measure, and Guide tools preview over empty space, persist snapped vertex or world-coordinate anchors, snap to vertices/edges/midpoints/faces/guides, and select guide lines in the viewport.
 
 ## Rollout plan
 
-1. Extract `ToolPoint` and snap-candidate scoring without changing visible behavior.
-2. Add free-space construction-plane projection and continuous previews to Measure, Dimension, and Guide.
-3. Add midpoint, face-center, origin, and edge/guide inference targets.
-4. Add axis, parallel, perpendicular, and typed-distance locks for non-destructive tools.
-5. Upgrade construction guides to support finite segments, offsets, and chained guide creation.
-6. Add a separate Geometry Line tool with explicit target mesh selection and undo-safe mesh edits.
-7. Add auto-merge/split options after the Geometry Line tool is reliable.
+1. Done: add vertex/world point anchors, guide snap projections, and free-space construction-plane projection.
+2. Done: add continuous previews to Measure, Dimension, and Guide.
+3. Done: add a separate Edit Mode Geometry Line tool with explicit active mesh editing and undo-safe mesh edits.
+4. Done: add midpoint, face-center, and richer edge/guide inference targets.
+5. Next: add parallel, perpendicular, local-axis, and typed-distance locks across non-destructive tools.
+6. Next: upgrade construction guides to support offsets, chained guide creation, and guide planes.
+7. Next: add auto-merge edge split/bind options after the Geometry Line tool is reliable.

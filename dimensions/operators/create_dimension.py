@@ -2,7 +2,7 @@ import bpy
 from mathutils.geometry import intersect_line_plane
 from mathutils import Vector
 
-from ..anchors import set_anchor
+from ..anchors import set_anchor_from_snap
 from ..collections import create_dimension_object
 from ..constants import DEFAULT_OFFSET_DISTANCE
 from ..drawing import (
@@ -12,7 +12,7 @@ from ..drawing import (
     get_offset_basis,
     set_preview_state,
 )
-from ..snapping import find_nearest_face_vertex, get_mouse_ray, has_view3d_window_region
+from ..snapping import find_nearest_snap_point, get_mouse_ray, has_view3d_window_region
 
 
 class CADDIM_OT_CreateDimension(bpy.types.Operator):
@@ -61,10 +61,13 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
         if event.type == "MOUSEMOVE":
             if self.state in {"PICK_START", "PICK_END"}:
-                self.hover_snap = find_nearest_face_vertex(
+                plane_point = self.start_snap["world_co"] if self.start_snap is not None else None
+                self.hover_snap = find_nearest_snap_point(
                     context,
                     event.mouse_region_x,
                     event.mouse_region_y,
+                    include_free=True,
+                    plane_point=plane_point,
                 )
             elif self.state == "SET_OFFSET":
                 self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
@@ -75,6 +78,13 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
             if self.state == "PICK_START":
                 if self.hover_snap is None:
+                    self.hover_snap = find_nearest_snap_point(
+                        context,
+                        event.mouse_region_x,
+                        event.mouse_region_y,
+                        include_free=True,
+                    )
+                if self.hover_snap is None:
                     return {"RUNNING_MODAL"}
 
                 self.start_snap = self._copy_snap(self.hover_snap)
@@ -83,6 +93,14 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
 
             if self.state == "PICK_END":
+                if self.hover_snap is None:
+                    self.hover_snap = find_nearest_snap_point(
+                        context,
+                        event.mouse_region_x,
+                        event.mouse_region_y,
+                        include_free=True,
+                        plane_point=self.start_snap["world_co"],
+                    )
                 if self.hover_snap is None:
                     return {"RUNNING_MODAL"}
 
@@ -219,16 +237,8 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
         dimension_object = create_dimension_object(context, "DIM Dimension")
 
-        set_anchor(
-            dimension_object.dimension_props.start,
-            self.start_snap["object"],
-            self.start_snap["vertex_index"],
-        )
-        set_anchor(
-            dimension_object.dimension_props.end,
-            self.end_snap["object"],
-            self.end_snap["vertex_index"],
-        )
+        set_anchor_from_snap(dimension_object.dimension_props.start, self.start_snap)
+        set_anchor_from_snap(dimension_object.dimension_props.end, self.end_snap)
         dimension_object.dimension_props.dimension_type = self.dimension_type
         dimension_object.dimension_props.offset_distance = self.offset_distance
         dimension_object.dimension_props.offset_plane_normal = tuple(self.offset_plane_normal)
@@ -262,6 +272,8 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
         if self.hover_snap is not None:
             preview["hover_screen"] = self.hover_snap["screen_co"]
+            preview["hover_type"] = self.hover_snap.get("type", "WORLD")
+            preview["hover_label"] = self.hover_snap.get("label", "Point")
 
         if self.start_snap is not None:
             preview["start_world"] = self.start_snap["world_co"]
@@ -279,6 +291,8 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
     @staticmethod
     def _copy_snap(snap):
         return {
+            "type": snap.get("type", "VERTEX"),
+            "label": snap.get("label", "Point"),
             "object": snap["object"],
             "vertex_index": snap["vertex_index"],
             "world_co": snap["world_co"].copy(),

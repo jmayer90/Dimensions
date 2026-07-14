@@ -20,6 +20,7 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
         row = self.layout.row(align=True)
         row.operator("dimensions.measure", icon="DRIVER_DISTANCE")
         row.operator("dimensions.create_guide", icon="EMPTY_AXIS")
+        self.layout.operator("dimensions.create_line", icon="MESH_DATA")
 
 
 class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
@@ -139,7 +140,7 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
         start_box.label(text="Start Anchor")
         start_box.prop(props.start, "target_object", text="Object")
         start_row = start_box.row(align=True)
-        start_row.label(text="Vertex Index")
+        start_row.label(text="Anchor")
         start_pick = start_row.operator(
             "dimensions.reattach_anchor",
             text=_vertex_picker_text(props.start),
@@ -151,7 +152,7 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
         end_box.label(text="End Anchor")
         end_box.prop(props.end, "target_object", text="Object")
         end_row = end_box.row(align=True)
-        end_row.label(text="Vertex Index")
+        end_row.label(text="Anchor")
         end_pick = end_row.operator(
             "dimensions.reattach_anchor",
             text=_vertex_picker_text(props.end),
@@ -179,6 +180,9 @@ class CADDIM_PT_ConstructionGuides(CADDIM_PT_PanelBase, bpy.types.Panel):
 
 
 def _vertex_picker_text(anchor):
+    if getattr(anchor, "anchor_type", "VERTEX") == "WORLD":
+        return "World Point"
+
     if anchor.vertex_index < 0:
         return "Pick Vertex"
 

@@ -16,6 +16,7 @@ from .constants import (
     DEFAULT_TEXT_SIZE,
 )
 from .properties import is_dimension_object, is_guide_object
+from .snapping import guide_segment_world
 from .units import format_length
 
 
@@ -444,18 +445,16 @@ def _draw_construction_guides(context, shader):
     for obj in context.scene.objects:
         if not is_guide_object(obj) or not obj.guide_props.visible or not _object_visible_in_viewport(context, obj):
             continue
-        start_world, _start_status = resolve_anchor(obj.guide_props.start)
-        end_world, _end_status = resolve_anchor(obj.guide_props.end)
-        if start_world is None or end_world is None:
+        segment = guide_segment_world(obj)
+        if segment is None:
             continue
-        direction = _guide_direction(start_world, end_world, obj.guide_props.axis)
-        _draw_world_line(context, shader, start_world, direction, settings.guide_color, settings.guide_line_width)
+        _draw_world_segment(shader, segment[0], segment[1], settings.guide_color, settings.guide_line_width)
 
 
 def _draw_guide_preview_marker(shader, state):
     hover = state.get("hover_screen")
     if hover is not None:
-        _draw_marker(shader, hover, (0.3, 1.0, 0.3, 1.0))
+        _draw_marker(shader, hover, _snap_marker_color(state))
 
 
 def _draw_guide_preview_world(context, shader, state):
@@ -466,42 +465,39 @@ def _draw_guide_preview_world(context, shader, state):
     settings = getattr(context.scene, "dimensions_settings", None)
     color = tuple(settings.guide_color) if settings is not None else (0.22, 0.70, 1.0, 0.7)
     width = settings.guide_line_width if settings is not None else 1.0
-    _draw_world_line(context, shader, start, _guide_direction(start, end, state.get("axis", "ALIGNED")), color, width)
+    _draw_guide_preview_segment(shader, start, end, state.get("axis", "ALIGNED"), color, width)
 
 
-def _draw_world_line(context, shader, origin, direction, color, line_width):
-    if direction is None or direction.length < 1e-6:
+def _draw_guide_preview_segment(shader, start, end, axis, color, line_width):
+    if axis == "X":
+        direction = Vector((1.0, 0.0, 0.0))
+    elif axis == "Y":
+        direction = Vector((0.0, 1.0, 0.0))
+    elif axis == "Z":
+        direction = Vector((0.0, 0.0, 1.0))
+    else:
+        direction = end - start
+        if direction.length < 1e-6:
+            return
+        direction.normalize()
+        _draw_world_segment(shader, start - direction * 10000.0, start + direction * 10000.0, color, line_width)
         return
 
-    direction = direction.normalized()
-    extent = _guide_world_extent(context, origin)
-    endpoints = [origin - direction * extent, origin + direction * extent]
+    _draw_world_segment(shader, start - direction * 10000.0, start + direction * 10000.0, color, line_width)
 
+
+def _draw_world_segment(shader, start_world, end_world, color, line_width):
     gpu.state.line_width_set(line_width)
-    batch = batch_for_shader(shader, "LINES", {"pos": endpoints})
+    batch = batch_for_shader(shader, "LINES", {"pos": [start_world, end_world]})
     shader.bind()
     shader.uniform_float("color", color)
     batch.draw(shader)
 
 
-def _guide_world_extent(context, origin):
-    clip_end = getattr(getattr(context, "space_data", None), "clip_end", 1000.0)
-    extent = max(float(clip_end) * 0.5, 100.0)
-
-    scene = getattr(context, "scene", None)
-    if scene is not None:
-        for obj in scene.objects:
-            if obj.type not in {"MESH", "CURVE", "EMPTY"}:
-                continue
-            extent = max(extent, (obj.matrix_world.translation - origin).length * 2.0)
-
-    return extent
-
-
 def _draw_transient_measure(context, shader, state):
     hover = state.get("hover_screen")
     if hover is not None:
-        _draw_marker(shader, hover, (0.3, 1.0, 0.3, 1.0))
+        _draw_marker(shader, hover, _snap_marker_color(state))
     start = state.get("start_world")
     raw_end = state.get("end_world")
     if start is None or raw_end is None:
@@ -564,7 +560,7 @@ def _draw_dimension_geometry(context, shader, geometry, color, precision):
 def _draw_preview(context, shader, preview_state):
     hover_screen = preview_state.get("hover_screen")
     if hover_screen is not None:
-        _draw_marker(shader, hover_screen, (0.3, 1.0, 0.3, 1.0))
+        _draw_marker(shader, hover_screen, _snap_marker_color(preview_state))
 
     start_world = preview_state.get("start_world")
     end_world = preview_state.get("end_world")
@@ -709,6 +705,33 @@ def find_dimension_hit(context, mouse_x, mouse_y, threshold=DEFAULT_SELECTION_PI
 
         distance = _geometry_hit_distance(context, geometry, geometry["precision"], mouse)
         if distance is None or distance > threshold:
+            continue
+
+        if best is None or distance < best[0]:
+            best = (distance, obj)
+
+    return None if best is None else best[1]
+
+
+def find_guide_hit(context, mouse_x, mouse_y, threshold=DEFAULT_SELECTION_PIXEL_THRESHOLD):
+    mouse = Vector((mouse_x, mouse_y))
+    best = None
+
+    for obj in context.scene.objects:
+        if not is_guide_object(obj) or not _object_visible_in_viewport(context, obj):
+            continue
+
+        segment = guide_segment_world(obj)
+        if segment is None:
+            continue
+
+        start_screen = _project_world_to_screen(context, segment[0])
+        end_screen = _project_world_to_screen(context, segment[1])
+        if start_screen is None or end_screen is None:
+            continue
+
+        distance = _point_to_segment_distance(mouse, start_screen, end_screen)
+        if distance > threshold:
             continue
 
         if best is None or distance < best[0]:
@@ -873,6 +896,22 @@ def _draw_marker(shader, position, color):
     shader.bind()
     shader.uniform_float("color", color)
     batch.draw(shader)
+
+
+def _snap_marker_color(state):
+    label = state.get("hover_label")
+    snap_type = state.get("hover_type")
+
+    if snap_type == "VERTEX":
+        return (0.25, 1.0, 0.35, 1.0)
+
+    if label == "Guide":
+        return (0.25, 0.72, 1.0, 1.0)
+
+    if label in {"Edge", "Midpoint", "Face Center", "Face"}:
+        return (1.0, 0.82, 0.25, 1.0)
+
+    return (1.0, 0.48, 0.20, 1.0)
 
 
 def _draw_text(text, position, color, text_size=DEFAULT_TEXT_SIZE):

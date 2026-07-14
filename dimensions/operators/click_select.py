@@ -1,6 +1,6 @@
 import bpy
 
-from ..drawing import find_dimension_hit
+from ..drawing import find_dimension_hit, find_guide_hit
 
 
 _click_select_timer_active = False
@@ -98,7 +98,13 @@ class DIMENSIONS_OT_ClickSelectModal(bpy.types.Operator):
                 event.mouse_region_y,
             )
             if hit_object is None:
-                return {"PASS_THROUGH"}
+                hit_object = find_guide_hit(
+                    context,
+                    event.mouse_region_x,
+                    event.mouse_region_y,
+                )
+                if hit_object is None:
+                    return {"PASS_THROUGH"}
 
             if event.shift:
                 hit_object.select_set(not hit_object.select_get())

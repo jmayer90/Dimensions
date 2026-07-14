@@ -1,7 +1,7 @@
 import bpy
 
 from ..drawing import clear_measure_state, set_measure_state
-from ..snapping import find_nearest_face_vertex
+from ..snapping import find_nearest_snap_point
 
 
 class CADDIM_OT_Measure(bpy.types.Operator):
@@ -20,9 +20,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         self.axis = "ALIGNED"
         self.start_world = None
         self.end_world = None
-        self.hover_snap = self._find_snap(context, event)
-        if self.hover_snap is not None:
-            self._start_from_hover()
+        self.hover_snap = None
         self._update_overlay()
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
@@ -46,6 +44,8 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             return {"RUNNING_MODAL"}
 
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
+            if self.hover_snap is None:
+                self.hover_snap = self._find_snap(context, event)
             if self.hover_snap is None:
                 return {"RUNNING_MODAL"}
             if self.state in {"PICK_START", "COMPLETE"}:
@@ -90,12 +90,19 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         state = {"state": self.state, "axis": self.axis}
         if self.hover_snap is not None:
             state["hover_screen"] = self.hover_snap["screen_co"]
+            state["hover_type"] = self.hover_snap.get("type", "WORLD")
+            state["hover_label"] = self.hover_snap.get("label", "Point")
         if self.start_world is not None:
             state["start_world"] = self.start_world
         if self.end_world is not None:
             state["end_world"] = self.end_world
         set_measure_state(state)
 
-    @staticmethod
-    def _find_snap(context, event):
-        return find_nearest_face_vertex(context, event.mouse_region_x, event.mouse_region_y)
+    def _find_snap(self, context, event):
+        return find_nearest_snap_point(
+            context,
+            event.mouse_region_x,
+            event.mouse_region_y,
+            include_free=True,
+            plane_point=self.start_world,
+        )

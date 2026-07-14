@@ -1,9 +1,9 @@
 import bpy
 
-from ..anchors import resolve_anchor, set_anchor
+from ..anchors import resolve_anchor, set_anchor_from_snap
 from ..drawing import clear_preview_state, set_preview_state
 from ..properties import is_dimension_object
-from ..snapping import find_nearest_face_vertex
+from ..snapping import find_nearest_snap_point
 
 
 class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
@@ -46,20 +46,28 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             return {"CANCELLED"}
 
         if event.type == "MOUSEMOVE":
-            self.hover_snap = find_nearest_face_vertex(
+            self.hover_snap = find_nearest_snap_point(
                 context,
                 event.mouse_region_x,
                 event.mouse_region_y,
+                include_free=True,
             )
             self._update_preview()
             return {"RUNNING_MODAL"}
 
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
             if self.hover_snap is None:
+                self.hover_snap = find_nearest_snap_point(
+                    context,
+                    event.mouse_region_x,
+                    event.mouse_region_y,
+                    include_free=True,
+                )
+            if self.hover_snap is None:
                 return {"RUNNING_MODAL"}
 
             anchor = self._get_target_anchor()
-            set_anchor(anchor, self.hover_snap["object"], self.hover_snap["vertex_index"])
+            set_anchor_from_snap(anchor, self.hover_snap)
             clear_preview_state()
             self.report({"INFO"}, f"Reattached {self.anchor_name.lower()} anchor")
             return {"FINISHED"}
@@ -94,6 +102,8 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
 
         if self.hover_snap is not None:
             preview["hover_screen"] = self.hover_snap["screen_co"]
+            preview["hover_type"] = self.hover_snap.get("type", "WORLD")
+            preview["hover_label"] = self.hover_snap.get("label", "Point")
 
         if self.anchor_name == "START":
             preview["start_world"] = self.hover_snap["world_co"] if self.hover_snap is not None else start_world
