@@ -19,7 +19,8 @@ from .properties import is_dimension_object, is_guide_object
 from .units import format_length
 
 
-_draw_handler = None
+_pixel_draw_handler = None
+_world_draw_handler = None
 _preview_state = None
 _measure_state = None
 _guide_preview_state = None
@@ -80,25 +81,31 @@ def clear_guide_preview_state():
 
 
 def register_draw_handler():
-    global _draw_handler
+    global _pixel_draw_handler, _world_draw_handler
 
     if _dimension_location_sync_handler not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_dimension_location_sync_handler)
 
-    if _draw_handler is not None:
-        return
+    if _world_draw_handler is None:
+        _world_draw_handler = bpy.types.SpaceView3D.draw_handler_add(
+            draw_world_guides,
+            (),
+            "WINDOW",
+            "POST_VIEW",
+        )
 
-    _draw_handler = bpy.types.SpaceView3D.draw_handler_add(
-        draw_dimensions,
-        (),
-        "WINDOW",
-        "POST_PIXEL",
-    )
+    if _pixel_draw_handler is None:
+        _pixel_draw_handler = bpy.types.SpaceView3D.draw_handler_add(
+            draw_dimensions,
+            (),
+            "WINDOW",
+            "POST_PIXEL",
+        )
     schedule_dimension_location_sync()
 
 
 def unregister_draw_handler():
-    global _draw_handler, _location_sync_scheduled, _preview_state, _measure_state, _guide_preview_state
+    global _pixel_draw_handler, _world_draw_handler, _location_sync_scheduled, _preview_state, _measure_state, _guide_preview_state
 
     if _dimension_location_sync_handler in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_dimension_location_sync_handler)
@@ -110,11 +117,13 @@ def unregister_draw_handler():
     _measure_state = None
     _guide_preview_state = None
 
-    if _draw_handler is None:
-        return
+    if _pixel_draw_handler is not None:
+        bpy.types.SpaceView3D.draw_handler_remove(_pixel_draw_handler, "WINDOW")
+        _pixel_draw_handler = None
 
-    bpy.types.SpaceView3D.draw_handler_remove(_draw_handler, "WINDOW")
-    _draw_handler = None
+    if _world_draw_handler is not None:
+        bpy.types.SpaceView3D.draw_handler_remove(_world_draw_handler, "WINDOW")
+        _world_draw_handler = None
 
 
 def schedule_dimension_location_sync():
@@ -353,7 +362,6 @@ def draw_dimensions():
     gpu.state.line_width_set(DEFAULT_LINE_WIDTH)
 
     try:
-        _draw_construction_guides(context, shader)
         for obj in context.scene.objects:
             if not is_dimension_object(obj):
                 continue
@@ -373,12 +381,36 @@ def draw_dimensions():
             _draw_preview(context, shader, _preview_state)
 
         if _guide_preview_state is not None:
-            _draw_guide_preview(context, shader, _guide_preview_state)
+            _draw_guide_preview_marker(shader, _guide_preview_state)
 
         if _measure_state is not None:
             _draw_transient_measure(context, shader, _measure_state)
 
         _draw_selected_object_overlay(context)
+    finally:
+        gpu.state.line_width_set(1.0)
+        gpu.state.blend_set("NONE")
+
+
+def draw_world_guides():
+    context = bpy.context
+
+    if context.area is None or context.area.type != "VIEW_3D":
+        return
+
+    if context.region is None or context.region.type != "WINDOW":
+        return
+
+    if context.region_data is None:
+        return
+
+    shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+    gpu.state.blend_set("ALPHA")
+
+    try:
+        _draw_construction_guides(context, shader)
+        if _guide_preview_state is not None:
+            _draw_guide_preview_world(context, shader, _guide_preview_state)
     finally:
         gpu.state.line_width_set(1.0)
         gpu.state.blend_set("NONE")
@@ -417,13 +449,16 @@ def _draw_construction_guides(context, shader):
         if start_world is None or end_world is None:
             continue
         direction = _guide_direction(start_world, end_world, obj.guide_props.axis)
-        _draw_infinite_world_line(context, shader, start_world, direction, settings.guide_color, settings.guide_line_width)
+        _draw_world_line(context, shader, start_world, direction, settings.guide_color, settings.guide_line_width)
 
 
-def _draw_guide_preview(context, shader, state):
+def _draw_guide_preview_marker(shader, state):
     hover = state.get("hover_screen")
     if hover is not None:
         _draw_marker(shader, hover, (0.3, 1.0, 0.3, 1.0))
+
+
+def _draw_guide_preview_world(context, shader, state):
     start = state.get("start_world")
     end = state.get("end_world")
     if start is None or end is None:
@@ -431,22 +466,17 @@ def _draw_guide_preview(context, shader, state):
     settings = getattr(context.scene, "dimensions_settings", None)
     color = tuple(settings.guide_color) if settings is not None else (0.22, 0.70, 1.0, 0.7)
     width = settings.guide_line_width if settings is not None else 1.0
-    _draw_infinite_world_line(context, shader, start, _guide_direction(start, end, state.get("axis", "ALIGNED")), color, width)
+    _draw_world_line(context, shader, start, _guide_direction(start, end, state.get("axis", "ALIGNED")), color, width)
 
 
-def _draw_infinite_world_line(context, shader, origin, direction, color, line_width):
+def _draw_world_line(context, shader, origin, direction, color, line_width):
     if direction is None or direction.length < 1e-6:
         return
-    origin_screen = _project_world_to_screen(context, origin)
-    direction_screen_point = _project_world_to_screen(context, origin + direction.normalized())
-    if origin_screen is None or direction_screen_point is None:
-        return
-    screen_direction = direction_screen_point - origin_screen
-    if screen_direction.length < 1e-4:
-        return
-    endpoints = _clip_infinite_screen_line(origin_screen, screen_direction, context.region.width, context.region.height)
-    if endpoints is None:
-        return
+
+    direction = direction.normalized()
+    extent = _guide_world_extent(context, origin)
+    endpoints = [origin - direction * extent, origin + direction * extent]
+
     gpu.state.line_width_set(line_width)
     batch = batch_for_shader(shader, "LINES", {"pos": endpoints})
     shader.bind()
@@ -454,27 +484,18 @@ def _draw_infinite_world_line(context, shader, origin, direction, color, line_wi
     batch.draw(shader)
 
 
-def _clip_infinite_screen_line(origin, direction, width, height):
-    candidates = []
-    if abs(direction.x) > 1e-8:
-        for x in (0.0, float(width)):
-            factor = (x - origin.x) / direction.x
-            y = origin.y + factor * direction.y
-            if 0.0 <= y <= height:
-                candidates.append(Vector((x, y)))
-    if abs(direction.y) > 1e-8:
-        for y in (0.0, float(height)):
-            factor = (y - origin.y) / direction.y
-            x = origin.x + factor * direction.x
-            if 0.0 <= x <= width:
-                candidates.append(Vector((x, y)))
-    unique = []
-    for point in candidates:
-        if not any((point - other).length < 0.5 for other in unique):
-            unique.append(point)
-    if len(unique) < 2:
-        return None
-    return max(((a, b) for a in unique for b in unique), key=lambda pair: (pair[1] - pair[0]).length)
+def _guide_world_extent(context, origin):
+    clip_end = getattr(getattr(context, "space_data", None), "clip_end", 1000.0)
+    extent = max(float(clip_end) * 0.5, 100.0)
+
+    scene = getattr(context, "scene", None)
+    if scene is not None:
+        for obj in scene.objects:
+            if obj.type not in {"MESH", "CURVE", "EMPTY"}:
+                continue
+            extent = max(extent, (obj.matrix_world.translation - origin).length * 2.0)
+
+    return extent
 
 
 def _draw_transient_measure(context, shader, state):

@@ -1,4 +1,4 @@
-# Measure and Construction Guides — Working Plan
+# Measure and Construction Guides - Working Plan
 
 This document tracks the implementation of two deliberately separate workflows:
 
@@ -23,7 +23,7 @@ This document tracks the implementation of two deliberately separate workflows:
 - [x] Object Mode toolbar tool.
 - [x] Create a persistent guide from two vertex snaps.
 - [x] `A` creates an aligned guide; `X`, `Y`, or `Z` creates a guide through the first point on that global axis.
-- [x] Draw guides across the viewport as infinite screen-space lines.
+- [x] Draw guides from world-space line geometry so they remain stable as the camera moves.
 - [x] Store guides as lightweight Empty objects in a dedicated `Construction Guides` collection.
 - [x] Follow linked vertices as source objects move or their vertex positions change.
 - [x] Respect object, collection, and view-layer visibility.
@@ -40,7 +40,7 @@ Measure remains active for repeated questions. A completed construction guide en
 
 ## Deliberate first-pass limitations
 
-- Snapping uses the add-on's current visible-face vertex picker; edge, midpoint, face, intersection, and inference locking are future work.
+- Snapping uses the add-on's current visible mesh hit and base-vertex picker; edge, midpoint, face, intersection, free-space points, and inference locking are future work.
 - Axis constraints are global. Local object axes and arbitrary inferred directions are future work.
 - Guides are infinite lines, not guide planes or finite segments.
 - Guides can be hidden or cleared as a group, and can be managed as scene objects in the Outliner. Direct line click-selection and per-guide styling are future work.
@@ -48,11 +48,12 @@ Measure remains active for repeated questions. A completed construction guide en
 
 ## Next stages
 
-1. Add SketchUp-like inference targets: endpoints, midpoints, edges, faces, intersections, and axis color feedback.
-2. Add typed distances and a measurement history/list with explicit pin-to-dimension and convert-to-guide actions.
-3. Add parallel offset guides, guide planes, repeated spacing, and selective erase.
-4. Add viewport guide hit-testing, hover feedback, and a dedicated guide management list.
-5. Add automated Blender integration coverage for modal lifecycle, save/reload, collection visibility, and topology changes.
+1. Add continuous free-space previews after the first point so dimensions, measures, and guides track the mouse even when the cursor is not over a snap target.
+2. Add SketchUp-like inference targets: endpoints, midpoints, edges, faces, intersections, and axis color feedback.
+3. Add typed distances and a measurement history/list with explicit pin-to-dimension and convert-to-guide actions.
+4. Add parallel offset guides, guide planes, repeated spacing, and selective erase.
+5. Add viewport guide hit-testing, hover feedback, and a dedicated guide management list.
+6. Add automated Blender integration coverage for modal lifecycle, save/reload, collection visibility, and topology changes.
 
 ## Acceptance checks
 
@@ -61,4 +62,5 @@ Measure remains active for repeated questions. A completed construction guide en
 - Axis switching updates both preview geometry and value without restarting the operation.
 - Guides survive save/reload and follow their linked anchor vertices.
 - Hiding the guide object or `Construction Guides` collection hides its overlay.
+- Guides remain visually attached to their world-space line as the camera moves.
 - Clear All Construction Guides is undoable and affects no dimension or mesh objects.

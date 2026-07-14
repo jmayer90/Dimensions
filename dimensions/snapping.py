@@ -1,10 +1,26 @@
+from heapq import nsmallest
+
 from bpy_extras import view3d_utils
 from mathutils import Vector
 
 from .constants import DEFAULT_SNAP_PIXEL_THRESHOLD
 
 
+def has_view3d_window_region(context):
+    return (
+        context is not None
+        and context.area is not None
+        and context.area.type == "VIEW_3D"
+        and context.region is not None
+        and context.region.type == "WINDOW"
+        and context.region_data is not None
+    )
+
+
 def get_mouse_ray(context, mouse_region_x, mouse_region_y):
+    if not has_view3d_window_region(context):
+        raise ValueError("A 3D View window region is required for mouse ray calculations")
+
     mouse = Vector((mouse_region_x, mouse_region_y))
 
     origin = view3d_utils.region_2d_to_origin_3d(
@@ -22,6 +38,9 @@ def get_mouse_ray(context, mouse_region_x, mouse_region_y):
 
 
 def raycast_from_mouse(context, mouse_x, mouse_y):
+    if not has_view3d_window_region(context):
+        return None
+
     origin, direction = get_mouse_ray(context, mouse_x, mouse_y)
     depsgraph = context.evaluated_depsgraph_get()
 
@@ -32,9 +51,6 @@ def raycast_from_mouse(context, mouse_x, mouse_y):
     )
 
     if not hit or obj is None or obj.type != "MESH":
-        return None
-
-    if face_index < 0 or face_index >= len(obj.data.polygons):
         return None
 
     return {
@@ -61,19 +77,12 @@ def find_nearest_face_vertex(
     candidate_vertices = []
     face_index = hit["face_index"]
     
-    if 0 <= face_index < len(obj.data.polygons):
+    if not obj.modifiers and 0 <= face_index < len(obj.data.polygons):
         polygon = obj.data.polygons[face_index]
         candidate_vertices = list(polygon.vertices)
     else:
         local_hit = obj.matrix_world.inverted() @ hit["location"]
-        try:
-            verts_sorted = sorted(
-                enumerate(obj.data.vertices),
-                key=lambda item: (item[1].co - local_hit).length_squared
-            )
-            candidate_vertices = [idx for idx, _ in verts_sorted[:8]]
-        except Exception:
-            candidate_vertices = []
+        candidate_vertices = _nearest_base_vertices(obj, local_hit)
 
     if not candidate_vertices:
         return None
@@ -108,3 +117,15 @@ def find_nearest_face_vertex(
         }
 
     return best
+
+
+def _nearest_base_vertices(obj, local_hit, limit=16):
+    if obj.type != "MESH" or not obj.data.vertices:
+        return []
+
+    nearest = nsmallest(
+        limit,
+        enumerate(obj.data.vertices),
+        key=lambda item: (item[1].co - local_hit).length_squared,
+    )
+    return [index for index, _vertex in nearest]

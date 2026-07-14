@@ -6,7 +6,7 @@ Version `0.1.0` contains a usable core prototype. It still needs Blender runtime
 
 ## Features
 
-- Create dimensions by picking two visible face vertices in Object Mode and placing an offset.
+- Create dimensions by picking two visible mesh vertices in Object Mode and placing an offset.
 - Measure true point-to-point distance and extend the annotation along an automatically chosen or explicit global X, Y, or Z direction.
 - Draw extension lines, arrowheads, and formatted values in the 3D Viewport.
 - Link anchors across one or two mesh objects and reattach either endpoint later.
@@ -50,7 +50,7 @@ Use **Measure** for a temporary answer. Click a start vertex, move to another ve
 
 Use **Add Construction Guide** for a persistent reference. Pick two vertices and press `A` for a guide aligned between them, or `X`, `Y`, or `Z` for an infinite global-axis guide through the first vertex. Guides are lightweight Empty objects in the `Construction Guides` collection and follow their linked anchors. The sidebar controls global guide visibility, color, line width, and **Clear All Guides**.
 
-The current first pass snaps to visible face vertices. Edge, midpoint, face, and intersection inference; typed distances; parallel offsets; guide planes; and direct line selection are planned follow-ups. See the living [Measure and Construction Guides plan](docs/MEASURE_GUIDES_PLAN.md).
+The current first pass snaps to visible mesh hits and base-mesh vertices, with a fallback for modifier/evaluated-geometry hits. Edge, midpoint, face, and intersection inference; free-space cursor points; typed distances; parallel offsets; guide planes; and direct line selection are planned follow-ups. See the living [Measure and Construction Guides plan](docs/MEASURE_GUIDES_PLAN.md) and [Interaction Toolkit Plan](docs/INTERACTION_TOOLKIT_PLAN.md).
 
 The measurement line and value always remain aligned to the two selected anchors. **Extension Axis** controls how the annotation moves away from that edge:
 
@@ -88,7 +88,7 @@ Current limitations:
 - Anchors use base-mesh vertex indices, not modifier output or persistent vertex IDs. Topology changes can detach an anchor or make an index identify a different vertex.
 - Dimensions are viewport overlays and do not appear in final renders.
 - Dimension overlays follow Blender viewport visibility, including an individual Empty's hide state and hidden or excluded parent collections/view layers.
-- A missing target object prevents that dimension from drawing. A detached vertex uses its fallback coordinate and reports its status in the sidebar, without a special viewport warning style.
+- A missing target object prevents that dimension from drawing. A detached vertex uses its fallback coordinate, without a special viewport warning style.
 - There is no dimension list, bulk visibility controls, preferences panel, or custom keymap yet.
 - Construction guides currently support infinite aligned/global-axis lines and group controls, but not guide planes, offsets, or direct overlay selection.
 - The selected-object HUD sorts bounding-box extents largest-to-smallest; Length, Width, and Thickness are not fixed local-axis labels.
@@ -104,7 +104,7 @@ Before a release:
 3. Test registration, unregistration, saving, and reopening in a clean Blender profile.
 4. Create dimensions within one object and across two objects; then move, rotate, scale, and edit referenced geometry.
 5. Verify Auto/X/Y/Z extension switching, keyboard constraints, offset editing, reattachment, click selection, unit formats, and broken references.
-6. Add CI and a GPL-3.0-or-later `LICENSE` file matching the manifest.
+6. Add CI for Blender integration coverage and release validation.
 
 The next useful product work is a dimension-management list with bulk visibility actions, clearer broken-anchor warnings, and performance testing of the draw and click-selection loops in larger scenes.
 

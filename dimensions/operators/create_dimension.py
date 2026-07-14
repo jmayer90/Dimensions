@@ -12,7 +12,7 @@ from ..drawing import (
     get_offset_basis,
     set_preview_state,
 )
-from ..snapping import find_nearest_face_vertex, get_mouse_ray
+from ..snapping import find_nearest_face_vertex, get_mouse_ray, has_view3d_window_region
 
 
 class CADDIM_OT_CreateDimension(bpy.types.Operator):
@@ -87,15 +87,21 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                     return {"RUNNING_MODAL"}
 
                 self.end_snap = self._copy_snap(self.hover_snap)
+                if (self.end_snap["world_co"] - self.start_snap["world_co"]).length < 1e-6:
+                    self.report({"WARNING"}, "Choose a different end point")
+                    self.end_snap = None
+                    return {"RUNNING_MODAL"}
+
                 self._begin_offset_stage(context)
                 self.state = "SET_OFFSET"
                 self._update_preview()
                 return {"RUNNING_MODAL"}
 
             if self.state == "SET_OFFSET":
-                self._create_dimension(context)
-                clear_preview_state()
-                return {"FINISHED"}
+                if self._create_dimension(context):
+                    clear_preview_state()
+                    return {"FINISHED"}
+                return {"RUNNING_MODAL"}
 
         if event.type in {"RIGHTMOUSE", "ESC"}:
             clear_preview_state()
@@ -108,6 +114,9 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
     def _update_offset(self, context, mouse_x, mouse_y):
         if self.start_snap is None or self.end_snap is None:
+            return
+
+        if not has_view3d_window_region(context):
             return
 
         start_world = self.start_snap["world_co"]
@@ -195,6 +204,19 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.offset_plane_normal = measure_direction.cross(perpendicular_axis).normalized()
 
     def _create_dimension(self, context):
+        if self.start_snap is None or self.end_snap is None:
+            return False
+
+        if (self.end_snap["world_co"] - self.start_snap["world_co"]).length < 1e-6:
+            self.report({"ERROR"}, "A dimension needs two different points")
+            return False
+
+        if self.offset_plane_normal is None:
+            self._begin_offset_stage(context)
+            if self.offset_plane_normal is None:
+                self.report({"ERROR"}, "Could not determine a dimension offset plane")
+                return False
+
         dimension_object = create_dimension_object(context, "DIM Dimension")
 
         set_anchor(
@@ -229,6 +251,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         context.view_layer.objects.active = dimension_object
 
         self.report({"INFO"}, "Created dimension")
+        return True
 
     def _update_preview(self):
         preview = {
