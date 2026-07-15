@@ -1,9 +1,9 @@
 import bpy
 
 from ..anchors import set_anchor_from_snap
-from ..collections import create_guide_object
+from ..collections import create_guide_object, remove_measurement_snap_proxies
 from ..drawing import clear_guide_preview_state, set_guide_preview_state
-from ..snapping import find_nearest_snap_point
+from ..snapping import copy_snap, find_nearest_snap_point
 
 
 class CADDIM_OT_CreateGuide(bpy.types.Operator):
@@ -99,14 +99,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
 
     @staticmethod
     def _copy_snap(snap):
-        return {
-            "type": snap.get("type", "VERTEX"),
-            "label": snap.get("label", "Point"),
-            "object": snap["object"],
-            "vertex_index": snap["vertex_index"],
-            "world_co": snap["world_co"].copy(),
-            "screen_co": snap["screen_co"].copy(),
-        }
+        return copy_snap(snap)
 
 
 class CADDIM_OT_ClearGuides(bpy.types.Operator):
@@ -116,8 +109,33 @@ class CADDIM_OT_ClearGuides(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        guide_objects = [obj for obj in context.scene.objects if hasattr(obj, "guide_props") and obj.guide_props.enabled]
+        guide_objects = [
+            obj for obj in context.scene.objects
+            if hasattr(obj, "guide_props")
+            and obj.guide_props.enabled
+            and getattr(obj.guide_props, "kind", "GUIDE") == "GUIDE"
+        ]
         for obj in guide_objects:
             bpy.data.objects.remove(obj, do_unlink=True)
         self.report({"INFO"}, f"Removed {len(guide_objects)} construction guide(s)")
+        return {"FINISHED"}
+
+
+class CADDIM_OT_ClearMeasurements(bpy.types.Operator):
+    bl_idname = "dimensions.clear_measurements"
+    bl_label = "Clear All Measurements"
+    bl_description = "Delete every persistent measurement in this scene"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        measurement_objects = [
+            obj for obj in context.scene.objects
+            if hasattr(obj, "guide_props")
+            and obj.guide_props.enabled
+            and getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT"
+        ]
+        for obj in measurement_objects:
+            remove_measurement_snap_proxies(obj)
+            bpy.data.objects.remove(obj, do_unlink=True)
+        self.report({"INFO"}, f"Removed {len(measurement_objects)} measurement(s)")
         return {"FINISHED"}

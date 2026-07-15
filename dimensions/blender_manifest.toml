@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "dimensions"
-version = "0.1.0"
+version = "0.1.1"
 name = "Dimensions"
 tagline = "Persistent vertex-linked dimensions for Blender"
 maintainer = "Joseph Mayer"

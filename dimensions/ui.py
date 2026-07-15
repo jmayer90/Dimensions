@@ -15,12 +15,16 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Dimensions"
     bl_idname = "CADDIM_PT_main_panel"
 
-    def draw(self, _context):
-        self.layout.operator("dimensions.create_dimension", icon="DRIVER_DISTANCE")
-        row = self.layout.row(align=True)
+    def draw(self, context):
+        object_tools = self.layout.column()
+        object_tools.enabled = context.mode == "OBJECT"
+        object_tools.operator("dimensions.create_dimension", icon="DRIVER_DISTANCE")
+        row = object_tools.row(align=True)
         row.operator("dimensions.measure", icon="DRIVER_DISTANCE")
         row.operator("dimensions.create_guide", icon="EMPTY_AXIS")
-        self.layout.operator("dimensions.create_line", icon="MESH_DATA")
+        line_row = self.layout.row()
+        line_row.enabled = context.mode == "EDIT_MESH"
+        line_row.operator("dimensions.create_line", icon="MESH_DATA")
 
 
 class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
@@ -52,6 +56,7 @@ class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
             layout.prop(settings, "imperial_denominator")
         layout.prop(settings, "precision")
         layout.prop(settings, "text_placement")
+        layout.prop(settings, "snap_pixel_radius")
         layout.prop(settings, "enable_click_select")
 
 
@@ -71,6 +76,7 @@ class CADDIM_PT_MeshSizeHUD(CADDIM_PT_PanelBase, bpy.types.Panel):
         layout.prop(settings, "show_selected_object_overlay", text="Enabled")
         if settings.show_selected_object_overlay:
             layout.prop(settings, "show_overlay_object_name")
+            layout.prop(settings, "show_overlay_volume")
             layout.prop(settings, "hud_corner")
             layout.prop(settings, "hud_padding_horizontal")
             layout.prop(settings, "hud_padding_vertical")
@@ -176,7 +182,9 @@ class CADDIM_PT_ConstructionGuides(CADDIM_PT_PanelBase, bpy.types.Panel):
         layout.prop(settings, "show_construction_guides")
         layout.prop(settings, "guide_color")
         layout.prop(settings, "guide_line_width")
-        layout.operator("dimensions.clear_guides", icon="TRASH")
+        actions = layout.row(align=True)
+        actions.operator("dimensions.clear_guides", text="Clear Guides", icon="TRASH")
+        actions.operator("dimensions.clear_measurements", text="Clear Measures", icon="TRASH")
 
 
 def _vertex_picker_text(anchor):

@@ -7,7 +7,25 @@ This plan captures the next design direction for Dimensions tools: measurement, 
 - The first implementation now keeps Measure, Dimension, and Guide previews alive over free space and adds visible-face vertex, edge, midpoint, face-center, face-point, and guide snapping. The inference model still needs intersections, parallel/perpendicular locks, and guide planes.
 - Persistent dimensions can store vertex anchors or world-coordinate anchors. Object-local surface anchors are still future work.
 - Snap behavior now covers the basic point classes, but it still needs a broader inference model without copying every behavior from a general-purpose snap add-on.
-- Typed direction-and-distance workflows are missing, which blocks SketchUp-like deliberate construction.
+- Typed scene-unit distance exists for Edit Mode mesh lines and persistent finite measurements. It is still missing from Dimension and infinite Guide placement.
+
+## QuickSnap-inspired target model
+
+[QuickSnap](https://github.com/JulienHeijmans/quicksnap) provides a useful reference for typed snap targets, pixel-radius lookup, nearby-object processing, depth-aware candidate scoring, target highlighting, and explicit target-mode switching. Dimensions should adopt those interaction principles without coupling snapping to object translation.
+
+Dimensions extends that model in several ways:
+
+- Construction guides are first-class snap targets rather than mesh-like display geometry.
+- Every candidate carries target identity and durable binding metadata separately from its world and screen coordinates.
+- Hidden objects, collections, guides, and disabled guide overlays are excluded consistently from drawing, selection, and snapping.
+- Edge projection uses perspective-correct interpolation so the committed world point matches the screen marker.
+- Edit Mode candidates come from the live BMesh, allowing a committed segment to become the next segment's valid snap topology immediately.
+- Edit Mode fallback candidates stay on the active mesh and include projected boundary edges, preventing silhouette ray misses from binding a mesh path to geometry behind the edited object.
+- Vertices, corners, and measurement start/mid/end points own the full configurable capture radius instead of losing to a raw face or line projection that happens to be closer to the pointer.
+- Persistent measurement endpoints also have a non-selectable two-vertex proxy for Blender-native transform snapping; the midpoint and finite segment remain Dimensions-level targets.
+- Candidate scoring should remain extensible to intersections, inferred axes, guide planes, and user-selectable target filters.
+
+The current implementation still collects only the visible ray-hit face plus visible guides instead of maintaining a scene-wide screen-space cache. A future performance pass should add an incrementally refreshed spatial index, borrowing QuickSnap's nearby-object/batched-processing idea while retaining Dimensions-specific guide and inference targets.
 
 ## Target interaction model
 
@@ -40,7 +58,7 @@ The practical first target is:
 3. Done: face point and face center snaps.
 4. Next: object-origin snaps.
 5. Next: axis and parallel inference from the active start point.
-6. Next: typed distance along the active inferred direction.
+6. In progress: typed distance is implemented for Measure and Draw Mesh Line; share it with Dimension and Guide next.
 7. Next: intersection and guide-plane inference.
 
 ## Snap Line-style workflows
@@ -71,14 +89,14 @@ This gives the precision workflow before adding mesh-edit side effects.
 
 ### Geometry line tool
 
-Geometry creation should be a separate explicit tool, not hidden inside Measure or Dimension.
+Geometry creation remains a separate explicit tool, not hidden inside Measure or Dimension.
 
 1. User selects a target mesh or enters edit mode.
 2. User picks a start `ToolPoint`.
 3. User previews a segment using the same snap, inference, and typed-distance system.
-4. User commits a new edge/vertex segment.
-5. If the endpoint lands on existing geometry, the tool can auto-merge to a vertex or split/bind to an edge based on a clear option.
-6. The committed endpoint becomes the next start point for chained lines and closed shapes.
+4. User commits a new edge/vertex segment; an unfinished path with an interior endpoint remains clean loose geometry instead of forcing a face-poke fan.
+5. When both path ends reach one face boundary, the deferred path is replaced with a knife-like face split that preserves all intermediate turns. Edge endpoints split their target edges first.
+6. The committed endpoint becomes the next start point for chained lines. Closing a simple coplanar surface loop rebuilds the surrounding ring with two required bridge edges and an independent inner face; closing away from a surface creates a standalone face.
 
 This keeps CAD-like creation available without making annotation tools unexpectedly destructive.
 
@@ -123,14 +141,14 @@ Keep this as a toolkit layer, probably separate from the drawing code:
 - `geometry_ops.py`: create vertices/edges and perform explicit merge/split operations for the future Geometry Line tool.
 - Modal operators: consume toolkit results and focus on workflow state.
 
-The first implementation slice made Dimension, Measure, and Guide tools preview over empty space, persist snapped vertex or world-coordinate anchors, snap to vertices/edges/midpoints/faces/guides, and select guide lines in the viewport.
+The current implementation makes Dimension, Measure, and Guide tools preview over empty space; supports typed distances in Measure and Draw Mesh Line; snaps to vertices, edges, midpoints, faces, infinite guides, and finite measurements; exposes measurement endpoints to Blender-native transform snapping; keeps Edit Mode fallback snaps on the active mesh; and selects construction objects in the viewport.
 
 ## Rollout plan
 
 1. Done: add vertex/world point anchors, guide snap projections, and free-space construction-plane projection.
 2. Done: add continuous previews to Measure, Dimension, and Guide.
-3. Done: add a separate Edit Mode Geometry Line tool with explicit active mesh editing and undo-safe mesh edits.
+3. Done: add a separate Edit Mode Geometry Line tool with explicit active mesh editing, connected chains, vertex/edge binding, common-face splitting, and undo-safe mesh edits.
 4. Done: add midpoint, face-center, and richer edge/guide inference targets.
-5. Next: add parallel, perpendicular, local-axis, and typed-distance locks across non-destructive tools.
+5. In progress: typed distance is complete for Measure; add it to Dimension/Guide and add parallel, perpendicular, and local-axis locks across tools.
 6. Next: upgrade construction guides to support offsets, chained guide creation, and guide planes.
-7. Next: add auto-merge edge split/bind options after the Geometry Line tool is reliable.
+7. Done for the single-face path: deferred boundary-to-boundary strokes cut without radial support fans, and simple closed coplanar paths create independent faces. Next: multi-face path routing, configurable edge split/bind behavior, and robust handling for boundary-touching, self-intersecting, or non-manifold loops.

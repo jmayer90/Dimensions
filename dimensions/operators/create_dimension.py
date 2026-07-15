@@ -12,7 +12,7 @@ from ..drawing import (
     get_offset_basis,
     set_preview_state,
 )
-from ..snapping import find_nearest_snap_point, get_mouse_ray, has_view3d_window_region
+from ..snapping import copy_snap, find_nearest_snap_point, get_mouse_ray, has_view3d_window_region
 
 
 class CADDIM_OT_CreateDimension(bpy.types.Operator):
@@ -290,11 +290,4 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
     @staticmethod
     def _copy_snap(snap):
-        return {
-            "type": snap.get("type", "VERTEX"),
-            "label": snap.get("label", "Point"),
-            "object": snap["object"],
-            "vertex_index": snap["vertex_index"],
-            "world_co": snap["world_co"].copy(),
-            "screen_co": snap["screen_co"].copy(),
-        }
+        return copy_snap(snap)

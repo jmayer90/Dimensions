@@ -1,4 +1,5 @@
 from math import floor, gcd
+import re
 
 import bpy
 
@@ -29,6 +30,30 @@ def blender_units_to_inches(context, value):
 def blender_units_to_meters(context, value):
     scale_length = context.scene.unit_settings.scale_length or 1.0
     return value * scale_length
+
+
+def parse_distance_input(context, text):
+    value_text = text.strip()
+    if not value_text:
+        raise ValueError("Distance input is empty")
+
+    if context is None:
+        return float(value_text)
+
+    unit_settings = context.scene.unit_settings
+    lowered = value_text.lower()
+    if "\"" in value_text or "'" in value_text or re.search(r"(in|inch|inches|ft|foot|feet)\s*$", lowered):
+        unit_system = "IMPERIAL"
+    elif re.search(r"(mm|millimeter|millimeters|cm|centimeter|centimeters|m|meter|meters)\s*$", lowered):
+        unit_system = "METRIC"
+    else:
+        unit_system = unit_settings.system
+
+    if unit_system not in {"METRIC", "IMPERIAL"}:
+        return float(value_text)
+
+    meters = bpy.utils.units.to_value(unit_system, "LENGTH", value_text)
+    return meters / (unit_settings.scale_length or 1.0)
 
 
 def infer_unit_style(context):
@@ -92,6 +117,42 @@ def format_length(context, value, precision=3):
     return _format_blender_units(context, value, precision)
 
 
+def format_volume(context, value, precision=3):
+    settings = get_display_settings(context)
+    style = get_configured_unit_style(context) if settings is not None else "BLENDER"
+    if style == "AUTO":
+        style = infer_unit_style(context)
+
+    if style == "BLENDER":
+        return _format_blender_volume(context, value, precision)
+
+    cubic_meters = value * (context.scene.unit_settings.scale_length or 1.0) ** 3
+    if style == "METRIC_AUTO":
+        magnitude = abs(cubic_meters)
+        if magnitude >= 1.0:
+            return f"{cubic_meters:.{precision}f} m\u00b3"
+        if magnitude >= 1e-6:
+            return f"{cubic_meters * 1e6:.{precision}f} cm\u00b3"
+        return f"{cubic_meters * 1e9:.{precision}f} mm\u00b3"
+
+    metric_units = {
+        "MILLIMETERS": (1e9, "mm\u00b3"),
+        "CENTIMETERS": (1e6, "cm\u00b3"),
+        "METERS": (1.0, "m\u00b3"),
+    }
+    if style in metric_units:
+        multiplier, suffix = metric_units[style]
+        return f"{cubic_meters * multiplier:.{precision}f} {suffix}"
+
+    cubic_inches = cubic_meters / (0.0254 ** 3)
+    if style == "FEET_INCHES" and abs(cubic_inches) >= 12.0 ** 3:
+        return f"{cubic_inches / (12.0 ** 3):.{precision}f} ft\u00b3"
+    if style in {"FEET_INCHES", "INCH_DECIMAL", "INCH_FRACTION"}:
+        return f"{cubic_inches:.{precision}f} in\u00b3"
+
+    return _format_blender_volume(context, value, precision)
+
+
 def _format_blender_units(context, value, precision):
     try:
         unit_settings = context.scene.unit_settings
@@ -108,6 +169,24 @@ def _format_blender_units(context, value, precision):
         )
     except Exception:
         return f"{value:.{precision}f}"
+
+
+def _format_blender_volume(context, value, precision):
+    try:
+        unit_settings = context.scene.unit_settings
+        display_value = value
+        if unit_settings.system in {"METRIC", "IMPERIAL"}:
+            display_value *= (unit_settings.scale_length or 1.0) ** 3
+
+        return bpy.utils.units.to_string(
+            unit_settings.system,
+            "VOLUME",
+            display_value,
+            precision=precision,
+            split_unit=False,
+        )
+    except Exception:
+        return f"{value:.{precision}f} BU\u00b3"
 
 
 def format_inches_decimal(context, value, precision):

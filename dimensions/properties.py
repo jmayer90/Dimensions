@@ -8,6 +8,7 @@ from .constants import (
     DEFAULT_GUIDE_LINE_WIDTH,
     DEFAULT_OFFSET_DISTANCE,
     DEFAULT_PRECISION,
+    DEFAULT_SNAP_PIXEL_THRESHOLD,
     DEFAULT_TEXT_SIZE,
 )
 
@@ -232,6 +233,15 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
 
 class CADDIM_PG_Guide(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(name="Enabled", default=False)
+    kind: bpy.props.EnumProperty(
+        name="Construction Type",
+        items=[
+            ("GUIDE", "Infinite Guide", "An infinite construction line"),
+            ("MEASUREMENT", "Measurement", "A persistent finite measured segment"),
+        ],
+        default="GUIDE",
+        update=update_dimension_display,
+    )
     start: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
     end: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
     axis: bpy.props.EnumProperty(
@@ -377,6 +387,22 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
 
     show_overlay_object_name: bpy.props.BoolProperty(
         name="Show Mesh Names",
+        default=True,
+        update=update_dimension_display,
+    )
+
+    snap_pixel_radius: bpy.props.IntProperty(
+        name="Snap Radius",
+        description="Screen-space capture radius for logical vertices, corners, midpoints, and construction points",
+        default=int(DEFAULT_SNAP_PIXEL_THRESHOLD),
+        min=8,
+        max=64,
+        subtype="PIXEL",
+    )
+
+    show_overlay_volume: bpy.props.BoolProperty(
+        name="Show Volume",
+        description="Show evaluated volume for closed selected meshes and N/A for open meshes",
         default=True,
         update=update_dimension_display,
     )

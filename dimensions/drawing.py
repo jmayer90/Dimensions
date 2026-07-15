@@ -7,6 +7,7 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Quaternion, Vector
 
 from .anchors import resolve_anchor
+from .collections import ensure_measurement_snap_proxy, remove_orphan_measurement_snap_proxies
 from .constants import (
     DEFAULT_ARROW_SIZE,
     DEFAULT_HOVER_MARKER_SIZE,
@@ -16,8 +17,14 @@ from .constants import (
     DEFAULT_TEXT_SIZE,
 )
 from .properties import is_dimension_object, is_guide_object
-from .snapping import guide_segment_world
-from .units import format_length
+from .snapping import construction_segment_world, find_nearest_guide_point, guide_is_visible, guide_segment_world
+from .units import format_length, format_volume
+from .volume import (
+    VOLUME_APPROXIMATE,
+    clear_volume_cache,
+    get_mesh_volume,
+    invalidate_volume_cache_from_depsgraph,
+)
 
 
 _pixel_draw_handler = None
@@ -117,6 +124,7 @@ def unregister_draw_handler():
     _preview_state = None
     _measure_state = None
     _guide_preview_state = None
+    clear_volume_cache()
 
     if _pixel_draw_handler is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_pixel_draw_handler, "WINDOW")
@@ -149,7 +157,8 @@ def _run_scheduled_location_sync():
 
 
 @persistent
-def _dimension_location_sync_handler(scene, _depsgraph):
+def _dimension_location_sync_handler(scene, depsgraph):
+    invalidate_volume_cache_from_depsgraph(depsgraph)
     sync_dimension_object_locations(scene)
 
 
@@ -161,13 +170,21 @@ def sync_dimension_object_locations(scene):
 
     _location_sync_active = True
     try:
-        for obj in scene.objects:
+        remove_orphan_measurement_snap_proxies(scene)
+        for obj in list(scene.objects):
             if is_guide_object(obj):
                 start_world, _status = resolve_anchor(obj.guide_props.start)
-                if start_world is not None and (obj.matrix_world.translation - start_world).length > 1e-6:
+                target_world = start_world
+                if getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT":
+                    end_world, _end_status = resolve_anchor(obj.guide_props.end)
+                    if start_world is not None and end_world is not None:
+                        target_world = (start_world + end_world) * 0.5
+                if target_world is not None and (obj.matrix_world.translation - target_world).length > 1e-6:
                     matrix_world = obj.matrix_world.copy()
-                    matrix_world.translation = start_world
+                    matrix_world.translation = target_world
                     obj.matrix_world = matrix_world
+                if getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT":
+                    ensure_measurement_snap_proxy(obj, scene)
                 continue
             if not is_dimension_object(obj):
                 continue
@@ -387,6 +404,8 @@ def draw_dimensions():
         if _measure_state is not None:
             _draw_transient_measure(context, shader, _measure_state)
 
+        _draw_persistent_measurements(context)
+
         _draw_selected_object_overlay(context)
     finally:
         gpu.state.line_width_set(1.0)
@@ -443,7 +462,7 @@ def _draw_construction_guides(context, shader):
     if settings is None or not settings.show_construction_guides:
         return
     for obj in context.scene.objects:
-        if not is_guide_object(obj) or not obj.guide_props.visible or not _object_visible_in_viewport(context, obj):
+        if not guide_is_visible(context, obj):
             continue
         segment = guide_segment_world(obj)
         if segment is None:
@@ -521,7 +540,36 @@ def _draw_transient_measure(context, shader, state):
     direction = (end_screen - start_screen).normalized()
     perpendicular = Vector((-direction.y, direction.x))
     label_position = (start_screen + end_screen) * 0.5 + perpendicular * (text_size + 4.0)
-    _draw_text(format_length(context, (end - start).length, precision), label_position, color, text_size)
+    label = state.get("distance_text", "").strip()
+    if not label:
+        label = format_length(context, (end - start).length, precision)
+    _draw_text(label, label_position, color, text_size)
+
+
+def _draw_persistent_measurements(context):
+    settings = getattr(context.scene, "dimensions_settings", None)
+    if settings is None or not settings.show_construction_guides:
+        return
+    precision = settings.precision
+    text_size = settings.dimension_text_size
+    color = tuple(settings.guide_color)
+    for obj in context.scene.objects:
+        if not guide_is_visible(context, obj):
+            continue
+        if getattr(obj.guide_props, "kind", "GUIDE") != "MEASUREMENT":
+            continue
+        segment = construction_segment_world(obj)
+        if segment is None:
+            continue
+        start_world, end_world = segment
+        start_screen = _project_world_to_screen(context, start_world)
+        end_screen = _project_world_to_screen(context, end_world)
+        if start_screen is None or end_screen is None or (end_screen - start_screen).length < 0.5:
+            continue
+        direction = (end_screen - start_screen).normalized()
+        perpendicular = Vector((-direction.y, direction.x))
+        label_position = (start_screen + end_screen) * 0.5 + perpendicular * (text_size + 4.0)
+        _draw_text(format_length(context, (end_world - start_world).length, precision), label_position, color, text_size)
 
 
 def _draw_dimension_geometry(context, shader, geometry, color, precision):
@@ -657,6 +705,7 @@ def _draw_selected_object_overlay(context):
     text_color = (0.80, 0.88, 0.95, 1.0)
 
     lines = [("Selected Mesh Size", header_color)]
+    depsgraph = context.evaluated_depsgraph_get()
     for obj in selected_mesh_objects[:6]:
         if settings.show_overlay_object_name:
             lines.append((obj.name, header_color))
@@ -668,6 +717,14 @@ def _draw_selected_object_overlay(context):
             f"Thickness {format_length(context, dims[2], 3)}"
         )
         lines.append((label, text_color))
+        if settings.show_overlay_volume:
+            volume, status = get_mesh_volume(obj, depsgraph)
+            if volume is None:
+                volume_label = "Volume N/A"
+            else:
+                approximation = "~" if status == VOLUME_APPROXIMATE else ""
+                volume_label = f"Volume {approximation}{format_volume(context, volume, 3)}"
+            lines.append((volume_label, text_color))
 
     is_right = settings.hud_corner in {"BOTTOM_RIGHT", "TOP_RIGHT"}
     is_top = settings.hud_corner in {"TOP_LEFT", "TOP_RIGHT"}
@@ -714,30 +771,8 @@ def find_dimension_hit(context, mouse_x, mouse_y, threshold=DEFAULT_SELECTION_PI
 
 
 def find_guide_hit(context, mouse_x, mouse_y, threshold=DEFAULT_SELECTION_PIXEL_THRESHOLD):
-    mouse = Vector((mouse_x, mouse_y))
-    best = None
-
-    for obj in context.scene.objects:
-        if not is_guide_object(obj) or not _object_visible_in_viewport(context, obj):
-            continue
-
-        segment = guide_segment_world(obj)
-        if segment is None:
-            continue
-
-        start_screen = _project_world_to_screen(context, segment[0])
-        end_screen = _project_world_to_screen(context, segment[1])
-        if start_screen is None or end_screen is None:
-            continue
-
-        distance = _point_to_segment_distance(mouse, start_screen, end_screen)
-        if distance > threshold:
-            continue
-
-        if best is None or distance < best[0]:
-            best = (distance, obj)
-
-    return None if best is None else best[1]
+    snap = find_nearest_guide_point(context, mouse_x, mouse_y, threshold)
+    return None if snap is None else snap.get("guide_object")
 
 
 def _project_dimension_geometry(context, anchor_start_world, anchor_end_world, world_geometry):
@@ -905,7 +940,10 @@ def _snap_marker_color(state):
     if snap_type == "VERTEX":
         return (0.25, 1.0, 0.35, 1.0)
 
-    if label == "Guide":
+    if snap_type == "MEASUREMENT":
+        return (0.25, 0.72, 1.0, 1.0)
+
+    if label in {"Guide", "Measurement"}:
         return (0.25, 0.72, 1.0, 1.0)
 
     if label in {"Edge", "Midpoint", "Face Center", "Face"}:

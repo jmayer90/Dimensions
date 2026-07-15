@@ -20,7 +20,7 @@ class CADDIM_WST_AddDimension(bpy.types.WorkSpaceTool):
 class CADDIM_WST_Measure(bpy.types.WorkSpaceTool):
     bl_idname = "dimensions.measure_tool"
     bl_label = "Measure"
-    bl_description = "Make a transient measurement; A for aligned or X/Y/Z for an axis projection"
+    bl_description = "Create a persistent finite measurement; point, constrain with A/X/Y/Z, and optionally type a distance"
     bl_space_type = "VIEW_3D"
     bl_context_mode = "OBJECT"
     bl_icon = "ops.view3d.ruler"
@@ -40,7 +40,7 @@ class CADDIM_WST_AddGuide(bpy.types.WorkSpaceTool):
 class CADDIM_WST_DrawMeshLine(bpy.types.WorkSpaceTool):
     bl_idname = "dimensions.draw_mesh_line_tool"
     bl_label = "Draw Mesh Line"
-    bl_description = "Create chained mesh edges in Edit Mode with Dimensions snapping"
+    bl_description = "Draw connected pencil edges or knife-like surface cuts with logical snapping and typed distances"
     bl_space_type = "VIEW_3D"
     bl_context_mode = "EDIT_MESH"
     bl_icon = "ops.view3d.ruler"
