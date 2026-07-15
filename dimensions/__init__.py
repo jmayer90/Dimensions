@@ -7,7 +7,6 @@ from .properties import classes as property_classes
 from .properties import register_properties, unregister_properties
 from .tools import register_tools, unregister_tools
 from .ui import classes as ui_classes
-from .workflow import register_mesh_workflow_defaults, unregister_mesh_workflow_defaults
 
 
 CLASSES = (
@@ -22,7 +21,6 @@ def register():
         bpy.utils.register_class(cls)
 
     register_properties()
-    register_mesh_workflow_defaults()
     register_tools()
     register_draw_handler()
     register_click_select()
@@ -32,7 +30,6 @@ def unregister():
     unregister_click_select()
     unregister_draw_handler()
     unregister_tools()
-    unregister_mesh_workflow_defaults()
     unregister_properties()
 
     for cls in reversed(CLASSES):

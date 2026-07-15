@@ -56,7 +56,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
                 self._update_overlay(context)
                 return {"RUNNING_MODAL"}
 
-        axis = axis_from_event(event, self.distance_text)
+        axis = axis_from_event(event)
         if axis is not None:
             self.axis = axis
             self._update_effective_end(context)

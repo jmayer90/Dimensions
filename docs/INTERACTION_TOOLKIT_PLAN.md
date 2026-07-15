@@ -114,12 +114,13 @@ Constraints should be explicit state in the shared toolkit:
 
 The UI should show the active constraint through color and a small viewport label, but the internal state should be independent of drawing so tests can exercise it.
 
-## Auto-merge and binding policy
+## Binding policy
 
-Auto-merge needs conservative defaults:
+Binding must remain explicit and local to the active tool:
 
+- Enabling the add-on does not change Blender's Auto Merge or mesh-editing settings.
 - Measurement, dimensions, and construction guides never modify mesh geometry.
-- Geometry Line can auto-merge only when its option is enabled and a target mesh/edit context is explicit.
+- Geometry Line binds only when a target mesh/edit context is explicit.
 - Vertex hits merge directly to that vertex.
 - Edge hits either split the edge and bind to the inserted vertex, or create a loose endpoint, depending on the selected mode.
 - Face hits create a point projected onto the face only when the tool is in geometry mode and the mesh operation is valid.

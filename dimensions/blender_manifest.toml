@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "dimensions"
-version = "0.1.1"
+version = "0.1.2"
 name = "Dimensions"
-tagline = "Persistent vertex-linked dimensions for Blender"
+tagline = "Precision dimensions, guides, measures, and mesh lines"
 maintainer = "Joseph Mayer"
 type = "add-on"
 

@@ -20,7 +20,7 @@ def is_navigation_event(event):
     return event.type in NAVIGATION_EVENTS
 
 
-def axis_from_event(event, current_text=""):
+def axis_from_event(event):
     """Return a Blender-style axis lock before or after numeric entry."""
     if event.value != "PRESS" or event.type not in AXIS_EVENTS:
         return None

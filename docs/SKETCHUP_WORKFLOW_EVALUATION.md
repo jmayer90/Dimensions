@@ -252,10 +252,12 @@ No work on these ideas should begin without an explicit future scope decision.
 
 The current background Blender suite provides useful coverage of geometry helpers and happy paths. Add the following gates before calling the four priority workflows production ready.
 
-Audit snapshot:
+Audit snapshot (July 15, 2026):
 
 - Blender 5.1.2 manifest validation: passed.
-- Blender 5.1.2 background smoke suite: 38 passed.
+- Blender 5.1.2 background smoke suite: 41 passed.
+- Extension registration no longer changes Blender's scene-wide Auto Merge or split settings; mesh binding remains local to the explicit Draw Mesh Line tool.
+- Hidden Edit Mode vertices are excluded from both projected fallback paths, and annotation display changes now redraw all open 3D Views.
 - Added regressions proving a tool-created face can be extruded and its new cap cut, and that keyboard/MMB axis constraints remain on a sloped edit face instead of creating mislabeled off-surface points.
 - Added regression coverage for a closed loop sharing an existing cut vertex, forced open-cut failure preservation, shared numeric input, target-highlight geometry, object-local anchors, and axis-guide anchor independence.
 - The non-planar visible-face split regression briefly failed during the audit and passed after the current surface-tolerance update; retain both that test and the off-surface rejection test.

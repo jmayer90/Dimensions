@@ -6,6 +6,7 @@ from mathutils import Vector
 
 from .constants import DEFAULT_SNAP_PIXEL_THRESHOLD
 from .anchors import resolve_anchor
+from .collections import MEASUREMENT_SNAP_PROXY_FLAG
 from .properties import is_guide_object
 
 
@@ -90,9 +91,18 @@ def _raycast_edit_mesh(context, origin_world, direction_world):
     if not bm.faces:
         return None
 
+    bm.verts.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
+    bm.verts.index_update()
     bm.faces.index_update()
-    tree = BVHTree.FromBMesh(bm)
+    visible_faces = [face for face in bm.faces if not face.hide]
+    if not visible_faces:
+        return None
+    tree = BVHTree.FromPolygons(
+        [vertex.co.copy() for vertex in bm.verts],
+        [[vertex.index for vertex in face.verts] for face in visible_faces],
+        all_triangles=False,
+    )
     inverse = obj.matrix_world.inverted_safe()
     origin_local = inverse @ origin_world
     direction_local = inverse.to_3x3() @ direction_world
@@ -100,12 +110,13 @@ def _raycast_edit_mesh(context, origin_world, direction_world):
         return None
     direction_local.normalize()
 
-    location, normal, face_index, _distance = tree.ray_cast(
+    location, normal, visible_face_index, _distance = tree.ray_cast(
         origin_local,
         direction_local,
     )
-    if location is None or face_index is None:
+    if location is None or visible_face_index is None:
         return None
+    face_index = visible_faces[visible_face_index].index
 
     normal_world = obj.matrix_world.to_3x3().inverted_safe().transposed() @ normal
     if normal_world.length > 1e-8:
@@ -544,7 +555,7 @@ def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold):
         objects_and_vertices = [
             (obj, obj.data.vertices)
             for obj in getattr(context, "visible_objects", ())
-            if obj.type == "MESH"
+            if obj.type == "MESH" and not obj.get(MEASUREMENT_SNAP_PROXY_FLAG, False)
         ]
 
     for obj, vertices in objects_and_vertices:
@@ -552,6 +563,8 @@ def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold):
             vertices.ensure_lookup_table()
             vertices.index_update()
         for vertex in vertices:
+            if context.mode == "EDIT_MESH" and vertex.hide:
+                continue
             world_co = obj.matrix_world @ vertex.co
             screen_co = view3d_utils.location_3d_to_region_2d(
                 context.region,

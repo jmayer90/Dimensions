@@ -457,17 +457,6 @@ def _axis_endpoint(start_world, end_world, axis):
     return end_world
 
 
-def _guide_direction(start_world, end_world, axis):
-    if axis == "X":
-        return Vector((1.0, 0.0, 0.0))
-    if axis == "Y":
-        return Vector((0.0, 1.0, 0.0))
-    if axis == "Z":
-        return Vector((0.0, 0.0, 1.0))
-    direction = end_world - start_world
-    return None if direction.length < 1e-6 else direction.normalized()
-
-
 def _draw_construction_guides(context, shader):
     settings = getattr(context.scene, "dimensions_settings", None)
     if settings is None or not settings.show_construction_guides:

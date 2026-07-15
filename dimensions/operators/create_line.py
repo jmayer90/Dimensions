@@ -55,7 +55,7 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
                 self._update_preview(context)
                 return {"RUNNING_MODAL"}
 
-        axis = axis_from_event(event, self.distance_text)
+        axis = axis_from_event(event)
         if axis is not None:
             self.axis = axis
             self._update_preview(context)

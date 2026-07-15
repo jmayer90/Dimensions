@@ -49,7 +49,7 @@ def _ensure_click_select_running():
             with bpy.context.temp_override(window=window, area=area, region=window_region):
                 try:
                     bpy.ops.dimensions.click_select_modal("INVOKE_DEFAULT")
-                except Exception:
+                except RuntimeError:
                     continue
 
     return 1.0
@@ -110,6 +110,9 @@ class DIMENSIONS_OT_ClickSelectModal(bpy.types.Operator):
                 hit_object.select_set(not hit_object.select_get())
                 if hit_object.select_get():
                     context.view_layer.objects.active = hit_object
+                elif context.view_layer.objects.active == hit_object:
+                    remaining = list(context.selected_objects)
+                    context.view_layer.objects.active = remaining[-1] if remaining else None
             else:
                 for selected_object in context.selected_objects:
                     selected_object.select_set(False)

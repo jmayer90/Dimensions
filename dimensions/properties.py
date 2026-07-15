@@ -52,8 +52,13 @@ def update_anchor_vertex_index(anchor, _context):
 
 
 def update_dimension_display(_dimension, context):
-    if context is not None and context.area is not None:
-        context.area.tag_redraw()
+    try:
+        from .drawing import tag_redraw_all_view3d
+
+        tag_redraw_all_view3d()
+    except (ImportError, RuntimeError):
+        if context is not None and context.area is not None:
+            context.area.tag_redraw()
     _schedule_dimension_location_sync()
 
 
@@ -170,6 +175,7 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
     visible: bpy.props.BoolProperty(
         name="Visible",
         default=True,
+        update=update_dimension_display,
     )
 
     color: bpy.props.FloatVectorProperty(
@@ -179,6 +185,7 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
         default=(0.08, 0.58, 1.0, 1.0),
         min=0.0,
         max=1.0,
+        update=update_dimension_display,
     )
 
     selected_color: bpy.props.FloatVectorProperty(
@@ -188,6 +195,7 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
         default=(0.35, 0.82, 1.0, 1.0),
         min=0.0,
         max=1.0,
+        update=update_dimension_display,
     )
 
     line_width: bpy.props.FloatProperty(
@@ -260,13 +268,6 @@ class CADDIM_PG_Guide(bpy.types.PropertyGroup):
 
 
 class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
-    mesh_workflow_initialized: bpy.props.BoolProperty(
-        name="Mesh Workflow Initialized",
-        description="Internal marker preserving user changes after the add-on sets initial mesh workflow defaults",
-        default=False,
-        options={"HIDDEN"},
-    )
-
     unit_style: bpy.props.EnumProperty(
         name="Unit Style",
         items=[
@@ -281,6 +282,7 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
             ("BLENDER", "Blender Native", "Use Blender's default unit formatting"),
         ],
         default="AUTO",
+        update=update_dimension_display,
     )
 
     metric_unit_style: bpy.props.EnumProperty(
@@ -321,6 +323,7 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
             ("64", "1/64", "Round fractions to the nearest sixty-fourth inch"),
         ],
         default="32",
+        update=update_dimension_display,
     )
 
     precision: bpy.props.IntProperty(

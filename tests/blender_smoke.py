@@ -36,8 +36,10 @@ from dimensions.snapping import (
     _best_snap_candidate,
     _edit_mesh_projected_vertex_priority,
     _nearest_projected_edit_mesh_element,
+    _nearest_projected_vertex,
     _nearest_measurement_segment_snap,
     _perspective_correct_segment_factor,
+    _raycast_edit_mesh,
     construction_segment_world,
     guide_is_visible,
     guide_line_world,
@@ -51,7 +53,6 @@ from dimensions.volume import (
     clear_volume_cache,
     get_mesh_volume,
 )
-from dimensions.workflow import initialize_scene_mesh_workflow
 
 
 def _line_operator_adapter():
@@ -112,29 +113,6 @@ def _vertex_snap(obj, x, y, z=0.0):
 
 
 class DimensionsBlenderSmokeTests(unittest.TestCase):
-    def test_mesh_workflow_defaults_initialize_once_per_scene(self):
-        scene = bpy.data.scenes.new("DimensionsMeshWorkflowDefaultsSmoke")
-        self.addCleanup(bpy.data.scenes.remove, scene)
-        scene.unit_settings.system = "METRIC"
-        scene.unit_settings.scale_length = 1.0
-        scene.dimensions_settings.mesh_workflow_initialized = False
-        scene.tool_settings.use_mesh_automerge = False
-        scene.tool_settings.use_mesh_automerge_and_split = False
-
-        self.assertTrue(initialize_scene_mesh_workflow(scene))
-        self.assertTrue(scene.tool_settings.use_mesh_automerge)
-        self.assertTrue(scene.tool_settings.use_mesh_automerge_and_split)
-        self.assertAlmostEqual(scene.tool_settings.double_threshold, 0.0001, places=7)
-
-        scene.tool_settings.use_mesh_automerge = False
-        scene.tool_settings.use_mesh_automerge_and_split = False
-        scene.tool_settings.double_threshold = 0.01
-
-        self.assertFalse(initialize_scene_mesh_workflow(scene))
-        self.assertFalse(scene.tool_settings.use_mesh_automerge)
-        self.assertFalse(scene.tool_settings.use_mesh_automerge_and_split)
-        self.assertAlmostEqual(scene.tool_settings.double_threshold, 0.01, places=6)
-
     def _make_edit_object(self, name, vertices, edges=(), faces=()):
         mesh = bpy.data.meshes.new(f"{name}Mesh")
         mesh.from_pydata(vertices, edges, faces)
@@ -183,8 +161,7 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         text, handled = update_distance_text("", number_event)
         self.assertTrue(handled)
         self.assertEqual(text, "2")
-        self.assertEqual(axis_from_event(axis_event, text), "X")
-        self.assertEqual(axis_from_event(axis_event, ""), "X")
+        self.assertEqual(axis_from_event(axis_event), "X")
         self.assertTrue(is_confirm_event(enter_event))
         self.assertEqual(constrained_delta(Vector((2.0, 3.0, 4.0)), "Y"), Vector((0.0, 3.0, 0.0)))
         self.assertEqual(
@@ -1075,6 +1052,27 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         world_vertices = [proxy.matrix_world @ vertex.co for vertex in proxy.data.vertices]
         self.assertEqual(world_vertices, [start, end])
 
+    def test_native_measurement_proxy_is_not_an_addon_mesh_snap_target(self):
+        from unittest.mock import patch
+
+        measurement = create_measurement_object(bpy.context, "DimensionsProxyIsolationSmoke")
+        self.addCleanup(bpy.data.objects.remove, measurement, do_unlink=True)
+        set_world_anchor(measurement.guide_props.start, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(measurement.guide_props.end, Vector((2.0, 0.0, 0.0)))
+        proxy = ensure_measurement_snap_proxy(measurement, bpy.context.scene)
+        self.addCleanup(bpy.data.meshes.remove, proxy.data)
+        self.addCleanup(bpy.data.objects.remove, proxy, do_unlink=True)
+        context = SimpleNamespace(
+            mode="OBJECT",
+            edit_object=None,
+            visible_objects=[proxy],
+            region=object(),
+            region_data=object(),
+        )
+        with patch("dimensions.snapping.has_view3d_window_region", return_value=True):
+            snap = _nearest_projected_vertex(context, 0.0, 0.0, 28.0)
+        self.assertIsNone(snap)
+
     def test_measurement_midpoint_is_an_explicit_snap_target(self):
         from unittest.mock import patch
 
@@ -1181,6 +1179,37 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
             self.assertIsNone(raycast_from_mouse(context, 10.0, 10.0))
         scene.ray_cast.assert_not_called()
 
+    def test_edit_mode_raycast_ignores_hidden_faces(self):
+        obj, mesh = self._make_edit_object(
+            "DimensionsHiddenFaceRaycastSmoke",
+            [
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+                (1.0, 0.0, 1.0),
+                (1.0, 1.0, 1.0),
+                (0.0, 1.0, 1.0),
+            ],
+            faces=[(0, 1, 2, 3), (4, 5, 6, 7)],
+        )
+        bm = bmesh.from_edit_mesh(mesh)
+        bm.faces.ensure_lookup_table()
+        bm.faces[1].hide_set(True)
+        context = SimpleNamespace(edit_object=obj)
+        try:
+            hit = _raycast_edit_mesh(
+                context,
+                Vector((0.5, 0.5, 2.0)),
+                Vector((0.0, 0.0, -1.0)),
+            )
+            self.assertIsNotNone(hit)
+            self.assertEqual(hit["face_index"], 0)
+            self.assertAlmostEqual(hit["location"].z, 0.0)
+        finally:
+            self._remove_edit_object(obj, mesh)
+
     def test_edit_mode_boundary_edge_is_available_when_face_raycast_misses(self):
         from unittest.mock import patch
 
@@ -1208,6 +1237,35 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
             self.assertEqual(snap["type"], "EDGE")
             self.assertEqual(snap["object"], obj)
             self.assertEqual(snap["world_co"], Vector((0.5, 0.0, 0.0)))
+        finally:
+            self._remove_edit_object(obj, mesh)
+
+    def test_hidden_edit_vertex_is_not_a_projected_snap_target(self):
+        from unittest.mock import patch
+
+        obj, mesh = self._make_edit_object(
+            "DimensionsHiddenProjectedVertexSmoke",
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
+        )
+        bm = bmesh.from_edit_mesh(mesh)
+        bm.verts.ensure_lookup_table()
+        bm.verts[0].hide_set(True)
+        context = SimpleNamespace(
+            mode="EDIT_MESH",
+            edit_object=obj,
+            region=object(),
+            region_data=object(),
+        )
+        try:
+            with (
+                patch("dimensions.snapping.has_view3d_window_region", return_value=True),
+                patch(
+                    "dimensions.snapping.view3d_utils.location_3d_to_region_2d",
+                    side_effect=lambda _region, _region_data, world: Vector((world.x, world.y)),
+                ),
+            ):
+                snap = _nearest_projected_vertex(context, 0.0, 0.0, 2.0)
+            self.assertEqual(snap["vertex_index"], 1)
         finally:
             self._remove_edit_object(obj, mesh)
 
