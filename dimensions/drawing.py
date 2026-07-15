@@ -1,13 +1,14 @@
 import blf
 import bpy
 import gpu
-from bpy.app.handlers import persistent
+from math import degrees
 from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
-from mathutils import Quaternion, Vector
+from mathutils import Vector
 
 from .anchors import resolve_anchor
-from .collections import ensure_measurement_snap_proxy, remove_orphan_measurement_snap_proxies
+from .area_binding import area_label_world, evaluate_area_binding
+from .angle_binding import resolve_angle_source
 from .constants import (
     DEFAULT_ARROW_SIZE,
     DEFAULT_HOVER_MARKER_SIZE,
@@ -16,83 +17,62 @@ from .constants import (
     DEFAULT_SELECTION_PIXEL_THRESHOLD,
     DEFAULT_TEXT_SIZE,
 )
+from .dimension_geometry import (
+    get_angle_world_geometry,
+    get_dimension_world_geometry,
+    get_measure_world_points,
+    get_offset_basis,
+    sanitize_plane_normal,
+)
 from .properties import is_dimension_object, is_guide_object
 from .snapping import construction_segment_world, find_nearest_guide_point, guide_is_visible, guide_segment_world
-from .units import format_length, format_volume
+from .scene_sync import register_scene_sync, unregister_scene_sync
+from .units import format_area, format_length, format_volume
 from .volume import (
     VOLUME_APPROXIMATE,
-    clear_volume_cache,
     get_mesh_volume,
-    invalidate_volume_cache_from_depsgraph,
+)
+from .viewport_state import (
+    clear_all_states,
+    clear_state,
+    get_state,
+    set_state,
+    tag_redraw_all_view3d,
 )
 
 
 _pixel_draw_handler = None
 _world_draw_handler = None
-_preview_state = None
-_measure_state = None
-_guide_preview_state = None
-_location_sync_active = False
-_location_sync_scheduled = False
-_AXIS_CANDIDATES = (
-    Vector((1.0, 0.0, 0.0)),
-    Vector((0.0, 1.0, 0.0)),
-    Vector((0.0, 0.0, 1.0)),
-)
-
-
-def tag_redraw_all_view3d():
-    for window in bpy.context.window_manager.windows:
-        screen = window.screen
-        if screen is None:
-            continue
-
-        for area in screen.areas:
-            if area.type == "VIEW_3D":
-                area.tag_redraw()
 
 
 def set_preview_state(preview_state):
-    global _preview_state
-    _preview_state = preview_state
-    tag_redraw_all_view3d()
+    set_state("DIMENSION", preview_state)
 
 
 def clear_preview_state():
-    global _preview_state
-    _preview_state = None
-    tag_redraw_all_view3d()
+    clear_state("DIMENSION")
 
 
 def set_measure_state(state):
-    global _measure_state
-    _measure_state = state
-    tag_redraw_all_view3d()
+    set_state("MEASURE", state)
 
 
 def clear_measure_state():
-    global _measure_state
-    _measure_state = None
-    tag_redraw_all_view3d()
+    clear_state("MEASURE")
 
 
 def set_guide_preview_state(state):
-    global _guide_preview_state
-    _guide_preview_state = state
-    tag_redraw_all_view3d()
+    set_state("GUIDE", state)
 
 
 def clear_guide_preview_state():
-    global _guide_preview_state
-    _guide_preview_state = None
-    tag_redraw_all_view3d()
+    clear_state("GUIDE")
 
 
 def register_draw_handler():
     global _pixel_draw_handler, _world_draw_handler
 
-    if _dimension_location_sync_handler not in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.append(_dimension_location_sync_handler)
+    register_scene_sync()
 
     if _world_draw_handler is None:
         _world_draw_handler = bpy.types.SpaceView3D.draw_handler_add(
@@ -109,22 +89,13 @@ def register_draw_handler():
             "WINDOW",
             "POST_PIXEL",
         )
-    schedule_dimension_location_sync()
 
 
 def unregister_draw_handler():
-    global _pixel_draw_handler, _world_draw_handler, _location_sync_scheduled, _preview_state, _measure_state, _guide_preview_state
+    global _pixel_draw_handler, _world_draw_handler
 
-    if _dimension_location_sync_handler in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(_dimension_location_sync_handler)
-
-    if bpy.app.timers.is_registered(_run_scheduled_location_sync):
-        bpy.app.timers.unregister(_run_scheduled_location_sync)
-    _location_sync_scheduled = False
-    _preview_state = None
-    _measure_state = None
-    _guide_preview_state = None
-    clear_volume_cache()
+    unregister_scene_sync()
+    clear_all_states()
 
     if _pixel_draw_handler is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_pixel_draw_handler, "WINDOW")
@@ -135,192 +106,16 @@ def unregister_draw_handler():
         _world_draw_handler = None
 
 
-def schedule_dimension_location_sync():
-    global _location_sync_scheduled
-
-    if _location_sync_scheduled:
-        return
-
-    _location_sync_scheduled = True
-    bpy.app.timers.register(_run_scheduled_location_sync, first_interval=0.0)
-
-
-def _run_scheduled_location_sync():
-    global _location_sync_scheduled
-    _location_sync_scheduled = False
-
-    scene = getattr(bpy.context, "scene", None)
-    if scene is not None:
-        sync_dimension_object_locations(scene)
-
-    return None
-
-
-@persistent
-def _dimension_location_sync_handler(scene, depsgraph):
-    invalidate_volume_cache_from_depsgraph(depsgraph)
-    sync_dimension_object_locations(scene)
-
-
-def sync_dimension_object_locations(scene):
-    global _location_sync_active
-
-    if _location_sync_active or scene is None:
-        return
-
-    _location_sync_active = True
-    try:
-        remove_orphan_measurement_snap_proxies(scene)
-        for obj in list(scene.objects):
-            if is_guide_object(obj):
-                start_world, _status = resolve_anchor(obj.guide_props.start)
-                target_world = start_world
-                if getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT":
-                    end_world, _end_status = resolve_anchor(obj.guide_props.end)
-                    if start_world is not None and end_world is not None:
-                        target_world = (start_world + end_world) * 0.5
-                if target_world is not None and (obj.matrix_world.translation - target_world).length > 1e-6:
-                    matrix_world = obj.matrix_world.copy()
-                    matrix_world.translation = target_world
-                    obj.matrix_world = matrix_world
-                if getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT":
-                    ensure_measurement_snap_proxy(obj, scene)
-                continue
-            if not is_dimension_object(obj):
-                continue
-
-            props = obj.dimension_props
-            start_world, _start_status = resolve_anchor(props.start)
-            end_world, _end_status = resolve_anchor(props.end)
-            if start_world is None or end_world is None:
-                continue
-
-            geometry = get_dimension_world_geometry(
-                props.dimension_type,
-                start_world,
-                end_world,
-                Vector(props.offset_plane_normal),
-                props.offset_distance,
-                props.offset_angle,
-            )
-            if geometry is None:
-                continue
-
-            target_world = geometry["line_mid_world"]
-            if (obj.matrix_world.translation - target_world).length <= 1e-6:
-                continue
-
-            matrix_world = obj.matrix_world.copy()
-            matrix_world.translation = target_world
-            obj.matrix_world = matrix_world
-    finally:
-        _location_sync_active = False
-
-
-def get_measure_world_points(_extension_axis, start_world, end_world):
-    return start_world, end_world, (end_world - start_world).length
-
-
-def get_dimension_world_geometry(
-    dimension_type,
-    start_world,
-    end_world,
-    plane_normal,
-    offset_distance,
-    offset_angle=0.0,
-):
-    measure_start_world, measure_end_world, value = get_measure_world_points(
-        dimension_type,
-        start_world,
-        end_world,
-    )
-
-    measure_vector = measure_end_world - measure_start_world
-    if measure_vector.length < 1e-6:
-        return None
-
-    measure_direction = measure_vector.normalized()
-    stable_plane_normal, offset_direction = get_offset_basis(
-        dimension_type,
-        measure_direction,
-        plane_normal,
-    )
-
-    if abs(offset_angle) >= 1e-6:
-        offset_rotation = Quaternion(measure_direction, offset_angle)
-        offset_direction = offset_rotation @ offset_direction
-        stable_plane_normal = measure_direction.cross(offset_direction).normalized()
-
-    if offset_direction.length < 1e-6:
-        return None
-
-    offset_direction.normalize()
-    offset_vector = offset_direction * offset_distance
-
-    line_start_world = measure_start_world + offset_vector
-    line_end_world = measure_end_world + offset_vector
-
-    return {
-        "measure_start_world": measure_start_world,
-        "measure_end_world": measure_end_world,
-        "measure_direction_world": measure_direction,
-        "plane_normal_world": stable_plane_normal,
-        "offset_direction_world": offset_direction,
-        "offset_distance": offset_distance,
-        "offset_angle": offset_angle,
-        "line_start_world": line_start_world,
-        "line_end_world": line_end_world,
-        "line_mid_world": (line_start_world + line_end_world) * 0.5,
-        "value": value,
-    }
-
-
-def get_offset_basis(extension_axis, measure_direction, plane_normal):
-    stable_plane_normal = _sanitize_plane_normal(measure_direction, plane_normal)
-    preferred_offset_direction = stable_plane_normal.cross(measure_direction)
-    axis_directions = {
-        "X": Vector((1.0, 0.0, 0.0)),
-        "Y": Vector((0.0, 1.0, 0.0)),
-        "Z": Vector((0.0, 0.0, 1.0)),
-    }
-
-    candidates = []
-    for axis_name, axis_direction in axis_directions.items():
-        perpendicular_axis = axis_direction - measure_direction * axis_direction.dot(measure_direction)
-        if perpendicular_axis.length >= 1e-6:
-            candidates.append((axis_name, perpendicular_axis.normalized()))
-
-    if not candidates:
-        return stable_plane_normal, preferred_offset_direction
-
-    if extension_axis in axis_directions:
-        matching_candidate = next(
-            (candidate for name, candidate in candidates if name == extension_axis),
-            None,
-        )
-    else:
-        matching_candidate = None
-
-    if matching_candidate is None:
-        preferred_direction = preferred_offset_direction.normalized()
-        _axis_name, matching_candidate = max(
-            candidates,
-            key=lambda item: abs(item[1].dot(preferred_direction)),
-        )
-        if matching_candidate.dot(preferred_direction) < 0.0:
-            matching_candidate.negate()
-
-    offset_direction = matching_candidate
-    stable_plane_normal = measure_direction.cross(offset_direction).normalized()
-
-    return stable_plane_normal, offset_direction
-
-
 def build_dimension_geometry_for_object(context, dimension_object):
     props = dimension_object.dimension_props
 
-    start_world, start_status = resolve_anchor(props.start)
-    end_world, end_status = resolve_anchor(props.end)
+    if getattr(props, "annotation_kind", "LINEAR") == "AREA":
+        return _build_area_geometry(context, props)
+    if getattr(props, "annotation_kind", "LINEAR") == "ANGLE":
+        return _build_angle_geometry(context, props)
+
+    start_world = resolve_anchor(props.start)
+    end_world = resolve_anchor(props.end)
     if start_world is None or end_world is None:
         return None
 
@@ -331,9 +126,16 @@ def build_dimension_geometry_for_object(context, dimension_object):
         Vector(props.offset_plane_normal),
         props.offset_distance,
         props.offset_angle,
+        props.measurement_mode,
     )
     if world_geometry is None:
         return None
+
+    placement_offset = Vector(props.presentation_offset)
+    if placement_offset.length_squared > 1e-12:
+        world_geometry = dict(world_geometry)
+        for key in ("line_start_world", "line_end_world", "line_mid_world"):
+            world_geometry[key] = world_geometry[key] + placement_offset
 
     screen_geometry = _project_dimension_geometry(
         context,
@@ -346,8 +148,7 @@ def build_dimension_geometry_for_object(context, dimension_object):
 
     screen_geometry["value"] = world_geometry["value"]
     screen_geometry["dimension_type"] = props.dimension_type
-    screen_geometry["start_status"] = start_status
-    screen_geometry["end_status"] = end_status
+    screen_geometry["measurement_mode"] = props.measurement_mode
     scene_settings = getattr(context.scene, "dimensions_settings", None)
     screen_geometry["precision"] = (
         scene_settings.precision if scene_settings is not None else DEFAULT_PRECISION
@@ -360,7 +161,113 @@ def build_dimension_geometry_for_object(context, dimension_object):
     screen_geometry["arrow_size"] = props.arrow_size
     screen_geometry["custom_text"] = props.custom_text.strip()
     screen_geometry["custom_text_position"] = props.custom_text_position
+    screen_geometry["value_prefix"] = props.value_prefix
+    screen_geometry["value_suffix"] = props.value_suffix
+    screen_geometry["tolerance_mode"] = props.tolerance_mode
+    screen_geometry["tolerance_upper"] = props.tolerance_upper
+    screen_geometry["tolerance_lower"] = props.tolerance_lower
     return screen_geometry
+
+
+def _annotation_style(context, props, geometry):
+    settings = getattr(context.scene, "dimensions_settings", None)
+    geometry["precision"] = settings.precision if settings is not None else DEFAULT_PRECISION
+    geometry["line_width"] = props.line_width
+    geometry["text_size"] = props.text_size
+    geometry["custom_text"] = props.custom_text.strip()
+    geometry["value_prefix"] = props.value_prefix
+    geometry["value_suffix"] = props.value_suffix
+    return geometry
+
+
+def _build_area_geometry(context, props):
+    result = evaluate_area_binding(props) if props.measurement_state != "CAPTURED" else None
+    if result is not None:
+        start_world = result["center"]
+        value = result["area"]
+        face_count = result["face_count"]
+        state = "LIVE"
+        props.area_value = value
+        props.area_face_count = face_count
+        if props.measurement_state != "LIVE":
+            props.measurement_state = "LIVE"
+    else:
+        start_world = resolve_anchor(props.start)
+        value = props.area_value
+        face_count = props.area_face_count
+        state = props.measurement_state
+        if state != "CAPTURED" and len(props.area_faces) > 0:
+            state = "NEEDS_REPAIR"
+            if props.measurement_state != state:
+                props.measurement_state = state
+    fallback_end = resolve_anchor(props.end)
+    end_world = area_label_world(props, start_world, fallback_end) + Vector(props.presentation_offset)
+    start_screen = _project_world_to_screen(context, start_world)
+    end_screen = _project_world_to_screen(context, end_world)
+    if start_screen is None or end_screen is None:
+        return None
+    return _annotation_style(context, props, {
+        "annotation_kind": "AREA",
+        "leader_start_screen": start_screen,
+        "leader_end_screen": end_screen,
+        "line_mid_screen": (start_screen + end_screen) * 0.5,
+        "value": value,
+        "measurement_state": state,
+        "face_count": face_count,
+    })
+
+
+def _build_angle_geometry(context, props):
+    source = resolve_angle_source(props)
+    if source is None:
+        return None
+    placement_offset = Vector(props.presentation_offset)
+    start_world = source["start"] + placement_offset
+    center_world = source["center"] + placement_offset
+    end_world = source["end"] + placement_offset
+    start_screen = _project_world_to_screen(context, start_world)
+    center_screen = _project_world_to_screen(context, center_world)
+    end_screen = _project_world_to_screen(context, end_world)
+    if start_screen is None or center_screen is None or end_screen is None:
+        return None
+    world_geometry = get_angle_world_geometry(
+        start_world,
+        center_world,
+        end_world,
+        props.angle_radius,
+        source["arc_mode"],
+    )
+    if world_geometry is None:
+        return _annotation_style(context, props, {
+            "annotation_kind": "ANGLE",
+            "center_screen": center_screen,
+            "start_screen": start_screen,
+            "end_screen": end_screen,
+            "arc_points": [],
+            "line_mid_screen": center_screen + Vector((18.0, 18.0)),
+            "label_position": center_screen + Vector((18.0, 18.0)),
+            "value": 0.0,
+            "invalid": True,
+            "measurement_state": "NEEDS_REPAIR",
+            "angle_mode": props.angle_mode,
+        })
+    label_position = _project_world_to_screen(context, world_geometry["label_world"])
+    arc_points = [_project_world_to_screen(context, point) for point in world_geometry["arc_points_world"]]
+    if start_screen is None or center_screen is None or end_screen is None or label_position is None or any(point is None for point in arc_points):
+        return None
+    return _annotation_style(context, props, {
+        "annotation_kind": "ANGLE",
+        "center_screen": center_screen,
+        "start_screen": start_screen,
+        "end_screen": end_screen,
+        "arc_points": arc_points,
+        "line_mid_screen": label_position,
+        "label_position": label_position,
+        "value": world_geometry["value"],
+        "measurement_state": props.measurement_state,
+        "angle_mode": props.angle_mode,
+        "connected": source.get("connected", True),
+    })
 
 
 def draw_dimensions():
@@ -375,6 +282,9 @@ def draw_dimensions():
     if context.region_data is None:
         return
 
+    preview_state = get_state("DIMENSION", context)
+    guide_preview_state = get_state("GUIDE", context)
+    measure_state = get_state("MEASURE", context)
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
     gpu.state.blend_set("ALPHA")
     gpu.state.line_width_set(DEFAULT_LINE_WIDTH)
@@ -392,22 +302,19 @@ def draw_dimensions():
             if geometry is None:
                 continue
 
-            if geometry["start_status"] != "LINKED" or geometry["end_status"] != "LINKED":
-                color = (1.0, 0.18, 0.08, 1.0)
-            else:
-                color = props.selected_color if obj.select_get() else props.color
+            color = props.selected_color if obj.select_get() else props.color
             _draw_dimension_geometry(context, shader, geometry, color, geometry["precision"])
 
-        if _preview_state is not None:
-            _draw_preview(context, shader, _preview_state)
+        if preview_state is not None:
+            _draw_preview(context, shader, preview_state)
 
-        if _guide_preview_state is not None:
-            _draw_guide_preview_marker(shader, _guide_preview_state)
+        if guide_preview_state is not None:
+            _draw_guide_preview_marker(shader, guide_preview_state)
 
-        if _measure_state is not None:
-            _draw_transient_measure(context, shader, _measure_state)
+        if measure_state is not None:
+            _draw_transient_measure(context, shader, measure_state)
 
-        for interaction_state in (_preview_state, _guide_preview_state, _measure_state):
+        for interaction_state in (preview_state, guide_preview_state, measure_state):
             if interaction_state is not None:
                 _draw_interaction_status(interaction_state)
 
@@ -431,17 +338,20 @@ def draw_world_guides():
     if context.region_data is None:
         return
 
+    preview_state = get_state("DIMENSION", context)
+    guide_preview_state = get_state("GUIDE", context)
+    measure_state = get_state("MEASURE", context)
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
     gpu.state.blend_set("ALPHA")
 
     try:
         _draw_construction_guides(context, shader)
         _draw_tool_snap_highlights(context, shader)
-        for interaction_state in (_preview_state, _guide_preview_state, _measure_state):
+        for interaction_state in (preview_state, guide_preview_state, measure_state):
             if interaction_state is not None:
                 _draw_axis_gesture(context, shader, interaction_state)
-        if _guide_preview_state is not None:
-            _draw_guide_preview_world(context, shader, _guide_preview_state)
+        if guide_preview_state is not None:
+            _draw_guide_preview_world(context, shader, guide_preview_state)
     finally:
         gpu.state.line_width_set(1.0)
         gpu.state.blend_set("NONE")
@@ -541,7 +451,11 @@ def _draw_axis_gesture(context, shader, state):
 def _draw_tool_snap_highlights(context, shader):
     locked_color = (0.10, 0.72, 1.0, 0.9)
     hover_color = (1.0, 0.58, 0.06, 1.0)
-    for state in (_preview_state, _guide_preview_state, _measure_state):
+    for state in (
+        get_state("DIMENSION", context),
+        get_state("GUIDE", context),
+        get_state("MEASURE", context),
+    ):
         if state is None:
             continue
         for snap in state.get("locked_snaps", ()):
@@ -862,7 +776,13 @@ def _draw_persistent_measurements(context):
 
 
 def _draw_dimension_geometry(context, shader, geometry, color, precision):
-    label = format_length(context, geometry["value"], precision)
+    if geometry.get("annotation_kind") == "AREA":
+        _draw_area_geometry(context, shader, geometry, color, precision)
+        return
+    if geometry.get("annotation_kind") == "ANGLE":
+        _draw_angle_geometry(shader, geometry, color, precision)
+        return
+    label = _format_linear_dimension_label(context, geometry, precision)
     text_layout = _build_text_layout(
         label,
         geometry,
@@ -892,14 +812,48 @@ def _draw_dimension_geometry(context, shader, geometry, color, precision):
     text_size = geometry.get("text_size", DEFAULT_TEXT_SIZE)
     for text, position in text_layout["text_items"]:
         _draw_text(text, position, color, text_size)
-    broken = []
-    if geometry.get("start_status") != "LINKED":
-        broken.append(f"Start: {geometry.get('start_status', 'Unknown').replace('_', ' ').title()}")
-    if geometry.get("end_status") != "LINKED":
-        broken.append(f"End: {geometry.get('end_status', 'Unknown').replace('_', ' ').title()}")
-    if broken:
-        warning_position = geometry["line_mid_screen"] + Vector((0.0, -(text_size + 10.0)))
-        _draw_text(" | ".join(broken), warning_position, (1.0, 0.18, 0.08, 1.0), text_size)
+
+
+def _draw_area_geometry(context, shader, geometry, color, precision):
+    start = geometry["leader_start_screen"]
+    end = geometry["leader_end_screen"]
+    gpu.state.line_width_set(geometry.get("line_width", DEFAULT_LINE_WIDTH))
+    batch = batch_for_shader(shader, "LINES", {"pos": [start, end]})
+    shader.bind()
+    shader.uniform_float("color", color)
+    batch.draw(shader)
+    _draw_marker(shader, start, color)
+    state = geometry.get("measurement_state", "CAPTURED")
+    state_suffix = "" if state == "LIVE" else ("  [Captured]" if state == "CAPTURED" else "  [Needs Repair]")
+    face_suffix = f"  ({geometry.get('face_count', 0)} faces)" if geometry.get("face_count", 0) > 1 else ""
+    value = f"{geometry.get('value_prefix', '')}{format_area(context, geometry['value'], precision)}{geometry.get('value_suffix', '')}"
+    label = f"Area {value}{face_suffix}{state_suffix}"
+    custom_text = geometry.get("custom_text", "")
+    if custom_text:
+        label = f"{custom_text}  {label}"
+    _draw_text_left(label, end + Vector((6.0, 2.0)), color, geometry.get("text_size", DEFAULT_TEXT_SIZE))
+
+
+def _draw_angle_geometry(shader, geometry, color, precision):
+    center = geometry["center_screen"]
+    points = [center, geometry["start_screen"], center, geometry["end_screen"]]
+    arc = geometry["arc_points"]
+    for start, end in zip(arc, arc[1:]):
+        points.extend((start, end))
+    gpu.state.line_width_set(geometry.get("line_width", DEFAULT_LINE_WIDTH))
+    batch = batch_for_shader(shader, "LINES", {"pos": points})
+    shader.bind()
+    shader.uniform_float("color", color)
+    batch.draw(shader)
+    label = (
+        "Angle [Needs Repair]"
+        if geometry.get("invalid")
+        else f"{geometry.get('value_prefix', '')}{degrees(geometry['value']):.{max(0, min(precision, 3))}f}\u00b0{geometry.get('value_suffix', '')}"
+    )
+    custom_text = geometry.get("custom_text", "")
+    if custom_text:
+        label = f"{custom_text}  {label}"
+    _draw_text(label, geometry["label_position"], color, geometry.get("text_size", DEFAULT_TEXT_SIZE))
 
 
 def _draw_preview(context, shader, preview_state):
@@ -909,6 +863,50 @@ def _draw_preview(context, shader, preview_state):
 
     start_world = preview_state.get("start_world")
     end_world = preview_state.get("end_world")
+    if preview_state.get("annotation_kind") == "AREA":
+        if start_world is None or end_world is None:
+            return
+        start_screen = _project_world_to_screen(context, start_world)
+        end_screen = _project_world_to_screen(context, end_world)
+        if start_screen is None or end_screen is None:
+            return
+        _draw_area_geometry(context, shader, {
+            "leader_start_screen": start_screen,
+            "leader_end_screen": end_screen,
+            "value": preview_state.get("area_value", 0.0),
+            "face_count": preview_state.get("face_count", 0),
+            "measurement_state": "LIVE",
+            "line_width": DEFAULT_LINE_WIDTH,
+            "text_size": DEFAULT_TEXT_SIZE,
+        }, (1.0, 0.48, 0.20, 1.0), DEFAULT_PRECISION)
+        return
+    if preview_state.get("annotation_kind") == "ANGLE":
+        center_world = preview_state.get("center_world")
+        if start_world is None or center_world is None or end_world is None:
+            return
+        world_geometry = get_angle_world_geometry(
+            Vector(start_world),
+            Vector(center_world),
+            Vector(end_world),
+            preview_state.get("angle_radius", 0.25),
+            preview_state.get("angle_mode", "MINOR"),
+        )
+        if world_geometry is None:
+            return
+        geometry = {
+            "center_screen": _project_world_to_screen(context, center_world),
+            "start_screen": _project_world_to_screen(context, start_world),
+            "end_screen": _project_world_to_screen(context, end_world),
+            "arc_points": [_project_world_to_screen(context, point) for point in world_geometry["arc_points_world"]],
+            "label_position": _project_world_to_screen(context, world_geometry["label_world"]),
+            "value": world_geometry["value"],
+            "line_width": DEFAULT_LINE_WIDTH,
+            "text_size": DEFAULT_TEXT_SIZE,
+        }
+        if any(value is None for value in (geometry["center_screen"], geometry["start_screen"], geometry["end_screen"], geometry["label_position"])) or any(point is None for point in geometry["arc_points"]):
+            return
+        _draw_angle_geometry(shader, geometry, (1.0, 0.48, 0.20, 1.0), DEFAULT_PRECISION)
+        return
     if start_world is None or end_world is None:
         return
 
@@ -916,9 +914,10 @@ def _draw_preview(context, shader, preview_state):
     offset_distance = preview_state.get("offset_distance", 0.0)
     offset_angle = preview_state.get("offset_angle", 0.0)
     dimension_type = preview_state.get("dimension_type", "ALIGNED")
+    measurement_mode = preview_state.get("measurement_mode", "TRUE")
 
     if plane_normal is None:
-        plane_normal = _sanitize_plane_normal(
+        plane_normal = sanitize_plane_normal(
             (end_world - start_world).normalized() if (end_world - start_world).length > 1e-6 else Vector((1.0, 0.0, 0.0)),
             Vector((0.0, 0.0, 1.0)),
         )
@@ -930,6 +929,7 @@ def _draw_preview(context, shader, preview_state):
         Vector(plane_normal),
         offset_distance,
         offset_angle,
+        measurement_mode,
     )
     if world_geometry is None:
         return
@@ -1108,15 +1108,6 @@ def _project_dimension_geometry(context, anchor_start_world, anchor_end_world, w
     }
 
 
-def _sanitize_plane_normal(measure_direction, plane_normal):
-    candidate = plane_normal.normalized() if plane_normal.length > 1e-6 else Vector((0.0, 0.0, 1.0))
-    if abs(candidate.dot(measure_direction)) < 0.98:
-        return candidate
-
-    fallback = min(_AXIS_CANDIDATES, key=lambda axis: abs(axis.dot(measure_direction)))
-    return fallback.normalized()
-
-
 def _build_arrow_segments(point, direction, arrow_scale=DEFAULT_ARROW_SIZE):
     perpendicular = Vector((-direction.y, direction.x))
     left = point + (direction * arrow_scale) + (perpendicular * arrow_scale * 0.45)
@@ -1263,17 +1254,17 @@ def _draw_text(text, position, color, text_size=DEFAULT_TEXT_SIZE):
     blf.draw(font_id, text)
 
 
-def _draw_text_left(text, position, color):
+def _draw_text_left(text, position, color, text_size=DEFAULT_TEXT_SIZE):
     font_id = 0
-    blf.size(font_id, DEFAULT_TEXT_SIZE)
+    blf.size(font_id, text_size)
     blf.color(font_id, *color)
     blf.position(font_id, position.x, position.y, 0)
     blf.draw(font_id, text)
 
 
-def _draw_text_right(text, position, color):
+def _draw_text_right(text, position, color, text_size=DEFAULT_TEXT_SIZE):
     font_id = 0
-    blf.size(font_id, DEFAULT_TEXT_SIZE)
+    blf.size(font_id, text_size)
     text_width, _text_height = blf.dimensions(font_id, text)
     blf.color(font_id, *color)
     blf.position(font_id, position.x - text_width, position.y, 0)
@@ -1289,7 +1280,25 @@ def _project_world_to_screen(context, world_co):
 
 
 def _geometry_hit_distance(context, geometry, precision, mouse):
-    label = format_length(context, geometry["value"], precision)
+    if geometry.get("annotation_kind") == "AREA":
+        label = f"Area {format_area(context, geometry['value'], precision)}"
+        return min(
+            _point_to_segment_distance(mouse, geometry["leader_start_screen"], geometry["leader_end_screen"]),
+            _point_to_label_distance(label, geometry["leader_end_screen"] + Vector((6.0, 2.0)), mouse, geometry.get("text_size", DEFAULT_TEXT_SIZE)),
+        )
+    if geometry.get("annotation_kind") == "ANGLE":
+        segments = [(geometry["center_screen"], geometry["start_screen"]), (geometry["center_screen"], geometry["end_screen"])]
+        segments.extend(zip(geometry["arc_points"], geometry["arc_points"][1:]))
+        label = (
+            "Angle [Needs Repair]"
+            if geometry.get("invalid")
+            else f"{degrees(geometry['value']):.{max(0, min(precision, 3))}f}\u00b0"
+        )
+        return min(
+            min(_point_to_segment_distance(mouse, start, end) for start, end in segments),
+            _point_to_label_distance(label, geometry["label_position"], mouse, geometry.get("text_size", DEFAULT_TEXT_SIZE)),
+        )
+    label = _format_linear_dimension_label(context, geometry, precision)
     text_layout = _build_text_layout(
         label,
         geometry,
@@ -1321,6 +1330,19 @@ def _geometry_hit_distance(context, geometry, precision, mouse):
         best_distance = min(best_distance, label_distance)
 
     return best_distance
+
+
+def _format_linear_dimension_label(context, geometry, precision):
+    value = format_length(context, geometry["value"], precision)
+    label = f"{geometry.get('value_prefix', '')}{value}{geometry.get('value_suffix', '')}"
+    tolerance_mode = geometry.get("tolerance_mode", "NONE")
+    upper = geometry.get("tolerance_upper", 0.0)
+    lower = geometry.get("tolerance_lower", 0.0)
+    if tolerance_mode == "SYMMETRIC" and upper > 0.0:
+        label += f" \u00b1{format_length(context, upper, precision)}"
+    elif tolerance_mode == "DEVIATION" and (upper > 0.0 or lower > 0.0):
+        label += f" +{format_length(context, upper, precision)} / -{format_length(context, lower, precision)}"
+    return label
 
 
 def _object_visible_in_viewport(context, obj):

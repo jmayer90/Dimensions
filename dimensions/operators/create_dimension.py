@@ -20,11 +20,13 @@ from ..interaction import (
 )
 from ..snapping import copy_snap, find_nearest_snap_point, get_mouse_ray, has_view3d_window_region
 from ..units import parse_distance_input
+from .selection_annotations import create_dimension_from_selected_edge
 
 
 class CADDIM_OT_CreateDimension(bpy.types.Operator):
     bl_idname = "dimensions.create_dimension"
     bl_label = "Create Dimension"
+    bl_description = "Create from one selected Edit Mode edge, or interactively pick two points"
     bl_options = {"REGISTER", "UNDO"}
 
     def invoke(self, context, event):
@@ -32,9 +34,15 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             self.report({"ERROR"}, "Run this operator from a 3D View")
             return {"CANCELLED"}
 
-        if context.mode != "OBJECT":
-            self.report({"ERROR"}, "Dimensions currently works only in Object Mode")
+        if context.mode not in {"OBJECT", "EDIT_MESH"}:
+            self.report({"ERROR"}, "Dimensions work in Object Mode or Mesh Edit Mode")
             return {"CANCELLED"}
+
+        if context.mode == "EDIT_MESH":
+            dimension = create_dimension_from_selected_edge(context)
+            if dimension is not None:
+                self.report({"INFO"}, "Created dimension from selected edge")
+                return {"FINISHED"}
 
         self.state = "PICK_START"
         self.hover_snap = None
@@ -415,11 +423,11 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         else:
             dimension_object.location = (self.start_snap["world_co"] + self.end_snap["world_co"]) * 0.5
 
-        for selected_object in context.selected_objects:
-            selected_object.select_set(False)
-
-        dimension_object.select_set(True)
-        context.view_layer.objects.active = dimension_object
+        if context.mode == "OBJECT":
+            for selected_object in context.selected_objects:
+                selected_object.select_set(False)
+            dimension_object.select_set(True)
+            context.view_layer.objects.active = dimension_object
 
         self.report({"INFO"}, "Created dimension")
         return True

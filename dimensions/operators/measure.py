@@ -23,8 +23,8 @@ class CADDIM_OT_Measure(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def invoke(self, context, event):
-        if context.area is None or context.area.type != "VIEW_3D" or context.mode != "OBJECT":
-            self.report({"ERROR"}, "Measure works in Object Mode from a 3D View")
+        if context.area is None or context.area.type != "VIEW_3D" or context.mode not in {"OBJECT", "EDIT_MESH"}:
+            self.report({"ERROR"}, "Measure works in Object Mode or Mesh Edit Mode from a 3D View")
             return {"CANCELLED"}
 
         self.state = "PICK_START"
@@ -159,10 +159,11 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         set_world_anchor(obj.guide_props.end, self.end_world)
         obj.location = (self.start_world + self.end_world) * 0.5
         ensure_measurement_snap_proxy(obj, context.scene)
-        for selected in context.selected_objects:
-            selected.select_set(False)
-        obj.select_set(True)
-        context.view_layer.objects.active = obj
+        if context.mode == "OBJECT":
+            for selected in context.selected_objects:
+                selected.select_set(False)
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
         clear_measure_state()
         self.report({"INFO"}, "Created persistent measurement")
         return {"FINISHED"}

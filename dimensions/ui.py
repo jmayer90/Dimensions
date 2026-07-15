@@ -1,9 +1,8 @@
 import bpy
 
-from .anchors import resolve_anchor
 from .constants import SIDEBAR_CATEGORY
 from .properties import is_dimension_object
-from .units import get_configured_unit_style
+from .units import format_area, format_length, get_configured_unit_style
 
 
 class CADDIM_PT_PanelBase:
@@ -17,15 +16,32 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_idname = "CADDIM_PT_main_panel"
 
     def draw(self, context):
-        object_tools = self.layout.column()
-        object_tools.enabled = context.mode == "OBJECT"
-        object_tools.operator("dimensions.create_dimension", icon="DRIVER_DISTANCE")
-        row = object_tools.row(align=True)
-        row.operator("dimensions.measure", icon="DRIVER_DISTANCE")
-        row.operator("dimensions.create_guide", icon="EMPTY_AXIS")
-        line_row = self.layout.row()
-        line_row.enabled = context.mode == "EDIT_MESH"
-        line_row.operator("dimensions.create_line", icon="MESH_DATA")
+        annotation_tools = self.layout.column()
+        annotation_tools.enabled = context.mode in {"OBJECT", "EDIT_MESH"}
+        annotation_tools.operator("dimensions.create_dimension", icon="DRIVER_DISTANCE")
+        annotation_tools.operator("dimensions.create_angle", icon="DRIVER_ROTATIONAL_DIFFERENCE")
+        annotation_tools.operator("dimensions.create_area", icon="FACESEL")
+        annotation_tools.operator("dimensions.measure", icon="DRIVER_DISTANCE")
+        guide_row = self.layout.row()
+        guide_row.enabled = context.mode == "OBJECT"
+        guide_row.operator("dimensions.create_guide", icon="EMPTY_AXIS")
+        if context.mode == "EDIT_MESH":
+            selection_box = self.layout.box()
+            selection_box.label(text="From Mesh Selection")
+            selection_box.operator(
+                "dimensions.dimension_selected_edge",
+                icon="DRIVER_DISTANCE",
+            )
+            selection_box.operator(
+                "dimensions.angle_selected_edges",
+                icon="DRIVER_ROTATIONAL_DIFFERENCE",
+            )
+            selection_box.operator("dimensions.create_area", text="Area from Selected Faces", icon="FACESEL")
+            selection_box.operator(
+                "dimensions.rebind_area_from_selection",
+                text="Apply Faces to Selected Area",
+                icon="FILE_REFRESH",
+            )
 
 
 class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
@@ -124,12 +140,57 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
         layout.use_property_decorate = False
         layout.label(text="Changes below affect only this dimension.")
         layout.prop(active_object, "name", text="Name")
-        layout.prop(props, "dimension_type")
-        layout.prop(props, "offset_distance")
-        layout.prop(props, "offset_angle")
+        annotation_kind = getattr(props, "annotation_kind", "LINEAR")
+        layout.label(text=f"Kind: {annotation_kind.title()}")
+        if annotation_kind == "LINEAR":
+            layout.prop(props, "measurement_mode")
+            layout.prop(props, "dimension_type")
+            layout.prop(props, "offset_distance")
+            layout.prop(props, "offset_angle")
+        elif annotation_kind == "AREA":
+            precision = context.scene.dimensions_settings.precision
+            layout.label(text=f"Measured Area: {format_area(context, props.area_value, precision)}")
+            layout.label(text=f"State: {props.measurement_state.replace('_', ' ').title()}")
+            source_name = props.area_source_object.name if props.area_source_object is not None else "Missing"
+            layout.label(text=f"Source: {source_name}")
+            if props.area_face_count:
+                layout.label(text=f"Bound Faces: {props.area_face_count}")
+            axis_label = "Aligned" if props.dimension_type == "ALIGNED" else f"{props.dimension_type} Axis"
+            precision = context.scene.dimensions_settings.precision
+            layout.label(text=f"Placement: {axis_label}, {format_length(context, props.offset_distance, precision)}")
+            area_actions = layout.row(align=True)
+            area_actions.operator("dimensions.move_area_label", text="Move Label", icon="ORIENTATION_CURSOR")
+            remake = area_actions.operator("dimensions.create_area", text="Remake Area", icon="FILE_REFRESH")
+            remake.replace_active = True
+            area_source_actions = layout.row(align=True)
+            area_source_actions.operator("dimensions.select_area_source", text="Select Source Faces", icon="RESTRICT_SELECT_OFF")
+            area_source_actions.operator("dimensions.capture_area", text="Capture", icon="REC")
+        elif annotation_kind == "ANGLE":
+            layout.prop(props, "angle_radius")
+            layout.prop(props, "angle_mode")
+            layout.label(text=f"State: {props.measurement_state.replace('_', ' ').title()}")
+            layout.label(text="Source: Two Edges" if props.angle_source_mode == "EDGES" else "Source: Legacy Three Point")
+            if props.angle_source_mode == "EDGES":
+                edge_actions = layout.row(align=True)
+                replace_a = edge_actions.operator("dimensions.replace_angle_edge", text="Replace Edge A", icon="EYEDROPPER")
+                replace_a.edge_slot = "A"
+                replace_b = edge_actions.operator("dimensions.replace_angle_edge", text="Replace Edge B", icon="EYEDROPPER")
+                replace_b.edge_slot = "B"
+            remake = layout.operator("dimensions.create_angle", text="Remake Angle", icon="FILE_REFRESH")
+            remake.replace_active = True
         layout.prop(props, "custom_text")
         if props.custom_text:
             layout.prop(props, "custom_text_position")
+        value_text = layout.row(align=True)
+        value_text.prop(props, "value_prefix", text="Prefix")
+        value_text.prop(props, "value_suffix", text="Suffix")
+        if annotation_kind == "LINEAR":
+            layout.prop(props, "tolerance_mode")
+            if props.tolerance_mode == "SYMMETRIC":
+                layout.prop(props, "tolerance_upper", text="Plus / Minus")
+            elif props.tolerance_mode == "DEVIATION":
+                layout.prop(props, "tolerance_upper")
+                layout.prop(props, "tolerance_lower")
         layout.prop(props, "visible")
 
         style_box = layout.box()
@@ -143,11 +204,11 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
         style_actions.operator("dimensions.reset_style_to_global", icon="LOOP_BACK")
         style_actions.operator("dimensions.copy_style_to_global", icon="DUPLICATE")
 
+        if annotation_kind in {"AREA", "ANGLE"}:
+            return
+
         start_box = layout.box()
         start_box.label(text="Start Anchor")
-        _start_world, start_status = resolve_anchor(props.start)
-        if start_status != "LINKED":
-            start_box.label(text=start_status.replace("_", " ").title(), icon="ERROR")
         start_box.prop(props.start, "target_object", text="Object")
         start_row = start_box.row(align=True)
         start_row.label(text="Anchor")
@@ -160,9 +221,6 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
 
         end_box = layout.box()
         end_box.label(text="End Anchor")
-        _end_world, end_status = resolve_anchor(props.end)
-        if end_status != "LINKED":
-            end_box.label(text=end_status.replace("_", " ").title(), icon="ERROR")
         end_box.prop(props.end, "target_object", text="Object")
         end_row = end_box.row(align=True)
         end_row.label(text="Anchor")
@@ -172,6 +230,7 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
             icon="EYEDROPPER",
         )
         end_pick.anchor_name = "END"
+
 
 
 class CADDIM_PT_ConstructionGuides(CADDIM_PT_PanelBase, bpy.types.Panel):
@@ -203,7 +262,9 @@ def _vertex_picker_text(anchor):
     if anchor.vertex_index < 0:
         return "Pick Vertex"
 
-    return str(anchor.vertex_index)
+    if getattr(anchor, "vertex_id", 0) > 0:
+        return f"ID {anchor.vertex_id}"
+    return f"Legacy Vertex {anchor.vertex_index}"
 
 
 classes = (

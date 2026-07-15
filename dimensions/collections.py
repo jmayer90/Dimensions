@@ -105,20 +105,25 @@ def ensure_measurement_snap_proxy(measurement_object, scene=None):
     ):
         return None
 
-    start_world, _start_status = resolve_anchor(measurement_object.guide_props.start)
-    end_world, _end_status = resolve_anchor(measurement_object.guide_props.end)
+    start_world = resolve_anchor(measurement_object.guide_props.start)
+    end_world = resolve_anchor(measurement_object.guide_props.end)
     if start_world is None or end_world is None or (end_world - start_world).length < 1e-6:
         return None
 
-    proxy = next(
-        (
-            child
-            for child in measurement_object.children
-            if child.get(MEASUREMENT_SNAP_PROXY_FLAG, False)
-        ),
-        None,
-    )
-    if proxy is None or proxy.type != "MESH":
+    flagged_children = [
+        child
+        for child in measurement_object.children
+        if child.get(MEASUREMENT_SNAP_PROXY_FLAG, False)
+    ]
+    proxy = next((child for child in flagged_children if child.type == "MESH"), None)
+    for duplicate in flagged_children:
+        if duplicate == proxy:
+            continue
+        duplicate_mesh = duplicate.data if duplicate.type == "MESH" else None
+        bpy.data.objects.remove(duplicate, do_unlink=True)
+        if duplicate_mesh is not None and duplicate_mesh.users == 0:
+            bpy.data.meshes.remove(duplicate_mesh)
+    if proxy is None:
         mesh = bpy.data.meshes.new(f"{measurement_object.name} Snap Targets")
         proxy = bpy.data.objects.new(f"{measurement_object.name} Snap Targets", mesh)
         for collection in measurement_object.users_collection:
@@ -130,6 +135,8 @@ def ensure_measurement_snap_proxy(measurement_object, scene=None):
         proxy.hide_select = True
         proxy.display_type = "WIRE"
         proxy.show_in_front = True
+    elif proxy.data.users > 1:
+        proxy.data = proxy.data.copy()
 
     if (proxy.matrix_world.translation - measurement_object.matrix_world.translation).length > 1e-6:
         proxy.matrix_world = measurement_object.matrix_world.copy()
@@ -184,6 +191,7 @@ def remove_orphan_measurement_snap_proxies(scene):
         parent = obj.parent
         if (
             parent is not None
+            and obj.type == "MESH"
             and hasattr(parent, "guide_props")
             and parent.guide_props.enabled
             and getattr(parent.guide_props, "kind", "GUIDE") == "MEASUREMENT"

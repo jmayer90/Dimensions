@@ -14,26 +14,50 @@ CLASSES = (
     *operator_classes,
     *ui_classes,
 )
+_registered_classes = []
+_registered_components = []
+
+
+_COMPONENTS = (
+    (register_properties, unregister_properties),
+    (register_tools, unregister_tools),
+    (register_draw_handler, unregister_draw_handler),
+    (register_click_select, unregister_click_select),
+)
 
 
 def register():
-    for cls in CLASSES:
-        bpy.utils.register_class(cls)
-
-    register_properties()
-    register_tools()
-    register_draw_handler()
-    register_click_select()
+    if _registered_classes or _registered_components:
+        return
+    try:
+        for cls in CLASSES:
+            bpy.utils.register_class(cls)
+            _registered_classes.append(cls)
+        for component_register, component_unregister in _COMPONENTS:
+            _registered_components.append(component_unregister)
+            component_register()
+    except Exception:
+        _rollback_registration()
+        raise
 
 
 def unregister():
-    unregister_click_select()
-    unregister_draw_handler()
-    unregister_tools()
-    unregister_properties()
+    _rollback_registration()
 
-    for cls in reversed(CLASSES):
-        bpy.utils.unregister_class(cls)
+
+def _rollback_registration():
+    while _registered_components:
+        component_unregister = _registered_components.pop()
+        try:
+            component_unregister()
+        except (ReferenceError, RuntimeError):
+            pass
+    while _registered_classes:
+        cls = _registered_classes.pop()
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

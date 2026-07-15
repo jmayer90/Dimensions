@@ -153,6 +153,45 @@ def format_volume(context, value, precision=3):
     return _format_blender_volume(context, value, precision)
 
 
+def format_area(context, value, precision=3):
+    settings = get_display_settings(context)
+    style = get_configured_unit_style(context) if settings is not None else "BLENDER"
+    if style == "AUTO":
+        style = infer_unit_style(context)
+    square_meters = value * (context.scene.unit_settings.scale_length or 1.0) ** 2
+    if style == "METRIC_AUTO":
+        magnitude = abs(square_meters)
+        if magnitude >= 1.0:
+            return f"{square_meters:.{precision}f} m\u00b2"
+        if magnitude >= 1e-4:
+            return f"{square_meters * 1e4:.{precision}f} cm\u00b2"
+        return f"{square_meters * 1e6:.{precision}f} mm\u00b2"
+    metric_units = {
+        "MILLIMETERS": (1e6, "mm\u00b2"),
+        "CENTIMETERS": (1e4, "cm\u00b2"),
+        "METERS": (1.0, "m\u00b2"),
+    }
+    if style in metric_units:
+        multiplier, suffix = metric_units[style]
+        return f"{square_meters * multiplier:.{precision}f} {suffix}"
+    square_inches = square_meters / (0.0254 ** 2)
+    if style == "FEET_INCHES" and abs(square_inches) >= 144.0:
+        return f"{square_inches / 144.0:.{precision}f} ft\u00b2"
+    if style in {"FEET_INCHES", "INCH_DECIMAL", "INCH_FRACTION"}:
+        return f"{square_inches:.{precision}f} in\u00b2"
+    try:
+        unit_settings = context.scene.unit_settings
+        return bpy.utils.units.to_string(
+            unit_settings.system,
+            "AREA",
+            square_meters if unit_settings.system in {"METRIC", "IMPERIAL"} else value,
+            precision=precision,
+            split_unit=False,
+        )
+    except Exception:
+        return f"{value:.{precision}f} BU\u00b2"
+
+
 def _format_blender_units(context, value, precision):
     try:
         unit_settings = context.scene.unit_settings

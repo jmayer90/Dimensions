@@ -15,6 +15,7 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
         name="Anchor",
         items=[
             ("START", "Start", "Reattach the start anchor"),
+            ("CENTER", "Center", "Reattach the angle vertex anchor"),
             ("END", "End", "Reattach the end anchor"),
         ],
     )
@@ -85,16 +86,20 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
         if self.anchor_name == "START":
             return self.dimension_object.dimension_props.start
 
+        if self.anchor_name == "CENTER":
+            return self.dimension_object.dimension_props.center
+
         return self.dimension_object.dimension_props.end
 
     def _update_preview(self):
         props = self.dimension_object.dimension_props
-        start_world, _ = resolve_anchor(props.start)
-        end_world, _ = resolve_anchor(props.end)
+        start_world = resolve_anchor(props.start)
+        end_world = resolve_anchor(props.end)
 
         preview = {
             "state": f"REATTACH_{self.anchor_name}",
             "dimension_type": props.dimension_type,
+            "measurement_mode": props.measurement_mode,
             "offset_distance": props.offset_distance,
             "offset_angle": props.offset_angle,
             "offset_plane_normal": tuple(props.offset_plane_normal),
@@ -108,6 +113,9 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
 
         if self.anchor_name == "START":
             preview["start_world"] = self.hover_snap["world_co"] if self.hover_snap is not None else start_world
+            preview["end_world"] = end_world
+        elif self.anchor_name == "CENTER":
+            preview["start_world"] = start_world
             preview["end_world"] = end_world
         else:
             preview["start_world"] = start_world

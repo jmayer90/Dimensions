@@ -1,0 +1,24 @@
+name: Validate Blender Extension
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  blender-5-1:
+    runs-on: windows-latest
+    env:
+      BLENDER_VERSION: 5.1.2
+      BLENDER_DIR: C:\blender
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Blender
+        shell: powershell
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "blender.zip"
+          Invoke-WebRequest "https://download.blender.org/release/Blender5.1/blender-$env:BLENDER_VERSION-windows-x64.zip" -OutFile $archive
+          Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP
+          Move-Item (Join-Path $env:RUNNER_TEMP "blender-$env:BLENDER_VERSION-windows-x64") $env:BLENDER_DIR
+      - name: Validate
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File scripts\validate.ps1 -Blender "$env:BLENDER_DIR\blender.exe"

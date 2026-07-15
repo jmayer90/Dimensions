@@ -7,6 +7,7 @@ from mathutils import Vector
 from .constants import DEFAULT_SNAP_PIXEL_THRESHOLD
 from .anchors import resolve_anchor
 from .collections import MEASUREMENT_SNAP_PROXY_FLAG
+from .projected_snap import nearest_visible_projected_vertex
 from .properties import is_guide_object
 
 
@@ -545,25 +546,26 @@ def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold):
     if not has_view3d_window_region(context):
         return None
 
+    if context.mode != "EDIT_MESH" or context.edit_object is None:
+        return nearest_visible_projected_vertex(
+            context,
+            mouse_x,
+            mouse_y,
+            pixel_threshold,
+            excluded_flag=MEASUREMENT_SNAP_PROXY_FLAG,
+        )
+
     mouse = Vector((mouse_x, mouse_y))
     best = None
-    if context.mode == "EDIT_MESH" and context.edit_object is not None:
-        import bmesh
+    import bmesh
 
-        objects_and_vertices = [(context.edit_object, bmesh.from_edit_mesh(context.edit_object.data).verts)]
-    else:
-        objects_and_vertices = [
-            (obj, obj.data.vertices)
-            for obj in getattr(context, "visible_objects", ())
-            if obj.type == "MESH" and not obj.get(MEASUREMENT_SNAP_PROXY_FLAG, False)
-        ]
+    objects_and_vertices = [(context.edit_object, bmesh.from_edit_mesh(context.edit_object.data).verts)]
 
     for obj, vertices in objects_and_vertices:
-        if context.mode == "EDIT_MESH":
-            vertices.ensure_lookup_table()
-            vertices.index_update()
+        vertices.ensure_lookup_table()
+        vertices.index_update()
         for vertex in vertices:
-            if context.mode == "EDIT_MESH" and vertex.hide:
+            if vertex.hide:
                 continue
             world_co = obj.matrix_world @ vertex.co
             screen_co = view3d_utils.location_3d_to_region_2d(
@@ -829,7 +831,7 @@ def guide_line_world(guide_object):
     if getattr(guide_object.guide_props, "kind", "GUIDE") == "MEASUREMENT":
         return None
 
-    start_world, _start_status = resolve_anchor(guide_object.guide_props.start)
+    start_world = resolve_anchor(guide_object.guide_props.start)
     if start_world is None:
         return None
 
@@ -841,7 +843,7 @@ def guide_line_world(guide_object):
     elif axis == "Z":
         direction = Vector((0.0, 0.0, 1.0))
     else:
-        end_world, _end_status = resolve_anchor(guide_object.guide_props.end)
+        end_world = resolve_anchor(guide_object.guide_props.end)
         if end_world is None:
             return None
         direction = end_world - start_world
@@ -865,8 +867,8 @@ def guide_segment_world(guide_object, extent=10000.0):
 
 
 def construction_segment_world(construction_object):
-    start_world, _start_status = resolve_anchor(construction_object.guide_props.start)
-    end_world, _end_status = resolve_anchor(construction_object.guide_props.end)
+    start_world = resolve_anchor(construction_object.guide_props.start)
+    end_world = resolve_anchor(construction_object.guide_props.end)
     if start_world is None or end_world is None:
         return None
     if (end_world - start_world).length < 1e-6:

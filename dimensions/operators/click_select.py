@@ -1,6 +1,7 @@
 import bpy
 
 from ..drawing import find_dimension_hit, find_guide_hit
+from ..viewport_state import prune_stale_states
 
 
 _click_select_timer_active = False
@@ -29,6 +30,7 @@ def _ensure_click_select_running():
     if not _click_select_timer_active:
         return None
 
+    prune_stale_states()
     for window in bpy.context.window_manager.windows:
         screen = window.screen
         if screen is None:

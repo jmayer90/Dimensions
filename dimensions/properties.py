@@ -43,12 +43,28 @@ def clamp_anchor_vertex_index(anchor):
 
 def update_anchor_target_object(anchor, _context):
     clamp_anchor_vertex_index(anchor)
+    _refresh_anchor_vertex_id(anchor)
     _schedule_dimension_location_sync()
 
 
 def update_anchor_vertex_index(anchor, _context):
     clamp_anchor_vertex_index(anchor)
+    _refresh_anchor_vertex_id(anchor)
     _schedule_dimension_location_sync()
+
+
+def _refresh_anchor_vertex_id(anchor):
+    if getattr(anchor, "anchor_type", "VERTEX") != "VERTEX":
+        anchor.vertex_id = 0
+        return
+    obj = anchor.target_object
+    vertex_index = anchor.vertex_index
+    if obj is None or obj.type != "MESH" or not (0 <= vertex_index < len(obj.data.vertices)):
+        anchor.vertex_id = 0
+        return
+    from .anchors import ensure_object_vertex_id
+
+    anchor.vertex_id = ensure_object_vertex_id(obj, vertex_index)
 
 
 def update_dimension_display(_dimension, context):
@@ -64,9 +80,9 @@ def update_dimension_display(_dimension, context):
 
 def _schedule_dimension_location_sync():
     try:
-        from .drawing import schedule_dimension_location_sync
+        from .scene_sync import schedule_scene_sync
 
-        schedule_dimension_location_sync()
+        schedule_scene_sync()
     except (ImportError, RuntimeError):
         pass
 
@@ -95,6 +111,14 @@ class CADDIM_PG_Anchor(bpy.types.PropertyGroup):
         update=update_anchor_vertex_index,
     )
 
+    vertex_id: bpy.props.IntProperty(
+        name="Persistent Vertex ID",
+        description="Stable mesh attribute ID used to survive vertex reindexing",
+        default=0,
+        min=0,
+        options={"HIDDEN"},
+    )
+
     fallback_local_co: bpy.props.FloatVectorProperty(
         name="Fallback Local Coordinate",
         size=3,
@@ -109,21 +133,33 @@ class CADDIM_PG_Anchor(bpy.types.PropertyGroup):
         default=(0.0, 0.0, 0.0),
     )
 
-    status: bpy.props.EnumProperty(
-        name="Status",
-        items=[
-            ("LINKED", "Linked", "The anchor is linked to a valid base-mesh vertex"),
-            ("DETACHED", "Detached", "The anchor fell back to its stored local coordinate"),
-            ("MISSING_OBJECT", "Missing Object", "The anchor's target object no longer exists"),
-        ],
-        default="LINKED",
-    )
 
+class CADDIM_PG_AreaFaceBinding(bpy.types.PropertyGroup):
+    face_id: bpy.props.IntProperty(name="Persistent Face ID", default=0, min=0)
+    fallback_center: bpy.props.FloatVectorProperty(name="Fallback Center", size=3, subtype="XYZ")
+    fallback_normal: bpy.props.FloatVectorProperty(
+        name="Fallback Normal",
+        size=3,
+        subtype="XYZ",
+        default=(0.0, 0.0, 1.0),
+    )
+    fallback_area: bpy.props.FloatProperty(name="Fallback Area", default=0.0, min=0.0)
+    vertex_count: bpy.props.IntProperty(name="Vertex Count", default=0, min=0)
 
 class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(
         name="Enabled",
         default=False,
+    )
+
+    annotation_kind: bpy.props.EnumProperty(
+        name="Annotation Type",
+        items=[
+            ("LINEAR", "Linear", "Distance between two points"),
+            ("AREA", "Area", "Live or captured area of a bound face set"),
+            ("ANGLE", "Angle", "Live direction angle between two persistent edges"),
+        ],
+        default="LINEAR",
     )
 
     start: bpy.props.PointerProperty(
@@ -132,6 +168,118 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
 
     end: bpy.props.PointerProperty(
         type=CADDIM_PG_Anchor,
+    )
+
+    center: bpy.props.PointerProperty(
+        type=CADDIM_PG_Anchor,
+    )
+
+    angle_a_start: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
+    angle_a_end: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
+    angle_b_start: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
+    angle_b_end: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
+
+    angle_source_mode: bpy.props.EnumProperty(
+        name="Angle Source",
+        items=[
+            ("THREE_POINT", "Legacy Three Point", "Angle defined by three point anchors"),
+            ("EDGES", "Two Edges", "Angle follows two persistent mesh edges"),
+        ],
+        default="THREE_POINT",
+        options={"HIDDEN"},
+    )
+
+    presentation_offset: bpy.props.FloatVectorProperty(
+        name="Placement Offset",
+        description="User translation applied to the source-derived annotation placement",
+        size=3,
+        subtype="TRANSLATION",
+        default=(0.0, 0.0, 0.0),
+        update=update_dimension_display,
+    )
+
+    canonical_location: bpy.props.FloatVectorProperty(
+        name="Canonical Placement",
+        size=3,
+        subtype="XYZ",
+        default=(0.0, 0.0, 0.0),
+        options={"HIDDEN"},
+    )
+
+    placement_initialized: bpy.props.BoolProperty(
+        name="Placement Initialized",
+        default=False,
+        options={"HIDDEN"},
+    )
+
+    area_value: bpy.props.FloatProperty(
+        name="Area",
+        default=0.0,
+        min=0.0,
+        options={"HIDDEN"},
+    )
+
+    measurement_state: bpy.props.EnumProperty(
+        name="Measurement State",
+        items=[
+            ("LIVE", "Live", "Value updates from its bound source geometry"),
+            ("CAPTURED", "Captured", "Value is an intentional fixed snapshot"),
+            ("NEEDS_REPAIR", "Needs Repair", "Source geometry is missing or ambiguous"),
+        ],
+        default="LIVE",
+        update=update_dimension_display,
+    )
+
+    area_source_object: bpy.props.PointerProperty(
+        name="Area Source",
+        type=bpy.types.Object,
+        poll=poll_mesh_objects,
+        update=update_dimension_display,
+    )
+
+    area_faces: bpy.props.CollectionProperty(type=CADDIM_PG_AreaFaceBinding)
+
+    area_face_count: bpy.props.IntProperty(
+        name="Face Count",
+        default=0,
+        min=0,
+        options={"HIDDEN"},
+    )
+
+    area_label_direction: bpy.props.FloatVectorProperty(
+        name="Area Label Direction",
+        description="Persistent world direction from the live Area center to its canonical label",
+        size=3,
+        subtype="DIRECTION",
+        default=(1.0, 0.0, 0.0),
+        options={"HIDDEN"},
+    )
+
+    area_placement_locked: bpy.props.BoolProperty(
+        name="Constrained Area Placement",
+        default=False,
+        options={"HIDDEN"},
+    )
+
+    angle_radius: bpy.props.FloatProperty(
+        name="Arc Radius",
+        description="World-space radius of the angle arc",
+        default=0.25,
+        min=0.001,
+        soft_max=10.0,
+        subtype="DISTANCE",
+        update=update_dimension_display,
+    )
+
+    angle_mode: bpy.props.EnumProperty(
+        name="Angle",
+        items=[
+            ("MINOR", "Minor", "Show the smaller angle between the rays"),
+            ("SUPPLEMENT", "Supplement", "Show the supplementary angle"),
+            ("REFLEX", "Reflex", "Show the reflex angle around the opposite side"),
+        ],
+        default="MINOR",
+        update=update_dimension_display,
     )
 
     dimension_type: bpy.props.EnumProperty(
@@ -143,6 +291,18 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
             ("Z", "Z Axis", "Extend the dimension along the global Z axis"),
         ],
         default="ALIGNED",
+        update=update_dimension_display,
+    )
+
+    measurement_mode: bpy.props.EnumProperty(
+        name="Measured Distance",
+        items=[
+            ("TRUE", "True / Aligned", "Measure the true distance between the anchors"),
+            ("DELTA_X", "X Projection", "Measure only the global X component"),
+            ("DELTA_Y", "Y Projection", "Measure only the global Y component"),
+            ("DELTA_Z", "Z Projection", "Measure only the global Z component"),
+        ],
+        default="TRUE",
         update=update_dimension_display,
     )
 
@@ -236,6 +396,47 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
             ("BELOW", "Below Value", "Display custom text below the measured value"),
         ],
         default="ABOVE",
+        update=update_dimension_display,
+    )
+
+    value_prefix: bpy.props.StringProperty(
+        name="Value Prefix",
+        description="Text placed immediately before the formatted measurement",
+        default="",
+        update=update_dimension_display,
+    )
+
+    value_suffix: bpy.props.StringProperty(
+        name="Value Suffix",
+        description="Text placed immediately after the formatted measurement",
+        default="",
+        update=update_dimension_display,
+    )
+
+    tolerance_mode: bpy.props.EnumProperty(
+        name="Tolerance",
+        items=[
+            ("NONE", "None", "Do not display a tolerance"),
+            ("SYMMETRIC", "Plus / Minus", "Display one symmetric plus/minus tolerance"),
+            ("DEVIATION", "Upper / Lower", "Display independent upper and lower deviations"),
+        ],
+        default="NONE",
+        update=update_dimension_display,
+    )
+
+    tolerance_upper: bpy.props.FloatProperty(
+        name="Upper Tolerance",
+        default=0.0,
+        min=0.0,
+        subtype="DISTANCE",
+        update=update_dimension_display,
+    )
+
+    tolerance_lower: bpy.props.FloatProperty(
+        name="Lower Tolerance",
+        default=0.0,
+        min=0.0,
+        subtype="DISTANCE",
         update=update_dimension_display,
     )
 
@@ -525,6 +726,7 @@ def unregister_properties():
 
 classes = (
     CADDIM_PG_Anchor,
+    CADDIM_PG_AreaFaceBinding,
     CADDIM_PG_Dimension,
     CADDIM_PG_Guide,
     CADDIM_PG_SceneSettings,

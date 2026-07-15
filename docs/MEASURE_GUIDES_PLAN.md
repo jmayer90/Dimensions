@@ -9,7 +9,7 @@ This document tracks two persistent but deliberately distinct construction workf
 
 ### Persistent Measure
 
-- [x] Object Mode toolbar tool.
+- [x] Object Mode and Mesh Edit Mode toolbar tool.
 - [x] Snap the start and end to visible mesh vertices, edge projections, edge midpoints, face centers, face points, construction guides, or free-space points.
 - [x] Live line and formatted distance while choosing the end.
 - [x] `A` for aligned distance and `X`, `Y`, or `Z` for a global-axis projection.
@@ -37,7 +37,7 @@ This document tracks two persistent but deliberately distinct construction workf
 
 ## Interaction model
 
-1. Select **Measure** or **Add Construction Guide** from the Object Mode toolbar.
+1. Select **Measure** in Object or Mesh Edit Mode, or **Add Construction Guide** from the Object Mode toolbar.
 2. Click a highlighted vertex for the start.
 3. Move to a second vertex; press `A`, `X`, `Y`, or `Z` at any time to change the constraint.
 4. Optionally type a distance such as `5"`, `125mm`, or `2ft`.

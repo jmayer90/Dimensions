@@ -1,14 +1,19 @@
 schema_version = "1.0.0"
 
 id = "dimensions"
-version = "0.1.2"
+version = "0.3.0"
 name = "Dimensions"
-tagline = "Precision dimensions, guides, measures, and mesh lines"
+tagline = "Precision dimensions, guides, and measurements"
 maintainer = "Joseph Mayer"
 type = "add-on"
 
-blender_version_min = "4.2.0"
+blender_version_min = "5.1.0"
 
 license = [
   "SPDX:GPL-3.0-or-later",
+]
+
+paths_exclude_pattern = [
+  "__pycache__/",
+  "*.py[cod]",
 ]

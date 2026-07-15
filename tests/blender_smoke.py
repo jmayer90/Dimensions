@@ -14,13 +14,17 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 import dimensions
 from dimensions.collections import (
+    create_dimension_object,
     create_guide_object,
     create_measurement_object,
     ensure_measurement_snap_proxy,
     get_or_create_dimension_collection,
     get_or_create_guide_collection,
 )
-from dimensions.anchors import resolve_anchor, set_anchor_from_snap, set_world_anchor
+from dimensions.anchors import resolve_anchor, set_anchor, set_anchor_from_snap, set_world_anchor
+from dimensions.area_binding import bind_area_face_indices, evaluate_area_binding
+from dimensions.angle_binding import derive_angle_from_world_edges, resolve_angle_source
+from dimensions.dimension_geometry import get_angle_world_geometry
 from dimensions.drawing import _snap_highlight_geometry
 from dimensions.interaction import (
     axis_from_event,
@@ -30,8 +34,10 @@ from dimensions.interaction import (
     update_distance_text,
 )
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
+from dimensions.operators.create_area import _constrained_label_world
 from dimensions.operators.create_guide import CADDIM_OT_CreateGuide
-from dimensions.operators.create_line import CADDIM_OT_CreateLine
+from dimensions.projected_snap import _is_visible
+from dimensions.scene_sync import sync_scene_objects
 from dimensions.snapping import (
     _best_snap_candidate,
     _edit_mesh_projected_vertex_priority,
@@ -53,13 +59,7 @@ from dimensions.volume import (
     clear_volume_cache,
     get_mesh_volume,
 )
-
-
-def _line_operator_adapter():
-    return SimpleNamespace(
-        _get_or_create_bmesh_vertex=CADDIM_OT_CreateLine._get_or_create_bmesh_vertex,
-        _find_bmesh_vertex_at=CADDIM_OT_CreateLine._find_bmesh_vertex_at,
-    )
+from dimensions.viewport_state import clear_all_states, get_state, set_state
 
 
 def _world_snap(x, y=0.0, z=0.0):
@@ -210,37 +210,6 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
             unit_settings.system = previous_system
             unit_settings.scale_length = previous_scale
 
-    def test_mesh_line_axis_constraint_stays_on_a_sloped_face(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsSlopedFaceAxisSmoke",
-            [(-1.0, -1.0, -1.0), (1.0, -1.0, 1.0), (1.0, 1.0, 1.0), (-1.0, 1.0, -1.0)],
-            faces=[(0, 1, 2, 3)],
-        )
-        try:
-            hover = _vertex_snap(obj, 1.0, 1.0, 1.0)
-            hover["vertex_index"] = 2
-            hover["face_index"] = 0
-            operator = SimpleNamespace(
-                start_snap=_world_snap(-1.0, 0.0, -1.0),
-                hover_snap=hover,
-                axis="X",
-                distance_text="",
-                distance_input_valid=True,
-                _copy_snap=lambda snap: dict(snap),
-            )
-            effective = CADDIM_OT_CreateLine._effective_end_snap(operator, bpy.context)
-            self.assertEqual(effective["type"], "FACE")
-            self.assertLess((effective["world_co"] - Vector((1.0, 0.0, 1.0))).length, 1e-5)
-            bm = bmesh.from_edit_mesh(mesh)
-            self.assertTrue(
-                CADDIM_OT_CreateLine._point_in_face(
-                    bm.faces[0],
-                    obj.matrix_world.inverted_safe() @ effective["world_co"],
-                )
-            )
-        finally:
-            self._remove_edit_object(obj, mesh)
-
     def test_snap_highlight_geometry_resolves_vertex_edge_and_face(self):
         obj = self._make_object(
             "DimensionsHighlightSmoke",
@@ -279,9 +248,101 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
 
         target.location = (3.0, 4.0, 5.0)
         bpy.context.view_layer.update()
-        world, status = resolve_anchor(dimension.guide_props.start)
-        self.assertEqual(status, "LINKED")
+        world = resolve_anchor(dimension.guide_props.start)
         self.assertEqual(world, Vector((4.0, 4.0, 5.0)))
+
+    def test_vertex_anchor_uses_persistent_id_after_reindexing(self):
+        guide = create_guide_object(bpy.context, "DimensionsPersistentAnchorSmoke")
+        self.addCleanup(bpy.data.objects.remove, guide, do_unlink=True)
+        target = self._make_object(
+            "DimensionsPersistentAnchorTargetSmoke",
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)],
+        )
+        anchor = guide.guide_props.start
+        set_anchor(anchor, target, 1)
+        persistent_id = anchor.vertex_id
+        attribute = target.data.attributes["dimensions_anchor_id"]
+        attribute.data[1].value = 0
+        attribute.data[2].value = persistent_id
+
+        world = resolve_anchor(anchor)
+
+        self.assertEqual(world, Vector((2.0, 0.0, 0.0)))
+
+        attribute.data[1].value = persistent_id
+        world = resolve_anchor(anchor)
+        self.assertEqual(world, Vector((1.0, 0.0, 0.0)))
+
+    def test_transient_state_is_isolated_per_viewport(self):
+        from unittest.mock import patch
+
+        class Pointer:
+            def __init__(self, value):
+                self.value = value
+
+            def as_pointer(self):
+                return self.value
+
+        first = SimpleNamespace(window=Pointer(1), area=Pointer(2), region=Pointer(3))
+        second = SimpleNamespace(window=Pointer(1), area=Pointer(4), region=Pointer(5))
+        with patch("dimensions.viewport_state.tag_redraw_all_view3d"):
+            clear_all_states()
+            set_state("MEASURE", {"value": "first"}, first)
+            set_state("MEASURE", {"value": "second"}, second)
+            self.assertEqual(get_state("MEASURE", first)["value"], "first")
+            self.assertEqual(get_state("MEASURE", second)["value"], "second")
+            clear_all_states()
+
+    def test_projected_vertex_depth_check_rejects_occlusion(self):
+        from unittest.mock import patch
+
+        candidate = {
+            "screen_co": Vector((10.0, 20.0)),
+            "world_co": Vector((0.0, 0.0, 10.0)),
+        }
+        scene = SimpleNamespace(
+            ray_cast=lambda *_args, **_kwargs: (
+                True,
+                Vector((0.0, 0.0, 5.0)),
+                Vector((0.0, 0.0, 1.0)),
+                0,
+                None,
+                Matrix.Identity(4),
+            )
+        )
+        context = SimpleNamespace(
+            region=object(),
+            region_data=object(),
+            scene=scene,
+            evaluated_depsgraph_get=lambda: object(),
+        )
+        with (
+            patch("dimensions.projected_snap.view3d_utils.region_2d_to_origin_3d", return_value=Vector((0, 0, 0))),
+            patch("dimensions.projected_snap.view3d_utils.region_2d_to_vector_3d", return_value=Vector((0, 0, 1))),
+        ):
+            self.assertFalse(_is_visible(context, candidate))
+
+    def test_registration_failure_rolls_back_cleanly(self):
+        original_components = dimensions._COMPONENTS
+
+        def fail_registration():
+            raise RuntimeError("intentional registration failure")
+
+        dimensions.unregister()
+        try:
+            dimensions._COMPONENTS = (
+                original_components[0],
+                (fail_registration, lambda: None),
+                *original_components[1:],
+            )
+            with self.assertRaises(RuntimeError):
+                dimensions.register()
+            self.assertFalse(dimensions._registered_classes)
+            self.assertFalse(dimensions._registered_components)
+            self.assertFalse(hasattr(bpy.types.Object, "dimension_props"))
+        finally:
+            dimensions._COMPONENTS = original_components
+            dimensions.register()
 
     def test_open_mesh_volume_is_unavailable(self):
         obj = self._make_object(
@@ -367,635 +428,238 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         self.assertIsNot(first_dimensions, second_dimensions)
         self.assertIsNot(first_guides, second_guides)
 
-    def test_chained_segments_share_the_committed_endpoint(self):
-        obj, mesh = self._make_edit_object("DimensionsChainSmoke", [])
-        try:
-            operator = _line_operator_adapter()
-            junction_index = CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _world_snap(0.0),
-                _world_snap(1.0),
-            )
-            CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _world_snap(1.0),
-                _world_snap(2.0),
-                start_vertex_index=junction_index,
-            )
 
-            bm = bmesh.from_edit_mesh(mesh)
-            self.assertEqual(len(bm.verts), 3)
-            self.assertEqual(len(bm.edges), 2)
-            self.assertEqual(sum(1 for vertex in bm.verts if len(vertex.link_edges) == 2), 1)
-        finally:
-            self._remove_edit_object(obj, mesh)
-
-    def test_edge_to_edge_segment_splits_a_face(self):
+    def test_edit_selection_creates_length_area_and_angle_annotations(self):
         obj, mesh = self._make_edit_object(
-            "DimensionsFaceCutSmoke",
-            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
+            "DimensionsSelectionAnnotationsSmoke",
+            [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
             faces=[(0, 1, 2, 3)],
         )
+        created = []
         try:
-            CADDIM_OT_CreateLine._create_edge(
-                _line_operator_adapter(),
-                bpy.context,
-                _edge_snap(obj, 0.5, 0.0),
-                _edge_snap(obj, 0.5, 1.0),
+            bm = bmesh.from_edit_mesh(mesh)
+            bm.verts.ensure_lookup_table()
+            bm.edges.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
+            for element in (*bm.verts, *bm.edges, *bm.faces):
+                element.select = False
+            bm.edges[0].select = True
+            invoke_context = SimpleNamespace(
+                area=SimpleNamespace(type="VIEW_3D"),
+                mode="EDIT_MESH",
+                edit_object=obj,
+                scene=bpy.context.scene,
+                region_data=None,
             )
-            CADDIM_OT_CreateLine._finalize_open_surface_path(
-                bpy.context,
-                [Vector((0.5, 0.0, 0.0)), Vector((0.5, 1.0, 0.0))],
+            operator = SimpleNamespace(report=lambda *_args: None)
+            self.assertEqual(
+                CADDIM_OT_CreateDimension.invoke(operator, invoke_context, None),
+                {"FINISHED"},
             )
+            created.append(next(obj for obj in bpy.data.objects if obj.name.startswith("DIM Selected Edge")))
+            self.assertEqual(created[-1].dimension_props.annotation_kind, "LINEAR")
+
+            bm.edges.ensure_lookup_table()
+            for edge in bm.edges:
+                edge.select = False
+            bm.edges[0].select = True
+            connected = next(edge for edge in bm.edges if edge != bm.edges[0] and set(edge.verts) & set(bm.edges[0].verts))
+            connected.select = True
+            self.assertEqual(bpy.ops.dimensions.angle_selected_edges(), {"FINISHED"})
+            created.append(next(obj for obj in bpy.data.objects if obj.name.startswith("ANGLE Selected Edges")))
+            self.assertEqual(created[-1].dimension_props.annotation_kind, "ANGLE")
+            self.assertEqual(created[-1].dimension_props.measurement_state, "LIVE")
+            self.assertEqual(created[-1].dimension_props.angle_source_mode, "EDGES")
+            self.assertGreater(created[-1].dimension_props.angle_radius, 0.0)
+
+            bm.edges.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
+            for edge in bm.edges:
+                edge.select = False
+            bm.faces[0].select = True
+            self.assertEqual(bpy.ops.dimensions.area_selected_faces(), {"FINISHED"})
+            created.append(next(obj for obj in bpy.data.objects if obj.name.startswith("AREA Selected Faces")))
+            self.assertEqual(created[-1].dimension_props.annotation_kind, "AREA")
+            self.assertAlmostEqual(created[-1].dimension_props.area_value, 2.0)
+            self.assertEqual(created[-1].dimension_props.measurement_state, "LIVE")
+            self.assertEqual(created[-1].dimension_props.area_face_count, 1)
+            self.assertEqual(len(created[-1].dimension_props.area_faces), 1)
 
             bm = bmesh.from_edit_mesh(mesh)
-            self.assertEqual(len(bm.verts), 6)
-            self.assertEqual(len(bm.edges), 7)
-            self.assertEqual(len(bm.faces), 2)
-        finally:
-            self._remove_edit_object(obj, mesh)
+            bm.verts.ensure_lookup_table()
+            bm.verts[2].co.y = 2.0
+            bm.verts[3].co.y = 2.0
+            bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+            result = evaluate_area_binding(created[-1].dimension_props)
+            self.assertIsNotNone(result)
+            self.assertAlmostEqual(result["area"], 4.0)
+            sync_scene_objects(bpy.context.scene)
+            self.assertAlmostEqual(created[-1].dimension_props.area_value, 4.0)
 
-    def test_face_interior_segment_does_not_create_a_vertex_fan(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsInteriorCutSmoke",
-            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
-        )
-        try:
-            CADDIM_OT_CreateLine._create_edge(
-                _line_operator_adapter(),
-                bpy.context,
-                _face_snap(obj, 0.25, 0.5),
-                _face_snap(obj, 0.75, 0.5),
-            )
-
-            bm = bmesh.from_edit_mesh(mesh)
-            self.assertEqual(len(bm.faces), 1)
-            for coordinate in (Vector((0.25, 0.5, 0.0)), Vector((0.75, 0.5, 0.0))):
-                vertex = CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, coordinate)
-                self.assertIsNotNone(vertex)
-                self.assertEqual(len(vertex.link_faces), 0)
-                self.assertEqual(len(vertex.link_edges), 1)
-        finally:
-            self._remove_edit_object(obj, mesh)
-
-    def test_face_membership_rejects_a_point_away_from_the_surface(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsFaceMembershipSmoke",
-            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
-        )
-        try:
             bm = bmesh.from_edit_mesh(mesh)
             bm.faces.ensure_lookup_table()
-            self.assertFalse(
-                CADDIM_OT_CreateLine._point_in_face(
-                    bm.faces[0],
-                    Vector((0.5, 0.5, 1.0)),
-                )
-            )
+            bmesh.ops.delete(bm, geom=[bm.faces[0]], context="FACES")
+            bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=True)
+            sync_scene_objects(bpy.context.scene)
+            self.assertEqual(created[-1].dimension_props.measurement_state, "NEEDS_REPAIR")
         finally:
+            for annotation in created:
+                bpy.data.objects.remove(annotation, do_unlink=True)
             self._remove_edit_object(obj, mesh)
 
-    def test_boundary_path_with_interior_point_cuts_without_a_fan(self):
+    def test_angle_geometry_is_world_space_and_supports_reflex_values(self):
+        start = Vector((2.0, 0.0, 0.0))
+        center = Vector((0.0, 0.0, 0.0))
+        end = Vector((0.0, 3.0, 0.0))
+        minor = get_angle_world_geometry(start, center, end, 0.75, "MINOR")
+        reflex = get_angle_world_geometry(start, center, end, 0.75, "REFLEX")
+
+        self.assertIsNotNone(minor)
+        self.assertAlmostEqual(minor["value"], 0.5 * 3.141592653589793)
+        self.assertAlmostEqual(reflex["value"], 1.5 * 3.141592653589793)
+        for point in (*minor["arc_points_world"], *reflex["arc_points_world"]):
+            self.assertAlmostEqual(point.z, 0.0)
+            self.assertAlmostEqual((point - center).length, 0.75, places=6)
+        self.assertLess((minor["arc_points_world"][-1] - end.normalized() * 0.75).length, 1e-6)
+        self.assertLess((reflex["arc_points_world"][-1] - end.normalized() * 0.75).length, 1e-6)
+
+    def test_two_edge_angles_support_disconnected_skew_and_supplement_solutions(self):
+        connected = derive_angle_from_world_edges(
+            Vector((0.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)),
+            Vector((0.0, 0.0, 0.0)), Vector((0.0, 3.0, 0.0)),
+        )
+        disconnected = derive_angle_from_world_edges(
+            Vector((-2.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)),
+            Vector((0.0, -2.0, 0.0)), Vector((0.0, 2.0, 0.0)),
+        )
+        skew = derive_angle_from_world_edges(
+            Vector((-2.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)),
+            Vector((0.0, -2.0, 1.0)), Vector((0.0, 2.0, 1.0)),
+        )
+        supplement = derive_angle_from_world_edges(
+            Vector((0.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)),
+            Vector((0.0, 0.0, 0.0)), Vector((1.0, 1.0, 0.0)),
+            "SUPPLEMENT",
+        )
+        self.assertTrue(connected["connected"])
+        self.assertFalse(disconnected["connected"])
+        self.assertFalse(skew["connected"])
+        self.assertEqual(disconnected["center"], Vector((0.0, 0.0, 0.0)))
+        self.assertAlmostEqual(skew["center"].z, 0.5)
+        self.assertAlmostEqual(supplement["value"], 3.0 * 3.141592653589793 / 4.0)
+
+    def test_disconnected_selected_edges_create_a_live_angle(self):
         obj, mesh = self._make_edit_object(
-            "DimensionsDeferredKnifeSmoke",
-            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
+            "DimensionsDisconnectedAngleSmoke",
+            [(-2.0, 0.0, 0.0), (2.0, 0.0, 0.0), (0.0, -2.0, 0.0), (0.0, 2.0, 0.0)],
+            edges=[(0, 1), (2, 3)],
         )
-        points = [Vector((0.5, 0.0, 0.0)), Vector((0.5, 0.5, 0.0)), Vector((0.5, 1.0, 0.0))]
+        annotation = None
         try:
-            operator = _line_operator_adapter()
-            center_index = CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _edge_snap(obj, *points[0]),
-                _face_snap(obj, *points[1]),
-            )
-            CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _vertex_snap(obj, *points[1]),
-                _edge_snap(obj, *points[2]),
-                start_vertex_index=center_index,
-            )
-            CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, points)
-
             bm = bmesh.from_edit_mesh(mesh)
-            center = CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, points[1])
-            self.assertEqual(len(bm.faces), 2)
-            self.assertIsNotNone(center)
-            self.assertEqual(len(center.link_edges), 2)
-            self.assertEqual(len(center.link_faces), 2)
+            for edge in bm.edges:
+                edge.select = True
+            self.assertEqual(bpy.ops.dimensions.angle_selected_edges(), {"FINISHED"})
+            annotation = next(obj for obj in bpy.data.objects if obj.name.startswith("ANGLE Selected Edges"))
+            source = resolve_angle_source(annotation.dimension_props)
+            self.assertIsNotNone(source)
+            self.assertFalse(source["connected"])
+            self.assertAlmostEqual(source["value"], 0.5 * 3.141592653589793)
+
+            bm.verts.ensure_lookup_table()
+            bm.verts[3].co.x = 2.0
+            bmesh.update_edit_mesh(mesh, loop_triangles=False, destructive=False)
+            source = resolve_angle_source(annotation.dimension_props)
+            self.assertIsNotNone(source)
+            self.assertNotAlmostEqual(source["value"], 0.5 * 3.141592653589793)
         finally:
+            if annotation is not None:
+                bpy.data.objects.remove(annotation, do_unlink=True)
             self._remove_edit_object(obj, mesh)
 
-    def test_path_returning_to_same_boundary_edge_splits_the_face(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsSameBoundaryEdgeSmoke",
-            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
+    def test_area_axis_distance_constraint_matches_linear_style_input(self):
+        center = Vector((1.0, 2.0, 3.0))
+        normal = Vector((0.0, 0.0, 1.0))
+        self.assertEqual(
+            _constrained_label_world(center, normal, Vector((-5.0, 8.0, 9.0)), "X", 2.5),
+            Vector((-1.5, 2.0, 3.0)),
         )
-        points = [
-            Vector((0.2, 0.0, 0.0)),
-            Vector((0.3, 0.45, 0.0)),
-            Vector((0.7, 0.65, 0.0)),
-            Vector((0.8, 0.0, 0.0)),
-        ]
+        aligned = _constrained_label_world(center, normal, center + Vector((3.0, 4.0, 0.0)), "ALIGNED", 10.0)
+        self.assertEqual(aligned, center + Vector((6.0, 8.0, 0.0)))
+
+    def test_annotation_transform_offset_survives_source_changes(self):
+        from dimensions.dimension_geometry import get_dimension_world_geometry
+
+        annotation = create_dimension_object(bpy.context, "DIM Transform Offset Smoke")
         try:
-            operator = _line_operator_adapter()
-            end_index = None
-            for index in range(len(points) - 1):
-                start_snap = (
-                    _edge_snap(obj, *points[index])
-                    if index == 0
-                    else _vertex_snap(obj, *points[index])
-                )
-                end_snap = (
-                    _edge_snap(obj, *points[index + 1])
-                    if index == len(points) - 2
-                    else _face_snap(obj, *points[index + 1])
-                )
-                end_index = CADDIM_OT_CreateLine._create_edge(
-                    operator,
-                    bpy.context,
-                    start_snap,
-                    end_snap,
-                    start_vertex_index=end_index,
-                )
+            props = annotation.dimension_props
+            props.annotation_kind = "LINEAR"
+            set_world_anchor(props.start, Vector((0.0, 0.0, 0.0)))
+            set_world_anchor(props.end, Vector((2.0, 0.0, 0.0)))
+            props.offset_plane_normal = (0.0, 0.0, 1.0)
+            props.offset_distance = 0.25
+            base = get_dimension_world_geometry("ALIGNED", Vector((0.0, 0.0, 0.0)), Vector((2.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0)), 0.25)
+            annotation.location = base["line_mid_world"]
+            sync_scene_objects(bpy.context.scene)
 
-            CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, points)
+            user_offset = Vector((0.0, 1.5, 0.75))
+            annotation.location += user_offset
+            sync_scene_objects(bpy.context.scene)
+            self.assertLess((Vector(props.presentation_offset) - user_offset).length, 1e-6)
 
-            bm = bmesh.from_edit_mesh(mesh)
-            self.assertEqual(len(bm.faces), 2)
-            self.assertTrue(
-                any(
-                    all(
-                        CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, point) in face.verts
-                        for point in points
-                    )
-                    for face in bm.faces
-                )
-            )
+            set_world_anchor(props.end, Vector((4.0, 0.0, 0.0)))
+            moved = get_dimension_world_geometry("ALIGNED", Vector((0.0, 0.0, 0.0)), Vector((4.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0)), 0.25)
+            sync_scene_objects(bpy.context.scene)
+            self.assertLess((annotation.location - (moved["line_mid_world"] + user_offset)).length, 1e-6)
         finally:
-            self._remove_edit_object(obj, mesh)
+            bpy.data.objects.remove(annotation, do_unlink=True)
 
-    def test_path_from_boundary_corner_back_to_its_edge_splits_the_face(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsCornerToBoundarySmoke",
-            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
+    def test_object_mode_area_binding_updates_after_geometry_changes(self):
+        mesh = bpy.data.meshes.new("DimensionsObjectAreaBindingMesh")
+        mesh.from_pydata(
+            [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
+            [],
+            [(0, 1, 2, 3)],
         )
-        points = [
-            Vector((0.0, 0.0, 0.0)),
-            Vector((0.35, 0.45, 0.0)),
-            Vector((0.7, 0.65, 0.0)),
-            Vector((0.8, 0.0, 0.0)),
-        ]
+        obj = bpy.data.objects.new("DimensionsObjectAreaBinding", mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        annotation = create_dimension_object(bpy.context, "AREA Object Binding Smoke")
         try:
-            operator = _line_operator_adapter()
-            end_index = None
-            for index in range(len(points) - 1):
-                start_snap = (
-                    _vertex_snap(obj, *points[index])
-                    if index == 0
-                    else _vertex_snap(obj, *points[index])
-                )
-                end_snap = (
-                    _edge_snap(obj, *points[index + 1])
-                    if index == len(points) - 2
-                    else _face_snap(obj, *points[index + 1])
-                )
-                end_index = CADDIM_OT_CreateLine._create_edge(
-                    operator,
-                    bpy.context,
-                    start_snap,
-                    end_snap,
-                    start_vertex_index=end_index,
-                )
+            props = annotation.dimension_props
+            props.annotation_kind = "AREA"
+            result = bind_area_face_indices(props, obj, [0])
+            self.assertIsNotNone(result)
+            self.assertAlmostEqual(result["area"], 2.0)
+            self.assertEqual(props.measurement_state, "LIVE")
 
-            CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, points)
-            bm = bmesh.from_edit_mesh(mesh)
-            self.assertEqual(len(bm.faces), 2)
+            mesh.vertices[2].co.y = 2.0
+            mesh.vertices[3].co.y = 2.0
+            mesh.update()
+            result = evaluate_area_binding(props)
+            self.assertIsNotNone(result)
+            self.assertAlmostEqual(result["area"], 4.0)
         finally:
-            self._remove_edit_object(obj, mesh)
+            bpy.data.objects.remove(annotation, do_unlink=True)
+            bpy.data.objects.remove(obj, do_unlink=True)
+            bpy.data.meshes.remove(mesh)
 
-    def test_path_across_a_nonplanar_visible_face_splits_the_face(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsNonplanarFaceSmoke",
-            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.2), (0.0, 1.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
+    def test_linear_dimensions_support_axis_projected_values(self):
+        from dimensions.dimension_geometry import get_dimension_world_geometry
+
+        start = Vector((1.0, 2.0, 3.0))
+        end = Vector((5.0, 8.0, 15.0))
+        geometry = get_dimension_world_geometry(
+            "ALIGNED",
+            start,
+            end,
+            Vector((0.0, 0.0, 1.0)),
+            0.25,
+            measurement_mode="DELTA_Y",
         )
-        points = [
-            Vector((0.2, 0.0, 0.0)),
-            Vector((0.5, 0.5, 0.1)),
-            Vector((0.8, 1.0, 0.16)),
-        ]
-        try:
-            operator = _line_operator_adapter()
-            center_index = CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _edge_snap(obj, *points[0]),
-                _face_snap(obj, *points[1]),
-            )
-            CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _vertex_snap(obj, *points[1]),
-                _edge_snap(obj, *points[2]),
-                start_vertex_index=center_index,
-            )
-
-            CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, points)
-            bm = bmesh.from_edit_mesh(mesh)
-            self.assertEqual(len(bm.faces), 2)
-        finally:
-            self._remove_edit_object(obj, mesh)
-
-    def test_closed_surface_path_creates_an_extrudable_inner_face(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsClosedFaceSmoke",
-            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
-        )
-        points = [
-            Vector((0.2, 0.2, 0.0)),
-            Vector((0.8, 0.2, 0.0)),
-            Vector((0.8, 0.8, 0.0)),
-            Vector((0.2, 0.8, 0.0)),
-            Vector((0.2, 0.2, 0.0)),
-        ]
-        try:
-            operator = _line_operator_adapter()
-            end_index = None
-            for index in range(len(points) - 1):
-                start_snap = (
-                    _face_snap(obj, *points[index])
-                    if index == 0
-                    else _vertex_snap(obj, *points[index])
-                )
-                end_snap = (
-                    _vertex_snap(obj, *points[index + 1])
-                    if index == len(points) - 2
-                    else _face_snap(obj, *points[index + 1])
-                )
-                end_index = CADDIM_OT_CreateLine._create_edge(
-                    operator,
-                    bpy.context,
-                    start_snap,
-                    end_snap,
-                    start_vertex_index=end_index,
-                )
-
-            CADDIM_OT_CreateLine._finalize_closed_path(bpy.context, points)
-            bm = bmesh.from_edit_mesh(mesh)
-            areas = [face.calc_area() for face in bm.faces]
-            self.assertTrue(any(abs(area - 0.36) < 1e-5 for area in areas))
-            self.assertTrue(all(area > 1e-8 for area in areas))
-            outer_vertices = {
-                vertex
-                for vertex in bm.verts
-                if vertex.co.x in {0.0, 1.0} and vertex.co.y in {0.0, 1.0}
-            }
-            inner_vertices = {
-                vertex
-                for vertex in bm.verts
-                if 0.19 < vertex.co.x < 0.81 and 0.19 < vertex.co.y < 0.81
-            }
-            bridges = [
-                edge
-                for edge in bm.edges
-                if any(vertex in outer_vertices for vertex in edge.verts)
-                and any(vertex in inner_vertices for vertex in edge.verts)
-            ]
-            self.assertEqual(len(bridges), 2)
-        finally:
-            self._remove_edit_object(obj, mesh)
-
-    def test_closed_surface_path_can_share_a_vertex_with_an_existing_cut(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsTouchingClosedFaceSmoke",
-            [(-2.0, -2.0, 0.0), (2.0, -2.0, 0.0), (2.0, 2.0, 0.0), (-2.0, 2.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
-        )
-        first_cut = [
-            Vector((-1.0, 2.0, 0.0)),
-            Vector((0.0, 0.0, 0.0)),
-            Vector((1.0, 2.0, 0.0)),
-        ]
-        closed_points = [
-            Vector((0.0, 0.0, 0.0)),
-            Vector((1.5, -0.2, 0.0)),
-            Vector((1.0, -1.5, 0.0)),
-            Vector((-1.0, -1.5, 0.0)),
-            Vector((-1.5, -0.2, 0.0)),
-            Vector((0.0, 0.0, 0.0)),
-        ]
-        try:
-            operator = _line_operator_adapter()
-            start_index = CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _edge_snap(obj, *first_cut[0]),
-                _face_snap(obj, *first_cut[1]),
-            )
-            CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _vertex_snap(obj, *first_cut[1]),
-                _edge_snap(obj, *first_cut[2]),
-                start_vertex_index=start_index,
-            )
-            self.assertIsNotNone(
-                CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, first_cut)
-            )
-
-            end_index = None
-            for index in range(len(closed_points) - 1):
-                start_snap = _vertex_snap(obj, *closed_points[index])
-                end_snap = (
-                    _vertex_snap(obj, *closed_points[index + 1])
-                    if index == len(closed_points) - 2
-                    else _face_snap(obj, *closed_points[index + 1])
-                )
-                end_index = CADDIM_OT_CreateLine._create_edge(
-                    operator,
-                    bpy.context,
-                    start_snap,
-                    end_snap,
-                    start_vertex_index=end_index,
-                )
-
-            self.assertIsNotNone(
-                CADDIM_OT_CreateLine._finalize_closed_path(bpy.context, closed_points)
-            )
-            bm = bmesh.from_edit_mesh(mesh)
-            expected = {tuple(point) for point in closed_points[:-1]}
-            created = [
-                face
-                for face in bm.faces
-                if {tuple(vertex.co) for vertex in face.verts} == expected
-            ]
-            self.assertEqual(len(created), 1)
-            self.assertAlmostEqual(created[0].calc_area(), 3.55, places=5)
-        finally:
-            self._remove_edit_object(obj, mesh)
-
-    def test_closed_surface_path_can_reuse_an_existing_cut_edge(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsReusedCutEdgeSmoke",
-            [(-2.0, -2.0, 0.0), (2.0, -2.0, 0.0), (2.0, 2.0, 0.0), (-2.0, 2.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
-        )
-        first_cut = [
-            Vector((-1.0, 2.0, 0.0)),
-            Vector((0.0, 0.0, 0.0)),
-            Vector((1.0, 2.0, 0.0)),
-        ]
-        reused_edge_loop = [
-            Vector((-1.0, 2.0, 0.0)),
-            Vector((0.0, 0.0, 0.0)),
-            Vector((-0.7, -1.2, 0.0)),
-            Vector((-1.6, 0.0, 0.0)),
-            Vector((-1.0, 2.0, 0.0)),
-        ]
-        try:
-            operator = _line_operator_adapter()
-            start_index = CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _edge_snap(obj, *first_cut[0]),
-                _face_snap(obj, *first_cut[1]),
-            )
-            CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _vertex_snap(obj, *first_cut[1]),
-                _edge_snap(obj, *first_cut[2]),
-                start_vertex_index=start_index,
-            )
-            self.assertIsNotNone(
-                CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, first_cut)
-            )
-
-            end_index = None
-            for index in range(len(reused_edge_loop) - 1):
-                end_index = CADDIM_OT_CreateLine._create_edge(
-                    operator,
-                    bpy.context,
-                    _vertex_snap(obj, *reused_edge_loop[index]),
-                    _vertex_snap(obj, *reused_edge_loop[index + 1]),
-                    start_vertex_index=end_index,
-                )
-                if index < len(reused_edge_loop) - 2:
-                    self.assertIsNone(
-                        CADDIM_OT_CreateLine._finalize_open_surface_path(
-                            bpy.context,
-                            reused_edge_loop[: index + 2],
-                        )
-                    )
-
-            self.assertIsNotNone(
-                CADDIM_OT_CreateLine._finalize_closed_path(bpy.context, reused_edge_loop)
-            )
-            bm = bmesh.from_edit_mesh(mesh)
-            expected = {tuple(point) for point in reused_edge_loop[:-1]}
-            created = [
-                face
-                for face in bm.faces
-                if {tuple(vertex.co) for vertex in face.verts} == expected
-            ]
-            self.assertEqual(len(created), 1)
-            for start, end in zip(reused_edge_loop, reused_edge_loop[1:]):
-                start_vertex = CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, start)
-                end_vertex = CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, end)
-                edge = bm.edges.get((start_vertex, end_vertex))
-                self.assertIsNotNone(edge)
-                self.assertTrue(edge.link_faces)
-        finally:
-            self._remove_edit_object(obj, mesh)
-
-    def test_path_cuts_the_cap_of_a_face_created_by_extrusion(self):
-        obj, mesh = self._make_edit_object(
-            "DimensionsExtrudedCapCutSmoke",
-            [(-2.0, -2.0, 0.0), (2.0, -2.0, 0.0), (2.0, 2.0, 0.0), (-2.0, 2.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
-        )
-        inset_loop = [
-            Vector((-1.0, -1.0, 0.0)),
-            Vector((1.0, -1.0, 0.0)),
-            Vector((1.0, 1.0, 0.0)),
-            Vector((-1.0, 1.0, 0.0)),
-            Vector((-1.0, -1.0, 0.0)),
-        ]
-        cap_cut = [
-            Vector((-1.0, 0.0, 1.0)),
-            Vector((0.0, 0.35, 1.0)),
-            Vector((1.0, 0.0, 1.0)),
-        ]
-        try:
-            operator = _line_operator_adapter()
-            end_index = None
-            for index in range(len(inset_loop) - 1):
-                end_index = CADDIM_OT_CreateLine._create_edge(
-                    operator,
-                    bpy.context,
-                    _face_snap(obj, *inset_loop[index]),
-                    _face_snap(obj, *inset_loop[index + 1]),
-                    start_vertex_index=end_index,
-                )
-            self.assertIsNotNone(
-                CADDIM_OT_CreateLine._finalize_closed_path(bpy.context, inset_loop)
-            )
-
-            bm = bmesh.from_edit_mesh(mesh)
-            inner_coordinates = {tuple(point) for point in inset_loop[:-1]}
-            inner_face = next(
-                face
-                for face in bm.faces
-                if {tuple(vertex.co) for vertex in face.verts} == inner_coordinates
-            )
-            extruded = bmesh.ops.extrude_discrete_faces(bm, faces=[inner_face])
-            cap_face = extruded["faces"][0]
-            bmesh.ops.translate(
-                bm,
-                verts=list(cap_face.verts),
-                vec=Vector((0.0, 0.0, 1.0)),
-            )
-            bmesh.update_edit_mesh(mesh, loop_triangles=True, destructive=True)
-
-            middle_index = CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _edge_snap(obj, *cap_cut[0]),
-                _face_snap(obj, *cap_cut[1]),
-            )
-            CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _vertex_snap(obj, *cap_cut[1]),
-                _edge_snap(obj, *cap_cut[2]),
-                start_vertex_index=middle_index,
-            )
-            face_count_before = len(bmesh.from_edit_mesh(mesh).faces)
-            self.assertIsNotNone(
-                CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, cap_cut)
-            )
-            bm = bmesh.from_edit_mesh(mesh)
-            self.assertEqual(len(bm.faces), face_count_before + 1)
-            middle = CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, cap_cut[1])
-            self.assertIsNotNone(middle)
-            self.assertEqual(len(middle.link_faces), 2)
-        finally:
-            self._remove_edit_object(obj, mesh)
-
-    def test_failed_open_surface_finalization_preserves_the_loose_path(self):
-        from unittest.mock import patch
-
-        obj, mesh = self._make_edit_object(
-            "DimensionsFailedSurfaceCutSmoke",
-            [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 2.0, 0.0), (0.0, 2.0, 0.0)],
-            faces=[(0, 1, 2, 3)],
-        )
-        points = [
-            Vector((0.0, 1.0, 0.0)),
-            Vector((1.0, 1.0, 0.0)),
-            Vector((2.0, 1.0, 0.0)),
-        ]
-        try:
-            operator = _line_operator_adapter()
-            end_index = CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _edge_snap(obj, *points[0]),
-                _face_snap(obj, *points[1]),
-            )
-            CADDIM_OT_CreateLine._create_edge(
-                operator,
-                bpy.context,
-                _vertex_snap(obj, *points[1]),
-                _edge_snap(obj, *points[2]),
-                start_vertex_index=end_index,
-            )
-            bm = bmesh.from_edit_mesh(mesh)
-            before = (len(bm.verts), len(bm.edges), len(bm.faces))
-
-            with patch.object(bmesh.utils, "face_split", side_effect=ValueError("forced failure")):
-                result = CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, points)
-
-            self.assertIsNone(result)
-            bm = bmesh.from_edit_mesh(mesh)
-            self.assertEqual((len(bm.verts), len(bm.edges), len(bm.faces)), before)
-            path_vertices = [
-                CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, point)
-                for point in points
-            ]
-            self.assertTrue(all(vertex is not None for vertex in path_vertices))
-            self.assertTrue(
-                all(bm.edges.get(pair) is not None for pair in zip(path_vertices, path_vertices[1:]))
-            )
-        finally:
-            self._remove_edit_object(obj, mesh)
-
-    def test_closed_free_space_path_creates_a_face(self):
-        obj, mesh = self._make_edit_object("DimensionsFreeFaceSmoke", [])
-        points = [
-            Vector((0.0, 0.0, 0.0)),
-            Vector((1.0, 0.0, 0.0)),
-            Vector((1.0, 1.0, 0.0)),
-            Vector((0.0, 1.0, 0.0)),
-            Vector((0.0, 0.0, 0.0)),
-        ]
-        try:
-            operator = _line_operator_adapter()
-            end_index = None
-            for index in range(len(points) - 1):
-                end_index = CADDIM_OT_CreateLine._create_edge(
-                    operator,
-                    bpy.context,
-                    _world_snap(*points[index]),
-                    _vertex_snap(obj, *points[index + 1]) if index == 3 else _world_snap(*points[index + 1]),
-                    start_vertex_index=end_index,
-                )
-            CADDIM_OT_CreateLine._finalize_closed_path(bpy.context, points)
-
-            bm = bmesh.from_edit_mesh(mesh)
-            self.assertEqual(len(bm.faces), 1)
-            self.assertAlmostEqual(bm.faces[0].calc_area(), 1.0)
-        finally:
-            self._remove_edit_object(obj, mesh)
-
-    def test_unmodified_vertex_snap_stays_bound(self):
-        start = _world_snap(0.0)
-        end = _world_snap(1.0)
-        end.update({"type": "VERTEX", "label": "Vertex", "vertex_index": 7})
-        operator = SimpleNamespace(
-            start_snap=start,
-            hover_snap=end,
-            axis="ALIGNED",
-            distance_text="",
-            _copy_snap=CADDIM_OT_CreateLine._copy_snap,
-            _axis_vector=CADDIM_OT_CreateLine._axis_vector,
-        )
-
-        effective = CADDIM_OT_CreateLine._effective_end_snap(operator)
-        self.assertEqual(effective["type"], "VERTEX")
-        self.assertEqual(effective["vertex_index"], 7)
-
-    def test_zero_axis_projection_is_not_accepted_unconstrained(self):
-        operator = SimpleNamespace(
-            start_snap=_world_snap(0.0),
-            hover_snap=_world_snap(0.0, 1.0),
-            axis="X",
-            distance_text="",
-            _copy_snap=CADDIM_OT_CreateLine._copy_snap,
-            _axis_vector=CADDIM_OT_CreateLine._axis_vector,
-        )
-
-        self.assertIsNone(CADDIM_OT_CreateLine._effective_end_snap(operator))
+        self.assertIsNotNone(geometry)
+        self.assertAlmostEqual(geometry["value"], 6.0)
+        self.assertEqual(geometry["measure_start_world"], start)
+        self.assertEqual(geometry["measure_end_world"], Vector((1.0, 8.0, 3.0)))
 
     def test_hidden_guides_are_not_snap_targets(self):
         guide = create_guide_object(bpy.context, "DimensionsHiddenGuideSmoke")
