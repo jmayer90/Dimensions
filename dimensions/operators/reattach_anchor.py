@@ -3,7 +3,7 @@ import bpy
 from ..anchors import resolve_anchor, set_anchor_from_snap
 from ..drawing import clear_preview_state, set_preview_state
 from ..properties import is_dimension_object
-from ..snapping import find_nearest_snap_point
+from ..snapping import copy_snap, find_nearest_snap_point
 
 
 class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
@@ -104,6 +104,7 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             preview["hover_screen"] = self.hover_snap["screen_co"]
             preview["hover_type"] = self.hover_snap.get("type", "WORLD")
             preview["hover_label"] = self.hover_snap.get("label", "Point")
+            preview["hover_snap"] = copy_snap(self.hover_snap)
 
         if self.anchor_name == "START":
             preview["start_world"] = self.hover_snap["world_co"] if self.hover_snap is not None else start_world

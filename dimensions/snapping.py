@@ -814,8 +814,7 @@ def guide_line_world(guide_object):
         return None
 
     start_world, _start_status = resolve_anchor(guide_object.guide_props.start)
-    end_world, _end_status = resolve_anchor(guide_object.guide_props.end)
-    if start_world is None or end_world is None:
+    if start_world is None:
         return None
 
     axis = guide_object.guide_props.axis
@@ -826,6 +825,9 @@ def guide_line_world(guide_object):
     elif axis == "Z":
         direction = Vector((0.0, 0.0, 1.0))
     else:
+        end_world, _end_status = resolve_anchor(guide_object.guide_props.end)
+        if end_world is None:
+            return None
         direction = end_world - start_world
         if direction.length < 1e-6:
             return None

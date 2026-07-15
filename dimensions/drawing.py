@@ -392,7 +392,10 @@ def draw_dimensions():
             if geometry is None:
                 continue
 
-            color = props.selected_color if obj.select_get() else props.color
+            if geometry["start_status"] != "LINKED" or geometry["end_status"] != "LINKED":
+                color = (1.0, 0.18, 0.08, 1.0)
+            else:
+                color = props.selected_color if obj.select_get() else props.color
             _draw_dimension_geometry(context, shader, geometry, color, geometry["precision"])
 
         if _preview_state is not None:
@@ -403,6 +406,10 @@ def draw_dimensions():
 
         if _measure_state is not None:
             _draw_transient_measure(context, shader, _measure_state)
+
+        for interaction_state in (_preview_state, _guide_preview_state, _measure_state):
+            if interaction_state is not None:
+                _draw_interaction_status(interaction_state)
 
         _draw_persistent_measurements(context)
 
@@ -429,6 +436,7 @@ def draw_world_guides():
 
     try:
         _draw_construction_guides(context, shader)
+        _draw_tool_snap_highlights(context, shader)
         if _guide_preview_state is not None:
             _draw_guide_preview_world(context, shader, _guide_preview_state)
     finally:
@@ -511,6 +519,169 @@ def _draw_world_segment(shader, start_world, end_world, color, line_width):
     shader.bind()
     shader.uniform_float("color", color)
     batch.draw(shader)
+
+
+def _draw_tool_snap_highlights(context, shader):
+    locked_color = (0.10, 0.72, 1.0, 0.9)
+    hover_color = (1.0, 0.58, 0.06, 1.0)
+    for state in (_preview_state, _guide_preview_state, _measure_state):
+        if state is None:
+            continue
+        for snap in state.get("locked_snaps", ()):
+            _draw_snap_highlight(context, shader, snap, locked_color)
+        hover_snap = state.get("hover_snap")
+        if hover_snap is not None:
+            _draw_snap_highlight(context, shader, hover_snap, hover_color)
+
+
+def _draw_snap_highlight(context, shader, snap, color):
+    geometry = _snap_highlight_geometry(context, snap)
+    if geometry is None:
+        return
+
+    kind = geometry["kind"]
+    points = geometry["points"]
+    if kind == "FACE" and len(points) >= 3:
+        from mathutils.geometry import tessellate_polygon
+
+        triangles = tessellate_polygon([points])
+        triangle_points = []
+        for triangle in triangles:
+            for value in triangle:
+                triangle_points.append(points[value] if isinstance(value, int) else value)
+        if triangle_points:
+            batch = batch_for_shader(shader, "TRIS", {"pos": triangle_points})
+            shader.bind()
+            shader.uniform_float("color", (color[0], color[1], color[2], 0.16))
+            batch.draw(shader)
+        outline = []
+        for index, point in enumerate(points):
+            outline.extend((point, points[(index + 1) % len(points)]))
+        gpu.state.line_width_set(4.0)
+        batch = batch_for_shader(shader, "LINES", {"pos": outline})
+        shader.bind()
+        shader.uniform_float("color", color)
+        batch.draw(shader)
+        return
+
+    if kind in {"EDGE", "GUIDE"} and len(points) == 2:
+        gpu.state.line_width_set(4.0)
+        batch = batch_for_shader(shader, "LINES", {"pos": points})
+        shader.bind()
+        shader.uniform_float("color", color)
+        batch.draw(shader)
+        return
+
+    if kind == "VERTEX" and points:
+        gpu.state.point_size_set(12.0)
+        batch = batch_for_shader(shader, "POINTS", {"pos": [points[0]]})
+        shader.bind()
+        shader.uniform_float("color", color)
+        batch.draw(shader)
+        gpu.state.point_size_set(1.0)
+
+
+def _snap_highlight_geometry(context, snap):
+    """Resolve a snap target into world geometry for viewport highlighting."""
+    if snap is None:
+        return None
+    snap_type = snap.get("type", "WORLD")
+    construction_object = snap.get("guide_object")
+    if construction_object is not None:
+        if snap_type == "GUIDE":
+            segment = guide_segment_world(construction_object)
+            return None if segment is None else {"kind": "GUIDE", "points": list(segment)}
+        if snap_type == "MEASUREMENT":
+            segment = construction_segment_world(construction_object)
+            if segment is None:
+                return None
+            if snap.get("label") in {"Measurement Start", "Measurement Midpoint", "Measurement End"}:
+                return {"kind": "VERTEX", "points": [snap["world_co"].copy()]}
+            return {"kind": "EDGE", "points": list(segment)}
+
+    obj = snap.get("object")
+    if obj is None or getattr(obj, "type", None) != "MESH":
+        return None
+
+    matrix = obj.matrix_world
+    if obj.mode == "EDIT" and getattr(context, "edit_object", None) == obj:
+        import bmesh
+
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        if snap_type == "VERTEX":
+            index = snap.get("vertex_index", -1)
+            if 0 <= index < len(bm.verts):
+                return {"kind": "VERTEX", "points": [matrix @ bm.verts[index].co]}
+        elif snap_type == "EDGE":
+            edge = None
+            index = snap.get("edge_index", -1)
+            if 0 <= index < len(bm.edges):
+                edge = bm.edges[index]
+            if edge is None:
+                vertices = snap.get("edge_vertices", ())
+                if len(vertices) == 2 and all(0 <= index < len(bm.verts) for index in vertices):
+                    edge = bm.edges.get((bm.verts[vertices[0]], bm.verts[vertices[1]]))
+            if edge is not None:
+                return {"kind": "EDGE", "points": [matrix @ vertex.co for vertex in edge.verts]}
+        elif snap_type == "FACE":
+            index = snap.get("face_index", -1)
+            if 0 <= index < len(bm.faces):
+                return {"kind": "FACE", "points": [matrix @ vertex.co for vertex in bm.faces[index].verts]}
+        return None
+
+    mesh = obj.data
+    if snap_type == "VERTEX":
+        index = snap.get("vertex_index", -1)
+        if 0 <= index < len(mesh.vertices):
+            return {"kind": "VERTEX", "points": [matrix @ mesh.vertices[index].co]}
+    elif snap_type == "EDGE":
+        vertices = snap.get("edge_vertices", ())
+        if len(vertices) != 2:
+            edge_index = snap.get("edge_index", -1)
+            if 0 <= edge_index < len(mesh.edges):
+                vertices = mesh.edges[edge_index].vertices
+        if len(vertices) == 2 and all(0 <= index < len(mesh.vertices) for index in vertices):
+            return {
+                "kind": "EDGE",
+                "points": [matrix @ mesh.vertices[index].co for index in vertices],
+            }
+    elif snap_type == "FACE":
+        index = snap.get("face_index", -1)
+        if 0 <= index < len(mesh.polygons):
+            return {
+                "kind": "FACE",
+                "points": [matrix @ mesh.vertices[vertex_index].co for vertex_index in mesh.polygons[index].vertices],
+            }
+    return None
+
+
+def _draw_interaction_status(state):
+    parts = []
+    label = state.get("hover_label")
+    if label:
+        parts.append(label)
+    axis = state.get("axis", "ALIGNED")
+    if axis != "ALIGNED":
+        parts.append(f"{axis} Axis")
+    distance_text = state.get("distance_text", "").strip()
+    if distance_text:
+        parts.append(f"Input: {distance_text}")
+    if not parts:
+        return
+    position = state.get("hover_screen")
+    if position is None:
+        position = Vector((24.0, 44.0))
+    else:
+        position = Vector((position.x + 14.0, position.y + 18.0))
+    color = (
+        (1.0, 0.22, 0.12, 1.0)
+        if not state.get("distance_input_valid", True)
+        else (1.0, 0.82, 0.28, 1.0)
+    )
+    _draw_text_left(" | ".join(parts), position, color)
 
 
 def _draw_transient_measure(context, shader, state):
@@ -603,6 +774,14 @@ def _draw_dimension_geometry(context, shader, geometry, color, precision):
     text_size = geometry.get("text_size", DEFAULT_TEXT_SIZE)
     for text, position in text_layout["text_items"]:
         _draw_text(text, position, color, text_size)
+    broken = []
+    if geometry.get("start_status") != "LINKED":
+        broken.append(f"Start: {geometry.get('start_status', 'Unknown').replace('_', ' ').title()}")
+    if geometry.get("end_status") != "LINKED":
+        broken.append(f"End: {geometry.get('end_status', 'Unknown').replace('_', ' ').title()}")
+    if broken:
+        warning_position = geometry["line_mid_screen"] + Vector((0.0, -(text_size + 10.0)))
+        _draw_text(" | ".join(broken), warning_position, (1.0, 0.18, 0.08, 1.0), text_size)
 
 
 def _draw_preview(context, shader, preview_state):

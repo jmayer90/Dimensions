@@ -18,7 +18,7 @@ def poll_mesh_objects(_self, obj):
 
 
 def clamp_anchor_vertex_index(anchor):
-    if getattr(anchor, "anchor_type", "VERTEX") == "WORLD":
+    if getattr(anchor, "anchor_type", "VERTEX") != "VERTEX":
         if anchor.vertex_index != -1:
             anchor.vertex_index = -1
         return
@@ -71,6 +71,7 @@ class CADDIM_PG_Anchor(bpy.types.PropertyGroup):
         name="Anchor Type",
         items=[
             ("VERTEX", "Vertex", "Anchor follows a mesh vertex"),
+            ("OBJECT_POINT", "Object Point", "Anchor follows a fixed local point on a mesh object"),
             ("WORLD", "World Point", "Anchor is a fixed world coordinate"),
         ],
         default="VERTEX",

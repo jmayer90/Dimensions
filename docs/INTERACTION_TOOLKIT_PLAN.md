@@ -5,9 +5,9 @@ This plan captures the next design direction for Dimensions tools: measurement, 
 ## Current problems
 
 - The first implementation now keeps Measure, Dimension, and Guide previews alive over free space and adds visible-face vertex, edge, midpoint, face-center, face-point, and guide snapping. The inference model still needs intersections, parallel/perpendicular locks, and guide planes.
-- Persistent dimensions can store vertex anchors or world-coordinate anchors. Object-local surface anchors are still future work.
+- Persistent dimensions and guides can store vertex anchors, object-local edge/face points, or world-coordinate anchors. Stable vertex identity and deformation-following barycentric surface anchors are still future work.
 - Snap behavior now covers the basic point classes, but it still needs a broader inference model without copying every behavior from a general-purpose snap add-on.
-- Typed scene-unit distance exists for Edit Mode mesh lines and persistent finite measurements. It is still missing from Dimension and infinite Guide placement.
+- Typed scene-unit distance and staged `Enter`/`Backspace`/`Esc` handling now exist across Dimension, Measure, Guide, and Mesh Line. The shared layer is intentionally small; the four operators still duplicate parts of their session state machines.
 
 ## QuickSnap-inspired target model
 
@@ -32,7 +32,7 @@ The current implementation still collects only the visible ray-hit face plus vis
 Every point-picking tool should work with a common `ToolPoint` concept:
 
 - `VERTEX`: object plus base vertex index, with fallback local coordinate.
-- `OBJECT_POINT`: object plus local coordinate, used for face centers, edge midpoints, curve points, and arbitrary object-surface hits. This is not implemented yet.
+- `OBJECT_POINT`: object plus local coordinate, used for edge and face snaps so an anchor follows object transforms. It does not yet follow later surface deformation.
 - `WORLD_POINT`: world coordinate only, used when the cursor is over empty space or when a typed/inferred point has no durable object link.
 
 During modal creation, tools should always have a preview end point. If no snap target is under the mouse, the end point should come from a stable construction plane, view plane, selected axis, guide plane, or inferred direction. Snapped points should override the free-space point when the cursor is close enough.
@@ -58,7 +58,7 @@ The practical first target is:
 3. Done: face point and face center snaps.
 4. Next: object-origin snaps.
 5. Next: axis and parallel inference from the active start point.
-6. In progress: typed distance is implemented for Measure and Draw Mesh Line; share it with Dimension and Guide next.
+6. Done: typed distance and `Enter` confirmation are implemented for Measure, Draw Mesh Line, Dimension, and Guide.
 7. Next: intersection and guide-plane inference.
 
 ## Snap Line-style workflows
@@ -141,7 +141,7 @@ Keep this as a toolkit layer, probably separate from the drawing code:
 - `geometry_ops.py`: create vertices/edges and perform explicit merge/split operations for the future Geometry Line tool.
 - Modal operators: consume toolkit results and focus on workflow state.
 
-The current implementation makes Dimension, Measure, and Guide tools preview over empty space; supports typed distances in Measure and Draw Mesh Line; snaps to vertices, edges, midpoints, faces, infinite guides, and finite measurements; exposes measurement endpoints to Blender-native transform snapping; keeps Edit Mode fallback snaps on the active mesh; and selects construction objects in the viewport.
+The current implementation makes Dimension, Measure, and Guide tools preview over empty space; supports typed distances in all four priority tools; highlights hovered targets in orange and accepted targets in blue; snaps to vertices, edges, midpoints, faces, infinite guides, and finite measurements; exposes measurement endpoints to Blender-native transform snapping; keeps Edit Mode fallback snaps on the active mesh; and selects construction objects in the viewport. Invalid numeric input is shown in red near the cursor.
 
 ## Rollout plan
 
@@ -149,6 +149,17 @@ The current implementation makes Dimension, Measure, and Guide tools preview ove
 2. Done: add continuous previews to Measure, Dimension, and Guide.
 3. Done: add a separate Edit Mode Geometry Line tool with explicit active mesh editing, connected chains, vertex/edge binding, common-face splitting, and undo-safe mesh edits.
 4. Done: add midpoint, face-center, and richer edge/guide inference targets.
-5. In progress: typed distance is complete for Measure; add it to Dimension/Guide and add parallel, perpendicular, and local-axis locks across tools.
+5. Partly done: typed distance and consistent confirmation/cancel staging are shared across all four priority tools. Parallel, perpendicular, and local-axis locks remain.
 6. Next: upgrade construction guides to support offsets, chained guide creation, and guide planes.
-7. Done for the single-face path: deferred boundary-to-boundary strokes cut without radial support fans, and simple closed coplanar paths create independent faces. Next: multi-face path routing, configurable edge split/bind behavior, and robust handling for boundary-touching, self-intersecting, or non-manifold loops.
+7. Done for the single-face path: deferred boundary-to-boundary strokes cut without radial support fans, and simple closed coplanar paths create independent faces, including a loop sharing one existing cut/boundary vertex. Finalization keeps the loose path intact when validation or face creation fails. Next: multi-face path routing, configurable edge split/bind behavior, and robust handling for more complex boundary-sharing, self-intersecting, or non-manifold loops.
+
+## Current shared input contract
+
+- Hover establishes direction and snap identity; orange marks the current target and blue marks accepted targets.
+- `A`, `X`, `Y`, or `Z` chooses aligned/global-axis behavior before or after numeric entry, matching Blender transform ordering.
+- Typing a scene-unit value changes the current distance; `Enter` accepts the current stage. Mesh Line commits that segment and continues the chain.
+- `Backspace` edits numeric text and steps back only after the text is empty.
+- `Esc` clears numeric text first, then steps back or exits. Right-click cancels one-shot tools; for Mesh Line it finishes the session and keeps accepted segments.
+- Wheel and middle-mouse navigation pass through to Blender.
+
+This is the baseline Blender-friendly contract. Future Shift/arrow-key inference locks should extend it without changing these meanings.

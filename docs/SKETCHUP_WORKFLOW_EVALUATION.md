@@ -11,18 +11,19 @@ Dimensions now contains credible first versions of all four priority workflows:
 - a finite measurement/tape workflow; and
 - a chained Edit Mode pencil/line tool.
 
-This is a strong experimental core, not yet a production-safe SketchUp-style modeling layer. The add-on already solves more of the hard geometry problem than its `0.1.0` version suggests: shared logical snapping, free-space previews, typed scene-unit lengths, persistent annotations, vertex/edge binding, edge splitting, single-face knife-like paths, and closed-loop face creation are all present. The final Blender 5.1 audit run passed all 25 current smoke tests.
+This is a strong experimental core, not yet a production-safe SketchUp-style modeling layer. The add-on already solves more of the hard geometry problem than its `0.1.0` version suggests: shared logical snapping, free-space previews, typed scene-unit lengths, persistent annotations, vertex/edge binding, edge splitting, single-face knife-like paths, and closed-loop face creation are all present. The implementation follow-up passed all 35 Blender 5.1 smoke tests.
 
 The largest remaining gap is not the absence of more tools. SketchUp's characteristic speed comes from a shared interaction language: inference points and lines, lockable directions and planes, a Measurements box that works consistently, predictable cancel/undo behavior, and immediate visual explanations of what will happen. Dimensions currently has useful pieces of that language, but each modal operator still implements a different subset.
 
 The recommended product sequence is therefore:
 
-1. Make Pencil topology commits transactional and recoverable.
+1. Done for currently supported open/closed single-face cuts: make Pencil topology commits recoverable and preserve the loose path on failure.
 2. Replace per-mouse-move full vertex scans with a depth-aware cached snap index.
-3. Build one shared inference, constraint, numeric-input, and modal-cancel toolkit.
-4. Improve anchor durability and visibly report broken or stale references.
-5. Bring Construction Guide and Measure together into a true Tape Measure workflow.
-6. Add higher-level SketchUp-style modeling tools only after they can reuse that foundation.
+3. Extend the new shared numeric/confirmation helpers into a complete inference and constraint toolkit.
+4. Add stable vertex identity and stronger surface association on top of the new object-local anchors and broken-reference warnings.
+5. Improve the four priority workflows before reconsidering broader tool expansion.
+
+Scope decision: the seven higher-level modeling proposals in the original audit are not on the active roadmap. They are retained only as historical ideas and should not be implemented without a new product decision.
 
 ## Reference behavior
 
@@ -41,31 +42,30 @@ Scores describe readiness for the requested SketchUp-like workflow, not code eff
 | Capability | Current readiness | What is already strong | Main gap |
 | --- | --- | --- | --- |
 | Construction lines | 3/5 | Persistent infinite lines, aligned/global axes, linked vertex anchors, visibility, selection, clearing, snap projection | The workflow creates a line from two points instead of the common offset-from-edge guide; no guide points, angular guides, editable offsets, dashes, or chain/repeat workflow |
-| Dimensions | 3.5/5 | Three-click placement, stable screen-space presentation, true 3D value, multiple unit formats, reattachment, local/global styling, hit selection | Most non-vertex anchors freeze in world space; topology identity is fragile; no projected/angular/radial/baseline/chain dimensions or visible broken-anchor state |
+| Dimensions | 4/5 | Three-click placement, typed endpoint/offset values, target highlighting, true 3D value, object-local edge/face anchors, reattachment, styling, hit selection, and broken-reference warnings | Vertex identity remains index-based; no projected/angular/radial/baseline/chain dimensions or export/render path |
 | Tape Measure | 2.5/5 | Continuous preview, logical snaps, typed units, global-axis constraints, persistent finite segment, label, custom and native endpoint snap targets | This is a saved construction segment, not yet a full Tape Measure: no hover-only readout, mode cycling, offset guide/guide point creation, optional ephemeral result, or resize-to-measure workflow |
-| Pencil / Line | 3/5 | Chained segments, typed distance, global axes, live BMesh snaps, direct vertex binding, edge splitting, deferred one-face cuts, closed-loop face creation | Destructive finalization is not transactional; one modal session has coarse undo/cancel semantics; no inference locks, multi-face cutting, or robust invalid-loop handling |
-| Shared inference | 2.5/5 | Vertices, edge projections, midpoints, face centers/points, guides, measurement endpoints/midpoints/segments, free-space points | Full visible-vertex scans, no depth filtering, intersections, extensions, local axes, parallel/perpendicular inference, guide planes, target filters, or persistent inference cues |
+| Pencil / Line | 3.5/5 | Chained segments, typed/Enter commit, global axes, live target highlighting, direct vertex binding, edge splitting, recoverable deferred one-face cuts, and closed loops sharing one existing vertex | One modal session has coarse undo semantics; no inference locks, multi-face cutting, or robust self-intersection/non-manifold handling |
+| Shared inference | 3/5 | Common numeric editing/confirmation, target and lock highlights, vertices, edge projections, midpoints, face centers/points, guides, measurements, and free-space points | Full visible-vertex scans, no depth filtering, intersections, extensions, local axes, parallel/perpendicular inference, guide planes, or target filters |
 
 ## Priority findings
 
-### P0: Pencil finalization can leave partially mutated topology after failure
+### P0 resolved for supported cases: Pencil failure preserves existing topology and the loose path
 
-`dimensions/operators/create_line.py` performs destructive cleanup before the replacement topology is known to be valid.
+The implementation follow-up changed `dimensions/operators/create_line.py` so open-path cleanup happens only after `face_split` succeeds. Closed-loop replacement faces are now built before the source face is removed, with rollback of newly created faces/edges on construction failure. A forced-failure regression test asserts that the original counts and complete loose path remain unchanged.
 
-- `_finalize_open_surface_path()` removes the loose path edges and interior vertices before calling `bmesh.utils.face_split()`. If the split raises or returns no result, the function returns without restoring the path.
-- `_cut_closed_loop_in_face()` removes the original surface face before creating all replacement ring triangles and the inner face. A `ValueError` can therefore leave the original face deleted and some replacement faces already created.
+- `_finalize_open_surface_path()` now leaves the accepted path untouched until the replacement split exists.
+- `_cut_closed_loop_in_face()` now leaves the original surface face in place until all replacement geometry exists, and cleans up new partial geometry on failure.
+- A closed loop may share one vertex with the surrounding face or an existing cut; this covers the reported triangle-apex/odd-loop case.
 
 The current happy-path tests are valuable, but unsupported, degenerate, self-intersecting, boundary-touching, or numerically difficult input is exactly where a modeling tool must fail without damaging the mesh.
 
 During the audit, the newly added `test_path_across_a_nonplanar_visible_face_splits_the_face` initially exposed a refusal to split a non-planar quad. The concurrently updated surface-tolerance calculation made that regression test pass in the final run. Keep the case as a permanent regression test: membership tolerance for non-planar n-gons can easily become either too strict (rejecting visible paths) or too broad (accepting points away from the surface), and silent refusal after temporary mesh edges have already been created is not sufficient feedback.
 
-Recommendation:
+Remaining recommendation:
 
 - Separate topology planning/validation from commit.
 - Validate the path, target faces, coplanarity, self-intersection, edge reuse, and expected output on a copied BMesh or other temporary representation.
-- Commit only after the complete result is known to be constructible.
-- If a commit can still fail, restore from the pre-commit copy before returning.
-- Add explicit failure-path tests that assert the complete original mesh and temporary path remain unchanged.
+- Extend validation/rollback coverage to self-intersection, repeated points, custom-data preservation, multi-face paths, and non-manifold input.
 
 ### P1: Snapping is linear in every visible vertex on every mouse move
 
@@ -82,31 +82,27 @@ Recommendation:
 - Add target filters for vertex, midpoint, edge, face, origin, guide, and measurement classes.
 - Establish budgets such as sub-8 ms hover updates around 250k visible vertices and usable interaction around one million visible vertices on reference hardware.
 
-### P1: Durable binding works only for base-mesh vertices, and even those lack stable identity
+### P1 partially resolved: object-local surface anchors and visible broken-reference state
 
-`dimensions/anchors.py::set_anchor_from_snap()` stores only `VERTEX` snaps as associative anchors; edge, midpoint, face, guide, measurement, and free-space snaps become fixed world points. `resolve_anchor()` later resolves a vertex only by base-mesh index. A topology edit can invalidate the index or, more dangerously, leave the index valid while it now names a different vertex.
+`dimensions/anchors.py::set_anchor_from_snap()` now stores mesh edge and face snaps as `OBJECT_POINT` anchors, so they follow object transforms. Detached vertex anchors render red and show a warning in the selected-dimension panel. Missing objects are reported in the panel even though their viewport geometry cannot be resolved. Vertex association still resolves by base-mesh index, so a topology edit can invalidate the index or, more dangerously, leave it valid while it names a different vertex.
 
-Although draw geometry carries `start_status` and `end_status`, the viewport and selected-dimension panel do not expose a warning state. A detached index falls back silently; a missing object makes the dimension disappear.
+Remaining recommendation:
 
-Recommendation:
-
-- Add `OBJECT_POINT` anchors for edge projections, midpoints, face centers, and surface points so they at least follow object transforms.
 - For surface points, store object-local position plus face/triangle identity and barycentric coordinates where possible.
 - Introduce a persistent vertex identifier layer for geometry created or touched by the add-on, retaining index and local-coordinate fallbacks for migration.
 - Track the mesh revision or binding confidence and show stale/detached/missing anchors in a warning color and management list.
 - Provide Reconnect, Convert to World Point, and Locate Target actions.
 
-### P1: The four modal tools do not yet share one interaction contract
+### P1 baseline implemented: the four modal tools share numeric confirmation and target feedback
 
-The operators duplicate point acquisition and key handling, and their behavior differs in important ways:
+The operators now share numeric editing, axis parsing, confirmation detection, navigation pass-through, and distance constraints through `dimensions/interaction.py`:
 
-- Measure accepts typed distance and Enter commits it.
-- Pencil accepts typed distance, but Enter ends the entire tool rather than committing the typed segment.
-- Dimension and Guide do not accept typed distances.
-- Measure uses Backspace/Escape as staged reset/cancel; Pencil ends and keeps the whole chain on Escape or right-click.
-- Axis constraints use `A/X/Y/Z`, but there is no Shift lock, arrow-key mapping, inferred direction lock, or shared on-screen constraint label.
+- Dimension, Measure, Guide, and Pencil accept scene-unit values and `Enter` accepts the current stage.
+- Pencil `Enter` commits the current segment and continues the chain; `Esc` clears typed input first, while `Esc`/right-click with no text ends the chain and keeps accepted geometry.
+- Hovered targets are orange, locked targets are blue, and the cursor label shows snap type, axis, numeric text, and invalid input.
+- `A/X/Y/Z` remain axis keys before or after numeric entry, matching Blender transform-style ordering; other letters remain available for unit suffixes.
 
-Recommendation:
+Remaining recommendation:
 
 Create reusable, testable components:
 
@@ -117,7 +113,7 @@ Create reusable, testable components:
 - `ToolSession`: staged point picking, previous point, hover point, cancel/reset, commit, and status text.
 - `GeometryTransaction`: validate, preview, commit, and rollback for destructive tools.
 
-The target interaction contract should be documented and tested once, then consumed by all four tools.
+The baseline contract is documented and its shared helpers are covered by smoke tests. Point/session state and richer inference are still duplicated.
 
 ### P1: A complete Pencil chain is one undo transaction
 
@@ -138,7 +134,7 @@ Additional current limitations:
 
 - Guides render as solid world lines rather than dashed construction geometry.
 - A fixed `10000.0` world-unit display extent is not scale independent.
-- An X/Y/Z guide resolves both anchors before choosing its stored global direction, so losing the unused end anchor can hide a guide that only logically needs its start point.
+- X/Y/Z guide resolution now depends only on its logical start anchor; the unused stored end no longer hides an axis guide.
 - The Empty acts as a selection proxy; normal Blender transforms do not edit the stored anchors/direction in a user-facing way.
 - There is no selective guide list, rename/edit-offset workflow, per-guide visibility control in the add-on UI, or Eraser-style deletion.
 
@@ -237,9 +233,9 @@ The viewport should explain every committed result before the click:
 
 This layer should be renderer-independent so inference and constraint tests can run without a live GPU context.
 
-## Recommended additional SketchUp-friendly tools
+## Deferred modeling-tool ideas (not current scope)
 
-These are ordered by how much value they gain from the proposed shared toolkit.
+The user explicitly chose not to add these items at this time and may never include them in this add-on. They remain here only as a record of the original evaluation, not as an implementation queue.
 
 1. **Rectangle on Plane** — two corners, plane inference/lock, typed `width, depth`, automatic face creation, and predictable winding.
 2. **Push/Pull** — face-normal extrusion with typed distance, inference to another face, copy/new-start modifier, and conservative manifold validation.
@@ -249,7 +245,7 @@ These are ordered by how much value they gain from the proposed shared toolkit.
 6. **Circle and Arc** — plane-aware creation, typed radius/segment count, center/quadrant/tangent inference.
 7. **Eraser / Soften** — click or drag to delete guide/construction entities and optionally dissolve or soften mesh edges with explicit mode feedback.
 
-Rectangle, Push/Pull, and Offset form the smallest convincing SketchUp-style modeling expansion. They should not be implemented as isolated modal operators; each should reuse ToolSession, inference, NumericInput, and GeometryTransaction.
+No work on these ideas should begin without an explicit future scope decision.
 
 ## Test and release strategy
 
@@ -258,7 +254,8 @@ The current background Blender suite provides useful coverage of geometry helper
 Audit snapshot:
 
 - Blender 5.1.2 manifest validation: passed.
-- Blender 5.1.2 background smoke suite: 25 passed.
+- Blender 5.1.2 background smoke suite: 35 passed.
+- Added regression coverage for a closed loop sharing an existing cut vertex, forced open-cut failure preservation, shared numeric input, target-highlight geometry, object-local anchors, and axis-guide anchor independence.
 - The non-planar visible-face split regression briefly failed during the audit and passed after the current surface-tolerance update; retain both that test and the off-surface rejection test.
 
 ### Geometry safety
@@ -294,21 +291,21 @@ Audit snapshot:
 
 ## Proposed milestones
 
-### Milestone 1 — Trustworthy core
+### Milestone 1 — Trustworthy core (partly complete)
 
-- Transactional Pencil finalization and failure tests.
-- Defined per-segment undo/cancel behavior.
+- Done for supported single-face operations: recoverable Pencil finalization and failure tests.
+- Done as one documented chain transaction: segment confirmation and staged cancel behavior. Per-segment undo remains open.
 - Depth-aware cached snapping with performance benchmarks.
-- Broken-anchor visualization and management actions.
+- Partly done: broken-anchor visualization; management actions remain.
 
 Exit criterion: invalid input cannot damage existing topology, large-scene hover remains interactive, and stale dimensions are never silently presented as trustworthy.
 
-### Milestone 2 — One SketchUp-style interaction language
+### Milestone 2 — One SketchUp-style interaction language (baseline in place)
 
 - Shared ToolPoint, SnapCandidate, ConstraintState, NumericInput, ToolSession, and overlay feedback.
 - Axis, local-axis, parallel, perpendicular, extension, through-point, intersection, and plane inference.
 - Shift and arrow-key locking plus target filters.
-- Typed values and consistent staged cancel behavior in all four tools.
+- Done: typed values, `Enter` confirmation, staged cancel behavior, and hovered/locked target feedback in all four tools.
 
 Exit criterion: a user who learns precision input and inference in one tool can predict all other tools.
 
@@ -328,12 +325,11 @@ Exit criterion: the common measure-and-lay-out-reference workflow requires no si
 
 Exit criterion: dimension annotations remain trustworthy through normal modeling edits and can leave the viewport in a documented output workflow.
 
-### Milestone 5 — SketchUp-style modeling expansion
+### Milestone 5 — SketchUp-style modeling expansion (parked)
 
-- Rectangle, Push/Pull, and Offset built on the shared interaction and transaction layers.
-- Move/Copy arrays and Protractor/Rotate next.
+- No planned implementation. Revisit only if the product scope changes after the four core workflows mature.
 
-Exit criterion: the add-on supports a coherent architectural block-out loop rather than a collection of unrelated tools.
+This milestone is not required for success of the current add-on.
 
 ## Definition of success for the original four needs
 
@@ -344,4 +340,4 @@ The original request is fully met when:
 - **Tape Measure** provides hover and two-point readout, temporary and saved results, guide modes, typed values, and safe optional rescaling.
 - **Pencil** creates chained edges/faces with consistent inference and numeric input, has per-segment cancel/undo, and never damages existing topology when a requested cut is invalid.
 
-The current add-on is meaningfully on the way to each of these. Milestones 1 through 3 should come before broadening the tool count; they will improve all four priority workflows simultaneously and make every later SketchUp-style tool substantially cheaper and more consistent to build.
+The current add-on is meaningfully on the way to each of these. Work should remain centered on the four priority workflows; broader modeling tools are not presumed to belong in this add-on.

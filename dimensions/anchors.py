@@ -27,6 +27,18 @@ def set_world_anchor(anchor, world_co):
     anchor.status = "LINKED"
 
 
+def set_object_anchor(anchor, obj, world_co):
+    if obj is None or obj.type != "MESH":
+        raise ValueError("Object-point anchor target must be a mesh object")
+    local_co = obj.matrix_world.inverted_safe() @ Vector(world_co)
+    anchor.anchor_type = "OBJECT_POINT"
+    anchor.target_object = obj
+    anchor.vertex_index = -1
+    anchor.fallback_local_co = tuple(local_co)
+    anchor.world_co = tuple(world_co)
+    anchor.status = "LINKED"
+
+
 def set_anchor_from_snap(anchor, snap):
     if snap is None:
         raise ValueError("Snap target is required")
@@ -35,12 +47,22 @@ def set_anchor_from_snap(anchor, snap):
         set_anchor(anchor, snap["object"], snap["vertex_index"])
         return
 
+    if snap.get("type") in {"EDGE", "FACE"} and snap.get("object") is not None:
+        set_object_anchor(anchor, snap["object"], snap["world_co"])
+        return
+
     set_world_anchor(anchor, snap["world_co"])
 
 
 def resolve_anchor(anchor):
     if getattr(anchor, "anchor_type", "VERTEX") == "WORLD":
         return Vector(anchor.world_co), "LINKED"
+
+    if getattr(anchor, "anchor_type", "VERTEX") == "OBJECT_POINT":
+        obj = anchor.target_object
+        if obj is None or obj.type != "MESH":
+            return None, "MISSING_OBJECT"
+        return obj.matrix_world @ Vector(anchor.fallback_local_co), "LINKED"
 
     obj = anchor.target_object
 

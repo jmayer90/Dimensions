@@ -32,6 +32,8 @@ This document tracks two persistent but deliberately distinct construction workf
 - [x] Global guide visibility, color, line width, and a clear-all action in the sidebar.
 - [x] Exclude hidden guides consistently from drawing, hit-testing, and snap candidate collection.
 - [x] Project the mouse ray onto the mathematical infinite guide instead of interpolating a finite screen-space proxy.
+- [x] Point in a direction, type a scene-unit distance, and press `Enter` to establish a precise aligned endpoint before creating the infinite guide.
+- [x] Select and activate a newly created guide for immediate Blender-side editing/inspection.
 
 ## Interaction model
 
@@ -43,6 +45,8 @@ This document tracks two persistent but deliberately distinct construction workf
 
 Both tools finish after committing one construction object. Run the tool again to create another.
 
+Hovered mesh elements, guides, and measurements are highlighted orange; accepted start targets are highlighted blue. Numeric input, axis state, and invalid values appear beside the pointer. `Backspace` edits text before resetting a pick, `Esc` clears typed input before stepping back/exiting, and right-click cancels the uncommitted construction object.
+
 ## Deliberate first-pass limitations
 
 - Snapping uses the add-on's current visible mesh hit, base-vertex picker, edge projection, midpoint, face center, face point, construction guide projection, and free-space point picker; intersection and richer inference locking are future work.
@@ -50,14 +54,14 @@ Both tools finish after committing one construction object. Run the tool again t
 - Axis constraints are global. Local object axes and arbitrary inferred directions are future work.
 - Guides are infinite construction lines, not guide planes.
 - Guides can be hidden or cleared as a group, selected directly in the viewport, and managed as scene objects in the Outliner. Per-guide styling is future work.
-- Typed distances are implemented for Measure and Draw Mesh Line. Guide offsets, arrays, and typed guide length/origin offsets are future work.
+- Typed endpoint distances are implemented for Measure and Construction Guide. A guide's typed value defines its direction endpoint, not a finite length. Parallel guide offsets, arrays, and typed source offsets are future work.
 
 ## Next stages
 
 1. Add SketchUp-like intersection inference, guide-plane inference, and richer axis color feedback.
 2. Add a construction-object history/list with convert-to-dimension and finite/infinite conversion actions.
 3. Add parallel/perpendicular guide constraints, guide planes, repeated spacing, and selective erase.
-4. Add hover feedback and a dedicated guide management list.
+4. Add a dedicated guide management list; basic hovered/locked target feedback is complete.
 5. Add automated Blender integration coverage for modal lifecycle, save/reload, collection visibility, and topology changes.
 
 ## Acceptance checks
@@ -72,3 +76,4 @@ Both tools finish after committing one construction object. Run the tool again t
 - Hidden guides and guides disabled by the global Show Guides control cannot be selected or used as snap targets.
 - Measurement starts and ends can be acquired by Blender's native Vertex transform snapper, including after loading measurements created by an earlier extension version.
 - Clear Guides and Clear Measurements are separate undoable actions and affect no dimension or mesh objects.
+- Typed guide endpoints accept scene units and `Enter`; X/Y/Z guides remain valid even if their logically unused end anchor later becomes unavailable.

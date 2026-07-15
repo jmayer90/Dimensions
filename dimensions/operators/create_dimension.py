@@ -12,7 +12,13 @@ from ..drawing import (
     get_offset_basis,
     set_preview_state,
 )
+from ..interaction import (
+    is_confirm_event,
+    is_navigation_event,
+    update_distance_text,
+)
 from ..snapping import copy_snap, find_nearest_snap_point, get_mouse_ray, has_view3d_window_region
+from ..units import parse_distance_input
 
 
 class CADDIM_OT_CreateDimension(bpy.types.Operator):
@@ -36,6 +42,8 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.dimension_type = "ALIGNED"
         self.offset_distance = DEFAULT_OFFSET_DISTANCE
         self.offset_plane_normal = None
+        self.distance_text = ""
+        self.distance_input_valid = True
 
         self._update_preview()
         context.window_manager.modal_handler_add(self)
@@ -53,11 +61,22 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         ):
             self.dimension_type = "ALIGNED" if event.type == "A" else event.type
             self._configure_offset_plane(context)
-            self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
+            if self.distance_text:
+                self._apply_numeric_input(context)
+            else:
+                self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
             self._update_preview()
             axis_label = "Auto" if self.dimension_type == "ALIGNED" else self.dimension_type
             self.report({"INFO"}, f"Extension axis: {axis_label}")
             return {"RUNNING_MODAL"}
+
+        if self.state in {"PICK_END", "SET_OFFSET"}:
+            new_text, handled = update_distance_text(self.distance_text, event)
+            if handled:
+                self.distance_text = new_text
+                self._apply_numeric_input(context)
+                self._update_preview()
+                return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
             if self.state in {"PICK_START", "PICK_END"}:
@@ -69,7 +88,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                     include_free=True,
                     plane_point=plane_point,
                 )
-            elif self.state == "SET_OFFSET":
+            elif self.state == "SET_OFFSET" and not self.distance_text:
                 self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
 
             self._update_preview()
@@ -87,10 +106,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 if self.hover_snap is None:
                     return {"RUNNING_MODAL"}
 
-                self.start_snap = self._copy_snap(self.hover_snap)
-                self.state = "PICK_END"
-                self._update_preview()
-                return {"RUNNING_MODAL"}
+                return self._accept_start()
 
             if self.state == "PICK_END":
                 if self.hover_snap is None:
@@ -104,31 +120,141 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 if self.hover_snap is None:
                     return {"RUNNING_MODAL"}
 
-                self.end_snap = self._copy_snap(self.hover_snap)
-                if (self.end_snap["world_co"] - self.start_snap["world_co"]).length < 1e-6:
-                    self.report({"WARNING"}, "Choose a different end point")
-                    self.end_snap = None
-                    return {"RUNNING_MODAL"}
-
-                self._begin_offset_stage(context)
-                self.state = "SET_OFFSET"
-                self._update_preview()
-                return {"RUNNING_MODAL"}
+                return self._accept_end(context)
 
             if self.state == "SET_OFFSET":
+                if self.distance_text and not self.distance_input_valid:
+                    self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+                    return {"RUNNING_MODAL"}
                 if self._create_dimension(context):
                     clear_preview_state()
                     return {"FINISHED"}
                 return {"RUNNING_MODAL"}
 
-        if event.type in {"RIGHTMOUSE", "ESC"}:
+        if is_confirm_event(event):
+            if self.state == "PICK_START":
+                if self.hover_snap is not None:
+                    return self._accept_start()
+                return {"RUNNING_MODAL"}
+            if self.state == "PICK_END":
+                return self._accept_end(context)
+            if self.state == "SET_OFFSET":
+                if self.distance_text and not self.distance_input_valid:
+                    self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+                    return {"RUNNING_MODAL"}
+                if self._create_dimension(context):
+                    clear_preview_state()
+                    return {"FINISHED"}
+                return {"RUNNING_MODAL"}
+
+        if event.type in {"BACK_SPACE", "DEL"} and event.value == "PRESS":
+            self._step_back()
+            self._update_preview()
+            return {"RUNNING_MODAL"}
+
+        if event.type == "ESC" and event.value == "PRESS":
+            if self.distance_text:
+                self.distance_text = ""
+                self.distance_input_valid = True
+                self._update_preview()
+                return {"RUNNING_MODAL"}
+            if self.state != "PICK_START":
+                self._step_back()
+                self._update_preview()
+                return {"RUNNING_MODAL"}
             clear_preview_state()
             return {"CANCELLED"}
 
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+        if event.type == "RIGHTMOUSE" and event.value == "PRESS":
+            clear_preview_state()
+            return {"CANCELLED"}
+
+        if is_navigation_event(event):
             return {"PASS_THROUGH"}
 
         return {"RUNNING_MODAL"}
+
+    def _accept_start(self):
+        if self.hover_snap is None:
+            return {"RUNNING_MODAL"}
+        self.start_snap = self._copy_snap(self.hover_snap)
+        self.state = "PICK_END"
+        self.distance_text = ""
+        self.distance_input_valid = True
+        self._update_preview()
+        return {"RUNNING_MODAL"}
+
+    def _accept_end(self, context):
+        effective_end = self._effective_end_snap(context)
+        if effective_end is None:
+            if self.distance_text:
+                self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+            return {"RUNNING_MODAL"}
+        self.end_snap = effective_end
+        if (self.end_snap["world_co"] - self.start_snap["world_co"]).length < 1e-6:
+            self.report({"WARNING"}, "Choose a different end point")
+            self.end_snap = None
+            return {"RUNNING_MODAL"}
+
+        self.distance_text = ""
+        self.distance_input_valid = True
+        self._begin_offset_stage(context)
+        self.state = "SET_OFFSET"
+        self._update_preview()
+        return {"RUNNING_MODAL"}
+
+    def _effective_end_snap(self, context):
+        if self.start_snap is None or self.hover_snap is None:
+            return None
+        snap = self._copy_snap(self.hover_snap)
+        direction = snap["world_co"] - self.start_snap["world_co"]
+        if direction.length < 1e-8:
+            return None
+        if not self.distance_text.strip():
+            self.distance_input_valid = True
+            return snap
+        try:
+            direction.normalize()
+            direction *= parse_distance_input(context, self.distance_text)
+        except (TypeError, ValueError):
+            self.distance_input_valid = False
+            return None
+        self.distance_input_valid = True
+        snap["type"] = "WORLD"
+        snap["label"] = "Typed Point"
+        snap["object"] = None
+        snap["vertex_index"] = -1
+        for key in ("edge_index", "edge_vertices", "edge_factor", "face_index"):
+            snap.pop(key, None)
+        snap["world_co"] = self.start_snap["world_co"] + direction
+        return snap
+
+    def _apply_numeric_input(self, context):
+        if not self.distance_text.strip():
+            self.distance_input_valid = True
+            return
+        if self.state == "PICK_END":
+            self._effective_end_snap(context)
+            return
+        try:
+            self.offset_distance = parse_distance_input(context, self.distance_text)
+        except (TypeError, ValueError):
+            self.distance_input_valid = False
+            return
+        self.distance_input_valid = True
+
+    def _step_back(self):
+        self.distance_text = ""
+        self.distance_input_valid = True
+        if self.state == "SET_OFFSET":
+            self.state = "PICK_END"
+            self.end_snap = None
+            self.offset_plane_normal = None
+        elif self.state == "PICK_END":
+            self.state = "PICK_START"
+            self.start_snap = None
+            self.end_snap = None
+            self.offset_plane_normal = None
 
     def _update_offset(self, context, mouse_x, mouse_y):
         if self.start_snap is None or self.end_snap is None:
@@ -268,20 +394,27 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             "state": self.state,
             "dimension_type": self.dimension_type,
             "offset_distance": self.offset_distance,
+            "distance_text": self.distance_text,
+            "distance_input_valid": self.distance_input_valid,
         }
 
         if self.hover_snap is not None:
             preview["hover_screen"] = self.hover_snap["screen_co"]
             preview["hover_type"] = self.hover_snap.get("type", "WORLD")
             preview["hover_label"] = self.hover_snap.get("label", "Point")
+            preview["hover_snap"] = self._copy_snap(self.hover_snap)
 
         if self.start_snap is not None:
             preview["start_world"] = self.start_snap["world_co"]
+            preview["locked_snaps"] = [self._copy_snap(self.start_snap)]
 
         if self.state == "PICK_END" and self.start_snap is not None and self.hover_snap is not None:
-            preview["end_world"] = self.hover_snap["world_co"]
+            end_snap = self._effective_end_snap(bpy.context)
+            if end_snap is not None:
+                preview["end_world"] = end_snap["world_co"]
         elif self.end_snap is not None:
             preview["end_world"] = self.end_snap["world_co"]
+            preview.setdefault("locked_snaps", []).append(self._copy_snap(self.end_snap))
 
         if self.offset_plane_normal is not None:
             preview["offset_plane_normal"] = tuple(self.offset_plane_normal)

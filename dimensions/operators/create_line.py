@@ -2,6 +2,13 @@ import bmesh
 import bpy
 
 from ..drawing import clear_measure_state, set_measure_state
+from ..interaction import (
+    axis_from_event,
+    constrained_delta,
+    is_confirm_event,
+    is_navigation_event,
+    update_distance_text,
+)
 from ..snapping import copy_snap, find_nearest_snap_point
 from ..units import parse_distance_input
 
@@ -22,8 +29,10 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
         self.start_snap = None
         self.start_vertex_index = None
         self.path_world_coords = []
+        self.has_committed_segments = False
         self.hover_snap = self._find_snap(context, event)
         self.distance_text = ""
+        self.distance_input_valid = True
         self._update_preview(context)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
@@ -33,15 +42,19 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
             clear_measure_state()
             return {"CANCELLED"}
 
-        if event.type in {"A", "X", "Y", "Z"} and event.value == "PRESS":
-            self.axis = "ALIGNED" if event.type == "A" else event.type
+        axis = axis_from_event(event, self.distance_text)
+        if axis is not None:
+            self.axis = axis
             self._update_preview(context)
             self.report({"INFO"}, f"Line direction: {self.axis.title()}")
             return {"RUNNING_MODAL"}
 
-        if event.value == "PRESS" and self.state == "PICK_END" and self._handle_distance_key(event):
-            self._update_preview(context)
-            return {"RUNNING_MODAL"}
+        if self.state == "PICK_END":
+            new_text, handled = update_distance_text(self.distance_text, event)
+            if handled:
+                self.distance_text = new_text
+                self._update_preview(context)
+                return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
             self.hover_snap = self._find_snap(context, event)
@@ -60,63 +73,79 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
                 self._update_preview(context)
                 return {"RUNNING_MODAL"}
 
-            end_snap = self._effective_end_snap(context)
-            if end_snap is None or (end_snap["world_co"] - self.start_snap["world_co"]).length < 1e-6:
-                return {"RUNNING_MODAL"}
+            return self._commit_segment(context)
 
-            end_vertex_index = self._create_edge(
-                context,
-                self.start_snap,
-                end_snap,
-                start_vertex_index=self.start_vertex_index,
-            )
-            if end_vertex_index is None:
-                self.report({"WARNING"}, "Could not create a valid mesh segment")
-                return {"RUNNING_MODAL"}
+        if is_confirm_event(event):
+            if self.state == "PICK_END":
+                return self._commit_segment(context)
+            clear_measure_state()
+            return {"FINISHED"} if self.has_committed_segments else {"CANCELLED"}
 
-            self.path_world_coords.append(end_snap["world_co"].copy())
-            path_finalized = False
-            if (
-                len(self.path_world_coords) >= 4
-                and (self.path_world_coords[-1] - self.path_world_coords[0]).length <= 1e-5
-            ):
-                finalized_index = self._finalize_closed_path(
-                    context,
-                    self.path_world_coords,
-                )
-                if finalized_index is not None:
-                    end_vertex_index = finalized_index
-                    path_finalized = True
-            else:
-                finalized_index = self._finalize_open_surface_path(
-                    context,
-                    self.path_world_coords,
-                )
-                if finalized_index is not None:
-                    end_vertex_index = finalized_index
-                    path_finalized = True
-
-            if path_finalized:
-                self.path_world_coords = [end_snap["world_co"].copy()]
-
-            self.start_snap = self._copy_snap(end_snap)
-            self.start_snap["type"] = "VERTEX"
-            self.start_snap["label"] = "Vertex"
-            self.start_snap["object"] = context.edit_object
-            self.start_snap["vertex_index"] = end_vertex_index
-            self.start_vertex_index = end_vertex_index
-            self.hover_snap = self.start_snap
+        if event.type == "ESC" and event.value == "PRESS" and self.distance_text:
             self.distance_text = ""
+            self.distance_input_valid = True
             self._update_preview(context)
             return {"RUNNING_MODAL"}
 
-        if event.type in {"RIGHTMOUSE", "ESC", "RET", "NUMPAD_ENTER"} and event.value == "PRESS":
+        if event.type in {"RIGHTMOUSE", "ESC"} and event.value == "PRESS":
             clear_measure_state()
-            return {"FINISHED"}
+            return {"FINISHED"} if self.has_committed_segments else {"CANCELLED"}
 
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+        if is_navigation_event(event):
             return {"PASS_THROUGH"}
 
+        return {"RUNNING_MODAL"}
+
+    def _commit_segment(self, context):
+        end_snap = self._effective_end_snap(context)
+        if end_snap is None or (end_snap["world_co"] - self.start_snap["world_co"]).length < 1e-6:
+            if self.distance_text:
+                self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+            return {"RUNNING_MODAL"}
+
+        end_vertex_index = self._create_edge(
+            context,
+            self.start_snap,
+            end_snap,
+            start_vertex_index=self.start_vertex_index,
+        )
+        if end_vertex_index is None:
+            self.report({"WARNING"}, "Could not create a valid mesh segment")
+            return {"RUNNING_MODAL"}
+
+        self.has_committed_segments = True
+        self.path_world_coords.append(end_snap["world_co"].copy())
+        path_finalized = False
+        closing_path = (
+            len(self.path_world_coords) >= 4
+            and (self.path_world_coords[-1] - self.path_world_coords[0]).length <= 1e-5
+        )
+        if closing_path:
+            finalized_index = self._finalize_closed_path(context, self.path_world_coords)
+            if finalized_index is not None:
+                end_vertex_index = finalized_index
+                path_finalized = True
+            else:
+                self.report({"WARNING"}, "Closed path kept as edges because a face could not be created")
+        else:
+            finalized_index = self._finalize_open_surface_path(context, self.path_world_coords)
+            if finalized_index is not None:
+                end_vertex_index = finalized_index
+                path_finalized = True
+
+        if path_finalized:
+            self.path_world_coords = [end_snap["world_co"].copy()]
+
+        self.start_snap = self._copy_snap(end_snap)
+        self.start_snap["type"] = "VERTEX"
+        self.start_snap["label"] = "Vertex"
+        self.start_snap["object"] = context.edit_object
+        self.start_snap["vertex_index"] = end_vertex_index
+        self.start_vertex_index = end_vertex_index
+        self.hover_snap = self.start_snap
+        self.distance_text = ""
+        self.distance_input_valid = True
+        self._update_preview(context)
         return {"RUNNING_MODAL"}
 
     def _find_snap(self, context, event):
@@ -139,13 +168,7 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
 
         direction = snap["world_co"] - self.start_snap["world_co"]
         original_direction = direction.copy()
-
-        if self.axis == "X":
-            direction = direction.project(self._axis_vector("X"))
-        elif self.axis == "Y":
-            direction = direction.project(self._axis_vector("Y"))
-        elif self.axis == "Z":
-            direction = direction.project(self._axis_vector("Z"))
+        direction = constrained_delta(direction, self.axis)
 
         if direction.length < 1e-6:
             return None
@@ -154,8 +177,10 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
             try:
                 direction.normalize()
                 direction *= parse_distance_input(context, self.distance_text)
-            except ValueError:
+            except (TypeError, ValueError):
+                self.distance_input_valid = False
                 return None
+        self.distance_input_valid = True
 
         constrained = (direction - original_direction).length >= 1e-6
         if not constrained:
@@ -383,11 +408,6 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
         if len(local_points) == 2 and existing_surface_edge is not None and existing_surface_edge.link_faces:
             return end_vertex.index
 
-        CADDIM_OT_CreateLine._remove_loose_path_edges(bm, path_vertices)
-        for vertex in path_vertices[1:-1]:
-            if vertex.is_valid and not vertex.link_edges and not vertex.link_faces:
-                bm.verts.remove(vertex)
-
         try:
             new_face, split_loop = bmesh.utils.face_split(
                 face,
@@ -400,6 +420,13 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
             return None
         if new_face is None or split_loop is None:
             return None
+
+        # Keep the user's loose stroke intact until face_split has succeeded.
+        # This makes unsupported or numerically invalid cuts non-destructive.
+        CADDIM_OT_CreateLine._remove_loose_path_edges(bm, path_vertices)
+        for vertex in path_vertices[1:-1]:
+            if vertex.is_valid and not vertex.link_edges and not vertex.link_faces:
+                bm.verts.remove(vertex)
         split_loop.edge.select = True
         new_face.select = True
         face.select = True
@@ -435,7 +462,12 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
             if all(CADDIM_OT_CreateLine._point_in_face(face, point) for point in local_points)
         ]
         surface_face = min(containing_faces, key=lambda face: face.calc_area()) if containing_faces else None
-        if surface_face is not None and not any(vertex in surface_face.verts for vertex in loop_vertices):
+        shared_boundary_vertices = (
+            set(loop_vertices).intersection(surface_face.verts)
+            if surface_face is not None
+            else set()
+        )
+        if surface_face is not None and len(shared_boundary_vertices) <= 1:
             created_face = CADDIM_OT_CreateLine._cut_closed_loop_in_face(
                 bm,
                 surface_face,
@@ -476,8 +508,9 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
         use_smooth = surface_face.smooth
         flat_vertices = outer_vertices + hole_vertices
         original_faces = set(bm.faces)
-        bm.faces.remove(surface_face)
+        original_edges = set(bm.edges)
         ring_faces = []
+        inner_face = None
         try:
             for triangle in triangles:
                 face = bm.faces.new([flat_vertices[index] for index in triangle])
@@ -488,7 +521,18 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
             inner_face.material_index = material_index
             inner_face.smooth = use_smooth
         except ValueError:
+            for created_face in reversed(ring_faces + ([inner_face] if inner_face is not None else [])):
+                if created_face is not None and created_face.is_valid:
+                    bm.faces.remove(created_face)
+            for edge in list(bm.edges):
+                if edge not in original_edges and not edge.link_faces:
+                    bm.edges.remove(edge)
             return None
+
+        # Only remove the source face after the complete replacement topology
+        # exists. If construction failed above, the original face and stroke
+        # remain untouched.
+        bm.faces.remove(surface_face)
 
         protected_edges = set()
         for vertices in (outer_vertices, inner_vertices):
@@ -597,33 +641,24 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
         return set() if best_pair is None else best_pair
 
     def _update_preview(self, context=None):
-        state = {"state": self.state, "axis": self.axis, "distance_text": self.distance_text}
+        state = {
+            "state": self.state,
+            "axis": self.axis,
+            "distance_text": self.distance_text,
+            "distance_input_valid": self.distance_input_valid,
+        }
         if self.hover_snap is not None:
             state["hover_screen"] = self.hover_snap["screen_co"]
             state["hover_type"] = self.hover_snap.get("type", "WORLD")
             state["hover_label"] = self.hover_snap.get("label", "Point")
+            state["hover_snap"] = self._copy_snap(self.hover_snap)
         if self.start_snap is not None:
             state["start_world"] = self.start_snap["world_co"]
+            state["locked_snaps"] = [self._copy_snap(self.start_snap)]
             end_snap = self._effective_end_snap(context)
             if end_snap is not None:
                 state["end_world"] = end_snap["world_co"]
         set_measure_state(state)
-
-    def _handle_distance_key(self, event):
-        character = event.ascii
-        if character and character in "0123456789.-'\" /abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ":
-            self.distance_text += character
-            return True
-
-        if event.type == "BACK_SPACE":
-            self.distance_text = self.distance_text[:-1]
-            return True
-
-        if event.type == "MINUS" and not self.distance_text:
-            self.distance_text = "-"
-            return True
-
-        return False
 
     @staticmethod
     def _axis_vector(axis):

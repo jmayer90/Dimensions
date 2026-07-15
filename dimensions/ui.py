@@ -1,5 +1,6 @@
 import bpy
 
+from .anchors import resolve_anchor
 from .constants import SIDEBAR_CATEGORY
 from .properties import is_dimension_object
 from .units import get_configured_unit_style
@@ -144,6 +145,9 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
 
         start_box = layout.box()
         start_box.label(text="Start Anchor")
+        _start_world, start_status = resolve_anchor(props.start)
+        if start_status != "LINKED":
+            start_box.label(text=start_status.replace("_", " ").title(), icon="ERROR")
         start_box.prop(props.start, "target_object", text="Object")
         start_row = start_box.row(align=True)
         start_row.label(text="Anchor")
@@ -156,6 +160,9 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
 
         end_box = layout.box()
         end_box.label(text="End Anchor")
+        _end_world, end_status = resolve_anchor(props.end)
+        if end_status != "LINKED":
+            end_box.label(text=end_status.replace("_", " ").title(), icon="ERROR")
         end_box.prop(props.end, "target_object", text="Object")
         end_row = end_box.row(align=True)
         end_row.label(text="Anchor")
@@ -190,6 +197,8 @@ class CADDIM_PT_ConstructionGuides(CADDIM_PT_PanelBase, bpy.types.Panel):
 def _vertex_picker_text(anchor):
     if getattr(anchor, "anchor_type", "VERTEX") == "WORLD":
         return "World Point"
+    if getattr(anchor, "anchor_type", "VERTEX") == "OBJECT_POINT":
+        return "Object Point"
 
     if anchor.vertex_index < 0:
         return "Pick Vertex"
