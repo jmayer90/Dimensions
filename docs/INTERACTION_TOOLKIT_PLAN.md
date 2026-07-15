@@ -22,6 +22,7 @@ Dimensions extends that model in several ways:
 - Edit Mode candidates come from the live BMesh, allowing a committed segment to become the next segment's valid snap topology immediately.
 - Edit Mode fallback candidates stay on the active mesh and include projected boundary edges, preventing silhouette ray misses from binding a mesh path to geometry behind the edited object.
 - Vertices, corners, and measurement start/mid/end points own the full configurable capture radius instead of losing to a raw face or line projection that happens to be closer to the pointer.
+- Hovered mesh targets expose all visible base edges and vertices as a lightweight, depth-tested black edit-like overlay, while the exact target keeps a restrained colored emphasis and a hovered vertex emphasizes every incident edge. This supplies object and neighborhood context without overwhelming the model.
 - Persistent measurement endpoints also have a non-selectable two-vertex proxy for Blender-native transform snapping; the midpoint and finite segment remain Dimensions-level targets.
 - Candidate scoring should remain extensible to intersections, inferred axes, guide planes, and user-selectable target filters.
 
@@ -151,15 +152,16 @@ The current implementation makes Dimension, Measure, and Guide tools preview ove
 4. Done: add midpoint, face-center, and richer edge/guide inference targets.
 5. Partly done: typed distance and consistent confirmation/cancel staging are shared across all four priority tools. Parallel, perpendicular, and local-axis locks remain.
 6. Next: upgrade construction guides to support offsets, chained guide creation, and guide planes.
-7. Done for the single-face path: deferred boundary-to-boundary strokes cut without radial support fans, and simple closed coplanar paths create independent faces, including a loop sharing one existing cut/boundary vertex. Finalization keeps the loose path intact when validation or face creation fails. Next: multi-face path routing, configurable edge split/bind behavior, and robust handling for more complex boundary-sharing, self-intersecting, or non-manifold loops.
+7. Done for the single-face path: deferred boundary-to-boundary strokes cut without radial support fans, including on caps created by extrusion, and simple closed coplanar paths create independent faces. A loop may share one existing vertex or reuse one contiguous chain of existing face/cut edges; an existing edge no longer prematurely resets the active path. Global-axis constraints on an angled edit face are projected into the face plane and revalidated so they cannot masquerade as surface points while actually sitting off the mesh. Finalization keeps the loose path intact when validation or face creation fails. Next: genuine multi-face path routing, configurable edge split/bind behavior, and robust handling for multiple boundary chains, self-intersecting, or non-manifold loops.
 
 ## Current shared input contract
 
 - Hover establishes direction and snap identity; orange marks the current target and blue marks accepted targets.
 - `A`, `X`, `Y`, or `Z` chooses aligned/global-axis behavior before or after numeric entry, matching Blender transform ordering.
+- During an active directional stage, middle-mouse press/drag displays all three global axes and release locks the axis closest to the mouse direction. Before a start point is accepted, middle mouse passes through for viewport orbit.
 - Typing a scene-unit value changes the current distance; `Enter` accepts the current stage. Mesh Line commits that segment and continues the chain.
 - `Backspace` edits numeric text and steps back only after the text is empty.
 - `Esc` clears numeric text first, then steps back or exits. Right-click cancels one-shot tools; for Mesh Line it finishes the session and keeps accepted segments.
-- Wheel and middle-mouse navigation pass through to Blender.
+- Wheel navigation always passes through to Blender; middle mouse passes through before an active directional stage and becomes the axis gesture during that stage.
 
 This is the baseline Blender-friendly contract. Future Shift/arrow-key inference locks should extend it without changing these meanings.

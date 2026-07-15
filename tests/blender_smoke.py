@@ -22,7 +22,13 @@ from dimensions.collections import (
 )
 from dimensions.anchors import resolve_anchor, set_anchor_from_snap, set_world_anchor
 from dimensions.drawing import _snap_highlight_geometry
-from dimensions.interaction import axis_from_event, constrained_delta, is_confirm_event, update_distance_text
+from dimensions.interaction import (
+    axis_from_event,
+    constrained_delta,
+    is_confirm_event,
+    nearest_axis_from_screen_vectors,
+    update_distance_text,
+)
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
 from dimensions.operators.create_guide import CADDIM_OT_CreateGuide
 from dimensions.operators.create_line import CADDIM_OT_CreateLine
@@ -45,6 +51,7 @@ from dimensions.volume import (
     clear_volume_cache,
     get_mesh_volume,
 )
+from dimensions.workflow import initialize_scene_mesh_workflow
 
 
 def _line_operator_adapter():
@@ -105,6 +112,29 @@ def _vertex_snap(obj, x, y, z=0.0):
 
 
 class DimensionsBlenderSmokeTests(unittest.TestCase):
+    def test_mesh_workflow_defaults_initialize_once_per_scene(self):
+        scene = bpy.data.scenes.new("DimensionsMeshWorkflowDefaultsSmoke")
+        self.addCleanup(bpy.data.scenes.remove, scene)
+        scene.unit_settings.system = "METRIC"
+        scene.unit_settings.scale_length = 1.0
+        scene.dimensions_settings.mesh_workflow_initialized = False
+        scene.tool_settings.use_mesh_automerge = False
+        scene.tool_settings.use_mesh_automerge_and_split = False
+
+        self.assertTrue(initialize_scene_mesh_workflow(scene))
+        self.assertTrue(scene.tool_settings.use_mesh_automerge)
+        self.assertTrue(scene.tool_settings.use_mesh_automerge_and_split)
+        self.assertAlmostEqual(scene.tool_settings.double_threshold, 0.0001, places=7)
+
+        scene.tool_settings.use_mesh_automerge = False
+        scene.tool_settings.use_mesh_automerge_and_split = False
+        scene.tool_settings.double_threshold = 0.01
+
+        self.assertFalse(initialize_scene_mesh_workflow(scene))
+        self.assertFalse(scene.tool_settings.use_mesh_automerge)
+        self.assertFalse(scene.tool_settings.use_mesh_automerge_and_split)
+        self.assertAlmostEqual(scene.tool_settings.double_threshold, 0.01, places=6)
+
     def _make_edit_object(self, name, vertices, edges=(), faces=()):
         mesh = bpy.data.meshes.new(f"{name}Mesh")
         mesh.from_pydata(vertices, edges, faces)
@@ -157,6 +187,13 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         self.assertEqual(axis_from_event(axis_event, ""), "X")
         self.assertTrue(is_confirm_event(enter_event))
         self.assertEqual(constrained_delta(Vector((2.0, 3.0, 4.0)), "Y"), Vector((0.0, 3.0, 0.0)))
+        self.assertEqual(
+            nearest_axis_from_screen_vectors(
+                Vector((8.0, 1.0)),
+                {"X": Vector((1.0, 0.0)), "Y": Vector((0.0, 1.0))},
+            ),
+            "X",
+        )
 
     def test_dimension_and_guide_apply_typed_scene_unit_distances(self):
         unit_settings = bpy.context.scene.unit_settings
@@ -196,6 +233,37 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
             unit_settings.system = previous_system
             unit_settings.scale_length = previous_scale
 
+    def test_mesh_line_axis_constraint_stays_on_a_sloped_face(self):
+        obj, mesh = self._make_edit_object(
+            "DimensionsSlopedFaceAxisSmoke",
+            [(-1.0, -1.0, -1.0), (1.0, -1.0, 1.0), (1.0, 1.0, 1.0), (-1.0, 1.0, -1.0)],
+            faces=[(0, 1, 2, 3)],
+        )
+        try:
+            hover = _vertex_snap(obj, 1.0, 1.0, 1.0)
+            hover["vertex_index"] = 2
+            hover["face_index"] = 0
+            operator = SimpleNamespace(
+                start_snap=_world_snap(-1.0, 0.0, -1.0),
+                hover_snap=hover,
+                axis="X",
+                distance_text="",
+                distance_input_valid=True,
+                _copy_snap=lambda snap: dict(snap),
+            )
+            effective = CADDIM_OT_CreateLine._effective_end_snap(operator, bpy.context)
+            self.assertEqual(effective["type"], "FACE")
+            self.assertLess((effective["world_co"] - Vector((1.0, 0.0, 1.0))).length, 1e-5)
+            bm = bmesh.from_edit_mesh(mesh)
+            self.assertTrue(
+                CADDIM_OT_CreateLine._point_in_face(
+                    bm.faces[0],
+                    obj.matrix_world.inverted_safe() @ effective["world_co"],
+                )
+            )
+        finally:
+            self._remove_edit_object(obj, mesh)
+
     def test_snap_highlight_geometry_resolves_vertex_edge_and_face(self):
         obj = self._make_object(
             "DimensionsHighlightSmoke",
@@ -211,7 +279,11 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         face_snap = _face_snap(obj, 0.25, 0.25, 0.0)
         face_snap["face_index"] = 0
 
-        self.assertEqual(_snap_highlight_geometry(context, vertex_snap)["kind"], "VERTEX")
+        vertex_geometry = _snap_highlight_geometry(context, vertex_snap)
+        self.assertEqual(vertex_geometry["kind"], "VERTEX")
+        self.assertEqual(len(vertex_geometry["connected_edges"]), 4)
+        self.assertEqual(len(vertex_geometry["object_edges"]), 6)
+        self.assertEqual(len(vertex_geometry["object_vertices"]), 3)
         self.assertEqual(len(_snap_highlight_geometry(context, edge_snap)["points"]), 2)
         self.assertEqual(len(_snap_highlight_geometry(context, face_snap)["points"]), 3)
 
@@ -692,6 +764,154 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
             ]
             self.assertEqual(len(created), 1)
             self.assertAlmostEqual(created[0].calc_area(), 3.55, places=5)
+        finally:
+            self._remove_edit_object(obj, mesh)
+
+    def test_closed_surface_path_can_reuse_an_existing_cut_edge(self):
+        obj, mesh = self._make_edit_object(
+            "DimensionsReusedCutEdgeSmoke",
+            [(-2.0, -2.0, 0.0), (2.0, -2.0, 0.0), (2.0, 2.0, 0.0), (-2.0, 2.0, 0.0)],
+            faces=[(0, 1, 2, 3)],
+        )
+        first_cut = [
+            Vector((-1.0, 2.0, 0.0)),
+            Vector((0.0, 0.0, 0.0)),
+            Vector((1.0, 2.0, 0.0)),
+        ]
+        reused_edge_loop = [
+            Vector((-1.0, 2.0, 0.0)),
+            Vector((0.0, 0.0, 0.0)),
+            Vector((-0.7, -1.2, 0.0)),
+            Vector((-1.6, 0.0, 0.0)),
+            Vector((-1.0, 2.0, 0.0)),
+        ]
+        try:
+            operator = _line_operator_adapter()
+            start_index = CADDIM_OT_CreateLine._create_edge(
+                operator,
+                bpy.context,
+                _edge_snap(obj, *first_cut[0]),
+                _face_snap(obj, *first_cut[1]),
+            )
+            CADDIM_OT_CreateLine._create_edge(
+                operator,
+                bpy.context,
+                _vertex_snap(obj, *first_cut[1]),
+                _edge_snap(obj, *first_cut[2]),
+                start_vertex_index=start_index,
+            )
+            self.assertIsNotNone(
+                CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, first_cut)
+            )
+
+            end_index = None
+            for index in range(len(reused_edge_loop) - 1):
+                end_index = CADDIM_OT_CreateLine._create_edge(
+                    operator,
+                    bpy.context,
+                    _vertex_snap(obj, *reused_edge_loop[index]),
+                    _vertex_snap(obj, *reused_edge_loop[index + 1]),
+                    start_vertex_index=end_index,
+                )
+                if index < len(reused_edge_loop) - 2:
+                    self.assertIsNone(
+                        CADDIM_OT_CreateLine._finalize_open_surface_path(
+                            bpy.context,
+                            reused_edge_loop[: index + 2],
+                        )
+                    )
+
+            self.assertIsNotNone(
+                CADDIM_OT_CreateLine._finalize_closed_path(bpy.context, reused_edge_loop)
+            )
+            bm = bmesh.from_edit_mesh(mesh)
+            expected = {tuple(point) for point in reused_edge_loop[:-1]}
+            created = [
+                face
+                for face in bm.faces
+                if {tuple(vertex.co) for vertex in face.verts} == expected
+            ]
+            self.assertEqual(len(created), 1)
+            for start, end in zip(reused_edge_loop, reused_edge_loop[1:]):
+                start_vertex = CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, start)
+                end_vertex = CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, end)
+                edge = bm.edges.get((start_vertex, end_vertex))
+                self.assertIsNotNone(edge)
+                self.assertTrue(edge.link_faces)
+        finally:
+            self._remove_edit_object(obj, mesh)
+
+    def test_path_cuts_the_cap_of_a_face_created_by_extrusion(self):
+        obj, mesh = self._make_edit_object(
+            "DimensionsExtrudedCapCutSmoke",
+            [(-2.0, -2.0, 0.0), (2.0, -2.0, 0.0), (2.0, 2.0, 0.0), (-2.0, 2.0, 0.0)],
+            faces=[(0, 1, 2, 3)],
+        )
+        inset_loop = [
+            Vector((-1.0, -1.0, 0.0)),
+            Vector((1.0, -1.0, 0.0)),
+            Vector((1.0, 1.0, 0.0)),
+            Vector((-1.0, 1.0, 0.0)),
+            Vector((-1.0, -1.0, 0.0)),
+        ]
+        cap_cut = [
+            Vector((-1.0, 0.0, 1.0)),
+            Vector((0.0, 0.35, 1.0)),
+            Vector((1.0, 0.0, 1.0)),
+        ]
+        try:
+            operator = _line_operator_adapter()
+            end_index = None
+            for index in range(len(inset_loop) - 1):
+                end_index = CADDIM_OT_CreateLine._create_edge(
+                    operator,
+                    bpy.context,
+                    _face_snap(obj, *inset_loop[index]),
+                    _face_snap(obj, *inset_loop[index + 1]),
+                    start_vertex_index=end_index,
+                )
+            self.assertIsNotNone(
+                CADDIM_OT_CreateLine._finalize_closed_path(bpy.context, inset_loop)
+            )
+
+            bm = bmesh.from_edit_mesh(mesh)
+            inner_coordinates = {tuple(point) for point in inset_loop[:-1]}
+            inner_face = next(
+                face
+                for face in bm.faces
+                if {tuple(vertex.co) for vertex in face.verts} == inner_coordinates
+            )
+            extruded = bmesh.ops.extrude_discrete_faces(bm, faces=[inner_face])
+            cap_face = extruded["faces"][0]
+            bmesh.ops.translate(
+                bm,
+                verts=list(cap_face.verts),
+                vec=Vector((0.0, 0.0, 1.0)),
+            )
+            bmesh.update_edit_mesh(mesh, loop_triangles=True, destructive=True)
+
+            middle_index = CADDIM_OT_CreateLine._create_edge(
+                operator,
+                bpy.context,
+                _edge_snap(obj, *cap_cut[0]),
+                _face_snap(obj, *cap_cut[1]),
+            )
+            CADDIM_OT_CreateLine._create_edge(
+                operator,
+                bpy.context,
+                _vertex_snap(obj, *cap_cut[1]),
+                _edge_snap(obj, *cap_cut[2]),
+                start_vertex_index=middle_index,
+            )
+            face_count_before = len(bmesh.from_edit_mesh(mesh).faces)
+            self.assertIsNotNone(
+                CADDIM_OT_CreateLine._finalize_open_surface_path(bpy.context, cap_cut)
+            )
+            bm = bmesh.from_edit_mesh(mesh)
+            self.assertEqual(len(bm.faces), face_count_before + 1)
+            middle = CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, cap_cut[1])
+            self.assertIsNotNone(middle)
+            self.assertEqual(len(middle.link_faces), 2)
         finally:
             self._remove_edit_object(obj, mesh)
 

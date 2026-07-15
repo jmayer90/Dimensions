@@ -5,6 +5,7 @@ from ..collections import create_measurement_object, ensure_measurement_snap_pro
 from ..drawing import clear_measure_state, set_measure_state
 from ..interaction import (
     axis_from_event,
+    axis_from_mouse_direction,
     constrained_delta,
     is_confirm_event,
     is_navigation_event,
@@ -34,6 +35,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         self.hover_snap = None
         self.distance_text = ""
         self.distance_input_valid = True
+        self.axis_gesture_active = False
         self._update_overlay(context)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
@@ -42,6 +44,17 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         if context.area is None or context.area.type != "VIEW_3D":
             clear_measure_state()
             return {"CANCELLED"}
+
+        if event.type == "MIDDLEMOUSE" and self.state == "PICK_END":
+            if event.value == "PRESS":
+                self.axis_gesture_active = True
+                self._update_axis_gesture(context, event)
+                self._update_overlay(context)
+                return {"RUNNING_MODAL"}
+            if event.value == "RELEASE" and self.axis_gesture_active:
+                self.axis_gesture_active = False
+                self._update_overlay(context)
+                return {"RUNNING_MODAL"}
 
         axis = axis_from_event(event, self.distance_text)
         if axis is not None:
@@ -60,6 +73,8 @@ class CADDIM_OT_Measure(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
+            if self.axis_gesture_active:
+                self._update_axis_gesture(context, event)
             self.hover_snap = self._find_snap(context, event)
             self._update_effective_end(context)
             self._update_overlay(context)
@@ -152,6 +167,16 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         self.report({"INFO"}, "Created persistent measurement")
         return {"FINISHED"}
 
+    def _update_axis_gesture(self, context, event):
+        axis = axis_from_mouse_direction(
+            context,
+            self.start_world,
+            event.mouse_region_x,
+            event.mouse_region_y,
+        )
+        if axis is not None:
+            self.axis = axis
+
     def _clear(self, context):
         self.state = "PICK_START"
         self.start_world = None
@@ -159,6 +184,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         self.end_world = None
         self.distance_text = ""
         self.distance_input_valid = True
+        self.axis_gesture_active = False
         self._update_overlay(context)
 
     def _update_overlay(self, context):
@@ -167,6 +193,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             "axis": self.axis,
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
+            "axis_gesture_active": self.axis_gesture_active,
         }
         if self.hover_snap is not None:
             state["hover_screen"] = self.hover_snap["screen_co"]
@@ -175,6 +202,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             state["hover_snap"] = copy_snap(self.hover_snap)
         if self.start_world is not None:
             state["start_world"] = self.start_world
+            state["axis_origin_world"] = self.start_world
         if self.start_snap is not None:
             state["locked_snaps"] = [copy_snap(self.start_snap)]
         if self.end_world is not None:

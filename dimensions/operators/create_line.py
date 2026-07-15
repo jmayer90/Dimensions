@@ -4,6 +4,7 @@ import bpy
 from ..drawing import clear_measure_state, set_measure_state
 from ..interaction import (
     axis_from_event,
+    axis_from_mouse_direction,
     constrained_delta,
     is_confirm_event,
     is_navigation_event,
@@ -33,6 +34,7 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
         self.hover_snap = self._find_snap(context, event)
         self.distance_text = ""
         self.distance_input_valid = True
+        self.axis_gesture_active = False
         self._update_preview(context)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
@@ -41,6 +43,17 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
         if context.area is None or context.area.type != "VIEW_3D" or context.mode != "EDIT_MESH":
             clear_measure_state()
             return {"CANCELLED"}
+
+        if event.type == "MIDDLEMOUSE" and self.state == "PICK_END":
+            if event.value == "PRESS":
+                self.axis_gesture_active = True
+                self._update_axis_gesture(context, event)
+                self._update_preview(context)
+                return {"RUNNING_MODAL"}
+            if event.value == "RELEASE" and self.axis_gesture_active:
+                self.axis_gesture_active = False
+                self._update_preview(context)
+                return {"RUNNING_MODAL"}
 
         axis = axis_from_event(event, self.distance_text)
         if axis is not None:
@@ -57,6 +70,8 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
+            if self.axis_gesture_active:
+                self._update_axis_gesture(context, event)
             self.hover_snap = self._find_snap(context, event)
             self._update_preview(context)
             return {"RUNNING_MODAL"}
@@ -168,7 +183,20 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
 
         direction = snap["world_co"] - self.start_snap["world_co"]
         original_direction = direction.copy()
-        direction = constrained_delta(direction, self.axis)
+        _surface_bmesh, surface_face, surface_normal = CADDIM_OT_CreateLine._surface_face_for_snap(
+            context,
+            snap,
+        )
+        if self.axis in {"X", "Y", "Z"} and surface_normal is not None:
+            direction = CADDIM_OT_CreateLine._axis_delta_on_face(
+                direction,
+                self.axis,
+                surface_normal,
+            )
+            if direction is None:
+                return None
+        else:
+            direction = constrained_delta(direction, self.axis)
 
         if direction.length < 1e-6:
             return None
@@ -186,11 +214,30 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
         if not constrained:
             return snap
 
-        remains_on_active_surface = (
-            context is not None
-            and snap.get("type") == "FACE"
-            and snap.get("object") == context.edit_object
-        )
+        candidate_world = self.start_snap["world_co"] + direction
+        remains_on_active_surface = False
+        if surface_face is not None and context is not None:
+            candidate_local = context.edit_object.matrix_world.inverted_safe() @ candidate_world
+            remains_on_active_surface = CADDIM_OT_CreateLine._point_in_face(
+                surface_face,
+                candidate_local,
+            )
+            preserves_edge_snap = (
+                snap.get("type") == "EDGE"
+                and (candidate_world - snap["world_co"]).length <= 1e-5
+            )
+            preserves_vertex_snap = (
+                snap.get("type") == "VERTEX"
+                and (candidate_world - snap["world_co"]).length <= 1e-5
+            )
+            if remains_on_active_surface and not (preserves_edge_snap or preserves_vertex_snap):
+                snap["type"] = "FACE"
+                snap["label"] = "On Face"
+                snap["object"] = context.edit_object
+                snap["face_index"] = surface_face.index
+                snap["vertex_index"] = -1
+                for key in ("edge_index", "edge_vertices", "edge_factor"):
+                    snap.pop(key, None)
         if not remains_on_active_surface:
             snap["type"] = "WORLD"
             snap["label"] = "Constrained Point"
@@ -198,8 +245,49 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
             snap["vertex_index"] = -1
             for key in ("edge_index", "edge_vertices", "edge_factor", "face_index"):
                 snap.pop(key, None)
-        snap["world_co"] = self.start_snap["world_co"] + direction
+        snap["world_co"] = candidate_world
         return snap
+
+    @staticmethod
+    def _surface_face_for_snap(context, snap):
+        if (
+            context is None
+            or context.edit_object is None
+            or snap.get("object") != context.edit_object
+            or snap.get("type") not in {"FACE", "EDGE", "VERTEX"}
+        ):
+            return None, None, None
+        bm = bmesh.from_edit_mesh(context.edit_object.data)
+        bm.faces.ensure_lookup_table()
+        bm.faces.index_update()
+        face_index = snap.get("face_index", -1)
+        if not (0 <= face_index < len(bm.faces)):
+            return None, None, None
+        face = bm.faces[face_index]
+        normal = context.edit_object.matrix_world.to_3x3().inverted_safe().transposed() @ face.normal
+        if normal.length < 1e-8:
+            return bm, face, None
+        return bm, face, normal.normalized()
+
+    @staticmethod
+    def _axis_delta_on_face(raw_delta, axis, face_normal):
+        axis_vector = CADDIM_OT_CreateLine._axis_vector(axis)
+        face_normal = face_normal.normalized()
+        tangent = axis_vector - face_normal * axis_vector.dot(face_normal)
+        axis_component = tangent.dot(axis_vector)
+        if tangent.length < 1e-8 or abs(axis_component) < 1e-8:
+            return None
+        return tangent * (raw_delta.dot(axis_vector) / axis_component)
+
+    def _update_axis_gesture(self, context, event):
+        axis = axis_from_mouse_direction(
+            context,
+            self.start_snap["world_co"] if self.start_snap is not None else None,
+            event.mouse_region_x,
+            event.mouse_region_y,
+        )
+        if axis is not None:
+            self.axis = axis
 
     def _create_edge(self, context, start_snap, end_snap, start_vertex_index=None):
         obj = context.edit_object
@@ -406,7 +494,9 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
         face = min(common_faces, key=lambda candidate: candidate.calc_area())
         existing_surface_edge = bm.edges.get((start_vertex, end_vertex))
         if len(local_points) == 2 and existing_surface_edge is not None and existing_surface_edge.link_faces:
-            return end_vertex.index
+            # Keep an existing boundary edge in the active path. It may be the
+            # reused side of a face the user is about to outline.
+            return None
 
         try:
             new_face, split_loop = bmesh.utils.face_split(
@@ -473,10 +563,14 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
                 surface_face,
                 loop_vertices,
             )
+        elif surface_face is not None:
+            created_face = CADDIM_OT_CreateLine._split_face_with_reused_boundary_path(
+                bm,
+                surface_face,
+                loop_vertices,
+            )
         elif surface_face is None:
             created_face = CADDIM_OT_CreateLine._create_isolated_face(bm, loop_vertices)
-        else:
-            return None
 
         if created_face is None:
             return None
@@ -488,6 +582,67 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
         bmesh.update_edit_mesh(obj.data, loop_triangles=True, destructive=True)
         closure_vertex = CADDIM_OT_CreateLine._find_bmesh_vertex_at(bm, local_points[0])
         return None if closure_vertex is None else closure_vertex.index
+
+    @staticmethod
+    def _split_face_with_reused_boundary_path(bm, surface_face, loop_vertices):
+        """Split a face when a closed stroke reuses one contiguous boundary chain."""
+        vertex_count = len(loop_vertices)
+        boundary_edges = []
+        for index, vertex in enumerate(loop_vertices):
+            edge = bm.edges.get((vertex, loop_vertices[(index + 1) % vertex_count]))
+            boundary_edges.append(edge is not None and edge in surface_face.edges)
+
+        if not any(boundary_edges) or all(boundary_edges):
+            return None
+
+        path_starts = [
+            index
+            for index, on_boundary in enumerate(boundary_edges)
+            if not on_boundary and boundary_edges[index - 1]
+        ]
+        if len(path_starts) != 1:
+            return None
+
+        path_indices = [path_starts[0]]
+        edge_index = path_starts[0]
+        while not boundary_edges[edge_index]:
+            edge_index = (edge_index + 1) % vertex_count
+            path_indices.append(edge_index)
+            if edge_index == path_starts[0]:
+                return None
+
+        path_vertices = [loop_vertices[index] for index in path_indices]
+        start_vertex = path_vertices[0]
+        end_vertex = path_vertices[-1]
+        if (
+            start_vertex is end_vertex
+            or start_vertex not in surface_face.verts
+            or end_vertex not in surface_face.verts
+        ):
+            return None
+
+        try:
+            new_face, split_loop = bmesh.utils.face_split(
+                surface_face,
+                start_vertex,
+                end_vertex,
+                coords=[vertex.co.copy() for vertex in path_vertices[1:-1]],
+                use_exist=True,
+            )
+        except (TypeError, ValueError):
+            return None
+        if new_face is None or split_loop is None:
+            return None
+
+        closed_vertices = list(loop_vertices) + [loop_vertices[0]]
+        CADDIM_OT_CreateLine._remove_loose_path_edges(bm, closed_vertices)
+        for vertex in path_vertices[1:-1]:
+            if vertex.is_valid and not vertex.link_edges and not vertex.link_faces:
+                bm.verts.remove(vertex)
+        split_loop.edge.select = True
+        new_face.select = True
+        surface_face.select = True
+        return new_face
 
     @staticmethod
     def _cut_closed_loop_in_face(bm, surface_face, loop_vertices):
@@ -646,6 +801,7 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
             "axis": self.axis,
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
+            "axis_gesture_active": self.axis_gesture_active,
         }
         if self.hover_snap is not None:
             state["hover_screen"] = self.hover_snap["screen_co"]
@@ -654,6 +810,7 @@ class CADDIM_OT_CreateLine(bpy.types.Operator):
             state["hover_snap"] = self._copy_snap(self.hover_snap)
         if self.start_snap is not None:
             state["start_world"] = self.start_snap["world_co"]
+            state["axis_origin_world"] = self.start_snap["world_co"]
             state["locked_snaps"] = [self._copy_snap(self.start_snap)]
             end_snap = self._effective_end_snap(context)
             if end_snap is not None:

@@ -45,7 +45,7 @@ This document tracks two persistent but deliberately distinct construction workf
 
 Both tools finish after committing one construction object. Run the tool again to create another.
 
-Hovered mesh elements, guides, and measurements are highlighted orange; accepted start targets are highlighted blue. Numeric input, axis state, and invalid values appear beside the pointer. `Backspace` edits text before resetting a pick, `Esc` clears typed input before stepping back/exiting, and right-click cancels the uncommitted construction object.
+Hovered mesh elements, guides, and measurements are highlighted orange; hovered mesh objects expose all visible base edges and vertices through a lightweight black edit-like overlay, and a target vertex gives its incident edges a restrained colored emphasis. Accepted start targets are highlighted blue. Numeric input, axis state, and invalid values appear beside the pointer. During endpoint placement, middle-mouse drag displays and selects the nearest projected global axis, while middle mouse before the first point remains viewport orbit. `Backspace` edits text before resetting a pick, `Esc` clears typed input before stepping back/exiting, and right-click cancels the uncommitted construction object.
 
 ## Deliberate first-pass limitations
 

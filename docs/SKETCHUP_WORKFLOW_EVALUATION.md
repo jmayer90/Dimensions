@@ -11,7 +11,7 @@ Dimensions now contains credible first versions of all four priority workflows:
 - a finite measurement/tape workflow; and
 - a chained Edit Mode pencil/line tool.
 
-This is a strong experimental core, not yet a production-safe SketchUp-style modeling layer. The add-on already solves more of the hard geometry problem than its `0.1.0` version suggests: shared logical snapping, free-space previews, typed scene-unit lengths, persistent annotations, vertex/edge binding, edge splitting, single-face knife-like paths, and closed-loop face creation are all present. The implementation follow-up passed all 35 Blender 5.1 smoke tests.
+This is a strong experimental core, not yet a production-safe SketchUp-style modeling layer. The add-on already solves more of the hard geometry problem than its `0.1.0` version suggests: shared logical snapping, free-space previews, typed scene-unit lengths, persistent annotations, vertex/edge binding, edge splitting, single-face knife-like paths, and closed-loop face creation are all present. The latest implementation follow-up passed all 38 Blender 5.1 smoke tests.
 
 The largest remaining gap is not the absence of more tools. SketchUp's characteristic speed comes from a shared interaction language: inference points and lines, lockable directions and planes, a Measurements box that works consistently, predictable cancel/undo behavior, and immediate visual explanations of what will happen. Dimensions currently has useful pieces of that language, but each modal operator still implements a different subset.
 
@@ -44,8 +44,8 @@ Scores describe readiness for the requested SketchUp-like workflow, not code eff
 | Construction lines | 3/5 | Persistent infinite lines, aligned/global axes, linked vertex anchors, visibility, selection, clearing, snap projection | The workflow creates a line from two points instead of the common offset-from-edge guide; no guide points, angular guides, editable offsets, dashes, or chain/repeat workflow |
 | Dimensions | 4/5 | Three-click placement, typed endpoint/offset values, target highlighting, true 3D value, object-local edge/face anchors, reattachment, styling, hit selection, and broken-reference warnings | Vertex identity remains index-based; no projected/angular/radial/baseline/chain dimensions or export/render path |
 | Tape Measure | 2.5/5 | Continuous preview, logical snaps, typed units, global-axis constraints, persistent finite segment, label, custom and native endpoint snap targets | This is a saved construction segment, not yet a full Tape Measure: no hover-only readout, mode cycling, offset guide/guide point creation, optional ephemeral result, or resize-to-measure workflow |
-| Pencil / Line | 3.5/5 | Chained segments, typed/Enter commit, global axes, live target highlighting, direct vertex binding, edge splitting, recoverable deferred one-face cuts, and closed loops sharing one existing vertex | One modal session has coarse undo semantics; no inference locks, multi-face cutting, or robust self-intersection/non-manifold handling |
-| Shared inference | 3/5 | Common numeric editing/confirmation, target and lock highlights, vertices, edge projections, midpoints, face centers/points, guides, measurements, and free-space points | Full visible-vertex scans, no depth filtering, intersections, extensions, local axes, parallel/perpendicular inference, guide planes, or target filters |
+| Pencil / Line | 3.5/5 | Chained segments, typed/Enter commit, keyboard/MMB axes projected safely on angled faces, lightweight mesh-neighborhood highlighting, direct vertex binding, edge splitting, extruded-cap cuts, recoverable one-face cuts, and closed loops that reuse a contiguous cut-edge chain | One modal session has coarse undo semantics; no inference locks, genuine multi-face cutting, or robust self-intersection/non-manifold handling |
+| Shared inference | 3.5/5 | Common numeric editing/confirmation, lightweight black edit-like object/vertex context, keyboard/MMB global-axis selection, vertices, edges, midpoints, faces, guides, measurements, and free-space points | Full visible-vertex scans, no depth filtering, intersections, extensions, local axes, parallel/perpendicular inference, guide planes, or target filters |
 
 ## Priority findings
 
@@ -55,7 +55,7 @@ The implementation follow-up changed `dimensions/operators/create_line.py` so op
 
 - `_finalize_open_surface_path()` now leaves the accepted path untouched until the replacement split exists.
 - `_cut_closed_loop_in_face()` now leaves the original surface face in place until all replacement geometry exists, and cleans up new partial geometry on failure.
-- A closed loop may share one vertex with the surrounding face or an existing cut; this covers the reported triangle-apex/odd-loop case.
+- A closed loop may share one vertex or one contiguous existing boundary/cut-edge chain with the surrounding face. Existing surface edges remain part of the active stroke instead of prematurely resetting it; this covers both reported triangle reuse cases.
 
 The current happy-path tests are valuable, but unsupported, degenerate, self-intersecting, boundary-touching, or numerically difficult input is exactly where a modeling tool must fail without damaging the mesh.
 
@@ -99,7 +99,8 @@ The operators now share numeric editing, axis parsing, confirmation detection, n
 
 - Dimension, Measure, Guide, and Pencil accept scene-unit values and `Enter` accepts the current stage.
 - Pencil `Enter` commits the current segment and continues the chain; `Esc` clears typed input first, while `Esc`/right-click with no text ends the chain and keeps accepted geometry.
-- Hovered targets are orange, locked targets are blue, and the cursor label shows snap type, axis, numeric text, and invalid input.
+- Hovered mesh objects expose lightweight, depth-tested black base edges and vertices; the exact target is orange, a vertex gives every incident edge restrained emphasis, locked targets are blue, and the cursor label shows snap type, axis, numeric text, and invalid input.
+- Middle-mouse drag during directional stages shows the global axis triad and locks the closest projected axis on release, while pre-pick middle mouse still orbits.
 - `A/X/Y/Z` remain axis keys before or after numeric entry, matching Blender transform-style ordering; other letters remain available for unit suffixes.
 
 Remaining recommendation:
@@ -254,7 +255,8 @@ The current background Blender suite provides useful coverage of geometry helper
 Audit snapshot:
 
 - Blender 5.1.2 manifest validation: passed.
-- Blender 5.1.2 background smoke suite: 35 passed.
+- Blender 5.1.2 background smoke suite: 38 passed.
+- Added regressions proving a tool-created face can be extruded and its new cap cut, and that keyboard/MMB axis constraints remain on a sloped edit face instead of creating mislabeled off-surface points.
 - Added regression coverage for a closed loop sharing an existing cut vertex, forced open-cut failure preservation, shared numeric input, target-highlight geometry, object-local anchors, and axis-guide anchor independence.
 - The non-planar visible-face split regression briefly failed during the audit and passed after the current surface-tolerance update; retain both that test and the off-surface rejection test.
 

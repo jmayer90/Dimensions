@@ -260,6 +260,13 @@ class CADDIM_PG_Guide(bpy.types.PropertyGroup):
 
 
 class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
+    mesh_workflow_initialized: bpy.props.BoolProperty(
+        name="Mesh Workflow Initialized",
+        description="Internal marker preserving user changes after the add-on sets initial mesh workflow defaults",
+        default=False,
+        options={"HIDDEN"},
+    )
+
     unit_style: bpy.props.EnumProperty(
         name="Unit Style",
         items=[

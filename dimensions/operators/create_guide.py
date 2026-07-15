@@ -5,6 +5,7 @@ from ..collections import create_guide_object, remove_measurement_snap_proxies
 from ..drawing import clear_guide_preview_state, set_guide_preview_state
 from ..interaction import (
     axis_from_event,
+    axis_from_mouse_direction,
     constrained_delta,
     is_confirm_event,
     is_navigation_event,
@@ -28,8 +29,9 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         self.hover_snap = None
         self.distance_text = ""
         self.distance_input_valid = True
+        self.axis_gesture_active = False
         self.state = "PICK_START"
-        self._update_preview()
+        self._update_preview(context)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
@@ -37,6 +39,17 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         if context.area is None or context.area.type != "VIEW_3D":
             clear_guide_preview_state()
             return {"CANCELLED"}
+
+        if event.type == "MIDDLEMOUSE" and self.state == "PICK_END":
+            if event.value == "PRESS":
+                self.axis_gesture_active = True
+                self._update_axis_gesture(context, event)
+                self._update_preview(context)
+                return {"RUNNING_MODAL"}
+            if event.value == "RELEASE" and self.axis_gesture_active:
+                self.axis_gesture_active = False
+                self._update_preview(context)
+                return {"RUNNING_MODAL"}
 
         axis = axis_from_event(event, self.distance_text)
         if axis is not None:
@@ -53,6 +66,8 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
+            if self.axis_gesture_active:
+                self._update_axis_gesture(context, event)
             plane_point = self.start_snap["world_co"] if self.start_snap is not None else None
             self.hover_snap = find_nearest_snap_point(
                 context,
@@ -61,7 +76,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
                 include_free=True,
                 plane_point=plane_point,
             )
-            self._update_preview()
+            self._update_preview(context)
             return {"RUNNING_MODAL"}
 
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
@@ -80,7 +95,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
                 self.start_snap = self._copy_snap(self.hover_snap)
                 self.state = "PICK_END"
                 self.distance_text = ""
-                self._update_preview()
+                self._update_preview(context)
                 return {"RUNNING_MODAL"}
 
             return self._commit(context)
@@ -93,7 +108,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         if event.type in {"BACK_SPACE", "DEL"} and event.value == "PRESS":
             if self.state == "PICK_END":
                 self._reset_to_start()
-                self._update_preview()
+                self._update_preview(context)
             return {"RUNNING_MODAL"}
 
         if event.type == "ESC" and event.value == "PRESS":
@@ -104,7 +119,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
             if self.state == "PICK_END":
                 self._reset_to_start()
-                self._update_preview()
+                self._update_preview(context)
                 return {"RUNNING_MODAL"}
             clear_guide_preview_state()
             return {"CANCELLED"}
@@ -160,6 +175,17 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         self.state = "PICK_START"
         self.distance_text = ""
         self.distance_input_valid = True
+        self.axis_gesture_active = False
+
+    def _update_axis_gesture(self, context, event):
+        axis = axis_from_mouse_direction(
+            context,
+            self.start_snap["world_co"] if self.start_snap is not None else None,
+            event.mouse_region_x,
+            event.mouse_region_y,
+        )
+        if axis is not None:
+            self.axis = axis
 
     def _create(self, context, end_snap):
         obj = create_guide_object(context)
@@ -179,6 +205,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             "state": self.state,
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
+            "axis_gesture_active": self.axis_gesture_active,
         }
         if self.hover_snap is not None:
             state["hover_screen"] = self.hover_snap["screen_co"]
@@ -187,6 +214,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             state["hover_snap"] = self._copy_snap(self.hover_snap)
         if self.start_snap is not None:
             state["start_world"] = self.start_snap["world_co"]
+            state["axis_origin_world"] = self.start_snap["world_co"]
             state["locked_snaps"] = [self._copy_snap(self.start_snap)]
         if self.state == "PICK_END" and self.hover_snap is not None:
             end_snap = self._effective_end_snap(context)

@@ -437,6 +437,9 @@ def draw_world_guides():
     try:
         _draw_construction_guides(context, shader)
         _draw_tool_snap_highlights(context, shader)
+        for interaction_state in (_preview_state, _guide_preview_state, _measure_state):
+            if interaction_state is not None:
+                _draw_axis_gesture(context, shader, interaction_state)
         if _guide_preview_state is not None:
             _draw_guide_preview_world(context, shader, _guide_preview_state)
     finally:
@@ -521,6 +524,31 @@ def _draw_world_segment(shader, start_world, end_world, color, line_width):
     batch.draw(shader)
 
 
+def _draw_axis_gesture(context, shader, state):
+    if not state.get("axis_gesture_active"):
+        return
+    origin = state.get("axis_origin_world")
+    if origin is None:
+        return
+    origin = Vector(origin)
+    extent = max(float(context.region_data.view_distance) * 0.22, 0.1)
+    active_axis = state.get("axis", "ALIGNED")
+    axes = {
+        "X": (Vector((1.0, 0.0, 0.0)), (1.0, 0.18, 0.12, 0.95)),
+        "Y": (Vector((0.0, 1.0, 0.0)), (0.22, 1.0, 0.18, 0.95)),
+        "Z": (Vector((0.0, 0.0, 1.0)), (0.20, 0.48, 1.0, 0.95)),
+    }
+    for axis, (direction, color) in axes.items():
+        width = 5.0 if axis == active_axis else 2.0
+        _draw_world_segment(
+            shader,
+            origin - direction * extent,
+            origin + direction * extent,
+            color,
+            width,
+        )
+
+
 def _draw_tool_snap_highlights(context, shader):
     locked_color = (0.10, 0.72, 1.0, 0.9)
     hover_color = (1.0, 0.58, 0.06, 1.0)
@@ -528,19 +556,43 @@ def _draw_tool_snap_highlights(context, shader):
         if state is None:
             continue
         for snap in state.get("locked_snaps", ()):
-            _draw_snap_highlight(context, shader, snap, locked_color)
+            _draw_snap_highlight(context, shader, snap, locked_color, show_object_context=False)
         hover_snap = state.get("hover_snap")
         if hover_snap is not None:
-            _draw_snap_highlight(context, shader, hover_snap, hover_color)
+            _draw_snap_highlight(context, shader, hover_snap, hover_color, show_object_context=True)
 
 
-def _draw_snap_highlight(context, shader, snap, color):
-    geometry = _snap_highlight_geometry(context, snap)
+def _draw_snap_highlight(context, shader, snap, color, show_object_context=False):
+    geometry = _snap_highlight_geometry(
+        context,
+        snap,
+        include_object_context=show_object_context,
+    )
     if geometry is None:
         return
 
     kind = geometry["kind"]
     points = geometry["points"]
+    object_edges = geometry.get("object_edges", ())
+    if show_object_context and object_edges:
+        gpu.state.depth_test_set("LESS_EQUAL")
+        try:
+            gpu.state.line_width_set(1.0)
+            batch = batch_for_shader(shader, "LINES", {"pos": object_edges})
+            shader.bind()
+            shader.uniform_float("color", (0.015, 0.015, 0.015, 0.72))
+            batch.draw(shader)
+            object_vertices = geometry.get("object_vertices", ())
+            if object_vertices:
+                gpu.state.point_size_set(3.0)
+                batch = batch_for_shader(shader, "POINTS", {"pos": object_vertices})
+                shader.bind()
+                shader.uniform_float("color", (0.01, 0.01, 0.01, 0.8))
+                batch.draw(shader)
+                gpu.state.point_size_set(1.0)
+        finally:
+            gpu.state.depth_test_set("NONE")
+
     if kind == "FACE" and len(points) >= 3:
         from mathutils.geometry import tessellate_polygon
 
@@ -557,7 +609,7 @@ def _draw_snap_highlight(context, shader, snap, color):
         outline = []
         for index, point in enumerate(points):
             outline.extend((point, points[(index + 1) % len(points)]))
-        gpu.state.line_width_set(4.0)
+        gpu.state.line_width_set(2.25)
         batch = batch_for_shader(shader, "LINES", {"pos": outline})
         shader.bind()
         shader.uniform_float("color", color)
@@ -565,7 +617,7 @@ def _draw_snap_highlight(context, shader, snap, color):
         return
 
     if kind in {"EDGE", "GUIDE"} and len(points) == 2:
-        gpu.state.line_width_set(4.0)
+        gpu.state.line_width_set(2.25)
         batch = batch_for_shader(shader, "LINES", {"pos": points})
         shader.bind()
         shader.uniform_float("color", color)
@@ -573,7 +625,14 @@ def _draw_snap_highlight(context, shader, snap, color):
         return
 
     if kind == "VERTEX" and points:
-        gpu.state.point_size_set(12.0)
+        connected_edges = geometry.get("connected_edges", ())
+        if connected_edges:
+            gpu.state.line_width_set(2.5)
+            batch = batch_for_shader(shader, "LINES", {"pos": connected_edges})
+            shader.bind()
+            shader.uniform_float("color", color)
+            batch.draw(shader)
+        gpu.state.point_size_set(9.0)
         batch = batch_for_shader(shader, "POINTS", {"pos": [points[0]]})
         shader.bind()
         shader.uniform_float("color", color)
@@ -581,7 +640,7 @@ def _draw_snap_highlight(context, shader, snap, color):
         gpu.state.point_size_set(1.0)
 
 
-def _snap_highlight_geometry(context, snap):
+def _snap_highlight_geometry(context, snap, include_object_context=True):
     """Resolve a snap target into world geometry for viewport highlighting."""
     if snap is None:
         return None
@@ -611,10 +670,38 @@ def _snap_highlight_geometry(context, snap):
         bm.verts.ensure_lookup_table()
         bm.edges.ensure_lookup_table()
         bm.faces.ensure_lookup_table()
+        object_edges = (
+            [
+                matrix @ vertex.co
+                for edge in bm.edges
+                for vertex in edge.verts
+                if not edge.hide
+            ]
+            if include_object_context
+            else []
+        )
+        object_vertices = (
+            [matrix @ vertex.co for vertex in bm.verts if not vertex.hide]
+            if include_object_context
+            else []
+        )
         if snap_type == "VERTEX":
             index = snap.get("vertex_index", -1)
             if 0 <= index < len(bm.verts):
-                return {"kind": "VERTEX", "points": [matrix @ bm.verts[index].co]}
+                vertex = bm.verts[index]
+                connected_edges = [
+                    matrix @ edge_vertex.co
+                    for edge in vertex.link_edges
+                    if not edge.hide
+                    for edge_vertex in edge.verts
+                ]
+                return {
+                    "kind": "VERTEX",
+                    "points": [matrix @ vertex.co],
+                    "connected_edges": connected_edges,
+                    "object_edges": object_edges,
+                    "object_vertices": object_vertices,
+                }
         elif snap_type == "EDGE":
             edge = None
             index = snap.get("edge_index", -1)
@@ -625,18 +712,55 @@ def _snap_highlight_geometry(context, snap):
                 if len(vertices) == 2 and all(0 <= index < len(bm.verts) for index in vertices):
                     edge = bm.edges.get((bm.verts[vertices[0]], bm.verts[vertices[1]]))
             if edge is not None:
-                return {"kind": "EDGE", "points": [matrix @ vertex.co for vertex in edge.verts]}
+                return {
+                    "kind": "EDGE",
+                    "points": [matrix @ vertex.co for vertex in edge.verts],
+                    "object_edges": object_edges,
+                    "object_vertices": object_vertices,
+                }
         elif snap_type == "FACE":
             index = snap.get("face_index", -1)
             if 0 <= index < len(bm.faces):
-                return {"kind": "FACE", "points": [matrix @ vertex.co for vertex in bm.faces[index].verts]}
+                return {
+                    "kind": "FACE",
+                    "points": [matrix @ vertex.co for vertex in bm.faces[index].verts],
+                    "object_edges": object_edges,
+                    "object_vertices": object_vertices,
+                }
         return None
 
     mesh = obj.data
+    object_edges = (
+        [
+            matrix @ mesh.vertices[vertex_index].co
+            for edge in mesh.edges
+            if not edge.hide
+            for vertex_index in edge.vertices
+        ]
+        if include_object_context
+        else []
+    )
+    object_vertices = (
+        [matrix @ vertex.co for vertex in mesh.vertices if not vertex.hide]
+        if include_object_context
+        else []
+    )
     if snap_type == "VERTEX":
         index = snap.get("vertex_index", -1)
         if 0 <= index < len(mesh.vertices):
-            return {"kind": "VERTEX", "points": [matrix @ mesh.vertices[index].co]}
+            connected_edges = [
+                matrix @ mesh.vertices[vertex_index].co
+                for edge in mesh.edges
+                if not edge.hide and index in edge.vertices
+                for vertex_index in edge.vertices
+            ]
+            return {
+                "kind": "VERTEX",
+                "points": [matrix @ mesh.vertices[index].co],
+                "connected_edges": connected_edges,
+                "object_edges": object_edges,
+                "object_vertices": object_vertices,
+            }
     elif snap_type == "EDGE":
         vertices = snap.get("edge_vertices", ())
         if len(vertices) != 2:
@@ -647,6 +771,8 @@ def _snap_highlight_geometry(context, snap):
             return {
                 "kind": "EDGE",
                 "points": [matrix @ mesh.vertices[index].co for index in vertices],
+                "object_edges": object_edges,
+                "object_vertices": object_vertices,
             }
     elif snap_type == "FACE":
         index = snap.get("face_index", -1)
@@ -654,6 +780,8 @@ def _snap_highlight_geometry(context, snap):
             return {
                 "kind": "FACE",
                 "points": [matrix @ mesh.vertices[vertex_index].co for vertex_index in mesh.polygons[index].vertices],
+                "object_edges": object_edges,
+                "object_vertices": object_vertices,
             }
     return None
 
@@ -665,7 +793,8 @@ def _draw_interaction_status(state):
         parts.append(label)
     axis = state.get("axis", "ALIGNED")
     if axis != "ALIGNED":
-        parts.append(f"{axis} Axis")
+        prefix = "MMB " if state.get("axis_gesture_active") else ""
+        parts.append(f"{prefix}{axis} Axis")
     distance_text = state.get("distance_text", "").strip()
     if distance_text:
         parts.append(f"Input: {distance_text}")

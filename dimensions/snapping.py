@@ -214,6 +214,8 @@ def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=DEFA
                 face_index,
                 projected_vertex,
             )
+            if projected_vertex["priority"] == 0:
+                projected_vertex["face_index"] = face_index
         candidates.append(projected_vertex)
 
     best = _best_snap_candidate(candidates, mouse, pixel_threshold)
@@ -270,6 +272,7 @@ def _add_edit_mesh_candidates(context, obj, face_index, mouse, candidates):
                 "priority": 0,
                 "object": obj,
                 "vertex_index": vertex.index,
+                "face_index": face.index,
                 "world_co": world_co.copy(),
                 "screen_co": screen_co.copy(),
             }

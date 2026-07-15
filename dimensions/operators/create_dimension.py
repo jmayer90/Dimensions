@@ -13,6 +13,7 @@ from ..drawing import (
     set_preview_state,
 )
 from ..interaction import (
+    axis_from_mouse_direction,
     is_confirm_event,
     is_navigation_event,
     update_distance_text,
@@ -44,6 +45,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.offset_plane_normal = None
         self.distance_text = ""
         self.distance_input_valid = True
+        self.axis_gesture_active = False
 
         self._update_preview()
         context.window_manager.modal_handler_add(self)
@@ -53,6 +55,17 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         if context.area is None or context.area.type != "VIEW_3D":
             clear_preview_state()
             return {"CANCELLED"}
+
+        if event.type == "MIDDLEMOUSE" and self.state == "SET_OFFSET":
+            if event.value == "PRESS":
+                self.axis_gesture_active = True
+                self._update_axis_gesture(context, event)
+                self._update_preview()
+                return {"RUNNING_MODAL"}
+            if event.value == "RELEASE" and self.axis_gesture_active:
+                self.axis_gesture_active = False
+                self._update_preview()
+                return {"RUNNING_MODAL"}
 
         if (
             self.state == "SET_OFFSET"
@@ -79,6 +92,8 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
+            if self.axis_gesture_active:
+                self._update_axis_gesture(context, event)
             if self.state in {"PICK_START", "PICK_END"}:
                 plane_point = self.start_snap["world_co"] if self.start_snap is not None else None
                 self.hover_snap = find_nearest_snap_point(
@@ -246,6 +261,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
     def _step_back(self):
         self.distance_text = ""
         self.distance_input_valid = True
+        self.axis_gesture_active = False
         if self.state == "SET_OFFSET":
             self.state = "PICK_END"
             self.end_snap = None
@@ -255,6 +271,25 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             self.start_snap = None
             self.end_snap = None
             self.offset_plane_normal = None
+
+    def _update_axis_gesture(self, context, event):
+        if self.start_snap is None or self.end_snap is None:
+            return
+        origin = (self.start_snap["world_co"] + self.end_snap["world_co"]) * 0.5
+        axis = axis_from_mouse_direction(
+            context,
+            origin,
+            event.mouse_region_x,
+            event.mouse_region_y,
+        )
+        if axis is None:
+            return
+        self.dimension_type = axis
+        self._configure_offset_plane(context)
+        if self.distance_text:
+            self._apply_numeric_input(context)
+        else:
+            self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
 
     def _update_offset(self, context, mouse_x, mouse_y):
         if self.start_snap is None or self.end_snap is None:
@@ -392,10 +427,12 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
     def _update_preview(self):
         preview = {
             "state": self.state,
+            "axis": self.dimension_type,
             "dimension_type": self.dimension_type,
             "offset_distance": self.offset_distance,
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
+            "axis_gesture_active": self.axis_gesture_active,
         }
 
         if self.hover_snap is not None:
@@ -415,6 +452,9 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         elif self.end_snap is not None:
             preview["end_world"] = self.end_snap["world_co"]
             preview.setdefault("locked_snaps", []).append(self._copy_snap(self.end_snap))
+            preview["axis_origin_world"] = (
+                self.start_snap["world_co"] + self.end_snap["world_co"]
+            ) * 0.5
 
         if self.offset_plane_normal is not None:
             preview["offset_plane_normal"] = tuple(self.offset_plane_normal)
