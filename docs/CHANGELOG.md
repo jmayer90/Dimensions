@@ -9,23 +9,6 @@
 - Made validation use Blender's bundled Python interpreter instead of requiring a separate Python installation on `PATH`.
 - Added a Blender Extensions publishing checklist and made CI retain the validated submission archive as a downloadable artifact.
 
-## Documentation and release metadata — July 17, 2026
-
-- Set the add-on manifest version to `0.2.1`.
-- Established the `0.2.x` version policy: the minor component (`2`) must not change without the project owner's express approval, while the patch component may be incremented with each adjustment.
-
-## 0.3.0 — July 15, 2026
-
-- Made annotation Empty translation a persistent presentation control instead of overwriting it during scene synchronization.
-- Preserved Linear and Area placement offsets when source geometry or owning-object transforms change.
-- Added `A`, `X`, `Y`, and `Z` constraints plus typed scene-unit distances to Area creation and Move Label.
-- Kept constrained Area label direction and distance stable as live source geometry changes.
-- Replaced vertex-plus-two-rays Angle acquisition with two persistent edge sources.
-- Added connected, intersecting-disconnected, and skew 3D edge handling with shared or virtual arc centers.
-- Added Minor, Supplement, and Reflex angle solutions.
-- Added independent Replace Edge A and Replace Edge B actions while retaining Remake Angle.
-- Expanded the Blender smoke suite to 36 tests covering dynamic two-edge angles, disconnected/skew geometry, Area constraints, and transform-offset preservation.
-
 ## 0.2.1 — July 15, 2026
 
 - Documented the next placement revision: user-editable annotation transforms, axis/distance Area placement, and persistent two-edge Angle sources with connected, intersecting, and skew-edge behavior.
@@ -37,6 +20,16 @@
 - Added single-face and Shift-click multi-face acquisition in Object Mode; Edit Mode uses the current selected faces.
 - Made live Area overlay evaluation read bound geometry during drawing so the value and leader origin update while geometry changes.
 - Added Object Mode Area-binding regression coverage and increased the Blender smoke suite to 32 tests.
+- Made annotation Empty translation a persistent presentation control instead of overwriting it during scene synchronization.
+- Preserved Linear and Area placement offsets when source geometry or owning-object transforms change.
+- Added `A`, `X`, `Y`, and `Z` constraints plus typed scene-unit distances to Area creation and Move Label.
+- Kept constrained Area label direction and distance stable as live source geometry changes.
+- Replaced vertex-plus-two-rays Angle acquisition with two persistent edge sources.
+- Added connected, intersecting-disconnected, and skew 3D edge handling with shared or virtual arc centers.
+- Added Minor, Supplement, and Reflex angle solutions.
+- Added independent Replace Edge A and Replace Edge B actions while retaining Remake Angle.
+- Expanded the Blender smoke suite to 36 tests covering dynamic two-edge angles, disconnected/skew geometry, Area constraints, and transform-offset preservation.
+
 
 ## 0.2.0 — July 15, 2026
 
