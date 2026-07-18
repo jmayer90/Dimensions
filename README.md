@@ -54,17 +54,3 @@ Dimensions and guides are normal scene objects in dedicated `Dimensions` and `Co
 - A full annotation/guide manager, local-axis and parallel/perpendicular inference, guide planes, and custom keymaps are not yet implemented.
 
 See [Design and Roadmap](docs/DESIGN.md) for architecture, invariants, known risks, and prioritized next work. The [Dimension and Measurement Tools Improvement Plan](docs/DIMENSION_TOOLS_PLAN.md) defines the Area and Angle redesign plus the path toward a fuller documentation toolset. Detailed interaction planning remains in [Interaction Toolkit Plan](docs/INTERACTION_TOOLKIT_PLAN.md) and [Measure and Construction Guides](docs/MEASURE_GUIDES_PLAN.md).
-
-## Development
-
-The extension uses `0.2.x` versioning until the project owner expressly approves changing the minor component (the `2`). Do not change that component without that approval. Increment the third, patch component for each adjustment as needed.
-
-Run the complete local release check from the repository root:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\validate.ps1
-```
-
-The reduced suite covers registration, units, volume, collection isolation, persistent anchor identity, constrained live Areas, persistent connected/disconnected/skew edge angles, source-preserving annotation transforms, projected distances, cached and depth-aware snapping, viewport state isolation, and measurement proxy save/reload repair. Foreground modal behavior, append/link workflows, undo/redo, package installation through the UI, and large-scene performance still require release QA. The declared and tested compatibility target is Blender 5.1.x; older versions and Blender 5.2 or newer are not currently declared compatible.
-
-The same validation runs in GitHub Actions against Blender 5.1.2. Update the workflow's pinned patch release when adopting a newer Blender 5.1 build.
