@@ -22,3 +22,9 @@ jobs:
       - name: Validate
         shell: powershell
         run: powershell -ExecutionPolicy Bypass -File scripts\validate.ps1 -Blender "$env:BLENDER_DIR\blender.exe"
+      - name: Upload validated extension package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dimensions-extension
+          path: build/dimensions-*.zip
+          if-no-files-found: error

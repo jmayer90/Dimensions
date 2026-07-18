@@ -4,9 +4,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+$blenderRoot = Split-Path -Parent $Blender
+$python = Get-ChildItem -LiteralPath $blenderRoot -Recurse -Filter "python.exe" |
+    Where-Object { $_.FullName -match '[\\/]python[\\/]bin[\\/]python\.exe$' } |
+    Select-Object -First 1
+if ($null -eq $python) {
+    throw "Could not locate Blender's bundled Python interpreter under $blenderRoot"
+}
 Push-Location $root
 try {
-    python -m compileall -q dimensions tests
+    & $python.FullName -m compileall -q dimensions tests
     if ($LASTEXITCODE -ne 0) { throw "Python compilation failed" }
 
     & $Blender --background --factory-startup --python tests\blender_smoke.py

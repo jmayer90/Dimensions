@@ -15,13 +15,15 @@ Dimensions is an experimental Blender 5.1 extension focused on precise viewport 
 
 ## Install
 
-Build the extension archive from the repository root. The build script stages the extension and required GPL license text before invoking Blender:
+Build the extension archive from the repository root. The build script stages the extension, GPL license, and README; invokes Blender's official builder; validates the resulting archive; and rejects missing release files or Python cache files:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build_extension.ps1
 ```
 
 In Blender, choose **Edit > Preferences > Add-ons > Install from Disk**, select the generated ZIP, and enable **Dimensions**. The add-on does not change Blender's global mesh-editing or Auto Merge settings.
+
+The submission-ready archive is written to `build/dimensions-<version>.zip`. See [Publishing on Blender Extensions](docs/PUBLISHING.md) for the release checklist and upload process.
 
 ## Use
 
@@ -55,12 +57,14 @@ See [Design and Roadmap](docs/DESIGN.md) for architecture, invariants, known ris
 
 ## Development
 
+The extension uses `0.2.x` versioning until the project owner expressly approves changing the minor component (the `2`). Do not change that component without that approval. Increment the third, patch component for each adjustment as needed.
+
 Run the complete local release check from the repository root:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\validate.ps1
 ```
 
-The reduced suite covers registration, units, volume, collection isolation, persistent anchor identity, constrained live Areas, persistent connected/disconnected/skew edge angles, source-preserving annotation transforms, projected distances, cached and depth-aware snapping, viewport state isolation, and measurement proxy save/reload repair. Foreground modal behavior, append/link workflows, undo/redo, package installation through the UI, and large-scene performance still require release QA. The declared and tested compatibility target is the latest Blender 5.1 release; older Blender versions are not supported.
+The reduced suite covers registration, units, volume, collection isolation, persistent anchor identity, constrained live Areas, persistent connected/disconnected/skew edge angles, source-preserving annotation transforms, projected distances, cached and depth-aware snapping, viewport state isolation, and measurement proxy save/reload repair. Foreground modal behavior, append/link workflows, undo/redo, package installation through the UI, and large-scene performance still require release QA. The declared and tested compatibility target is Blender 5.1.x; older versions and Blender 5.2 or newer are not currently declared compatible.
 
 The same validation runs in GitHub Actions against Blender 5.1.2. Update the workflow's pinned patch release when adopting a newer Blender 5.1 build.

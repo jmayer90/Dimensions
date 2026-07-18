@@ -98,6 +98,10 @@ The detailed design sequence and acceptance criteria for the annotation overhaul
 
 ## Release gate
 
+### Version policy
+
+The manifest remains on the `0.2.x` release line until the project owner expressly approves a change to the minor component (the `2`). The patch component is the routine adjustment counter and may be incremented for each adjustment.
+
 A release candidate should pass:
 
 - Python compilation and the focused Blender background smoke suite;

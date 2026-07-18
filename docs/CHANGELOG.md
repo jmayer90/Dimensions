@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.2 — July 17, 2026
+
+- Added marketplace metadata for the official `3D View` category, identified Cynic Wild as the maintainer, and intentionally omitted a manifest website.
+- Restricted declared compatibility to the tested Blender 5.1.x release line.
+- Moved package exclusions into the manifest's documented `[build]` section.
+- Made the release build self-validating and added checks for required documentation, licensing, and excluded Python cache files.
+- Made validation use Blender's bundled Python interpreter instead of requiring a separate Python installation on `PATH`.
+- Added a Blender Extensions publishing checklist and made CI retain the validated submission archive as a downloadable artifact.
+
+## Documentation and release metadata — July 17, 2026
+
+- Set the add-on manifest version to `0.2.1`.
+- Established the `0.2.x` version policy: the minor component (`2`) must not change without the project owner's express approval, while the patch component may be incremented with each adjustment.
+
 ## 0.3.0 — July 15, 2026
 
 - Made annotation Empty translation a persistent presentation control instead of overwriting it during scene synchronization.
