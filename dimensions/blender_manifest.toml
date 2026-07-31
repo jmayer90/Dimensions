@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "dimensions"
-version = "0.2.2"
+version = "0.2.3"
 name = "Dimensions"
 tagline = "Precision dimensions, guides, and measurements"
 maintainer = "Cynic Wild"
@@ -9,7 +9,6 @@ type = "add-on"
 tags = ["3D View"]
 
 blender_version_min = "5.1.0"
-blender_version_max = "5.2.0"
 
 license = [
   "SPDX:GPL-3.0-or-later",

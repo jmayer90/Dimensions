@@ -109,5 +109,5 @@ A release candidate should pass:
 - clean-profile register, unregister, install, disable, and re-enable;
 - save/reload and undo/redo for every persistent object type;
 - foreground viewport checks for selection, visibility, native measurement snapping, unit display, and broken anchors;
-- tests on the declared Blender 5.1 target; and
+- tests on the declared Blender 5.1 and 5.2 targets; and
 - snap performance checks on representative dense scenes.

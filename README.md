@@ -1,6 +1,6 @@
 # Dimensions
 
-Dimensions is an experimental Blender 5.1 extension focused on precise viewport dimensions and annotation. It provides persistent dimensions, saved measurements, construction guides, shared snapping, axis constraints, and scene-unit input without creating or cutting mesh geometry.
+Dimensions is an experimental Blender 5.1+ extension focused on precise viewport dimensions and annotation. It provides persistent dimensions, saved measurements, construction guides, shared snapping, axis constraints, and scene-unit input without creating or cutting mesh geometry.
 
 ## What it does
 

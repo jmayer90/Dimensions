@@ -1,4 +1,5 @@
 import sys
+import tomllib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -113,6 +114,22 @@ def _vertex_snap(obj, x, y, z=0.0):
 
 
 class DimensionsBlenderSmokeTests(unittest.TestCase):
+    def test_manifest_compatibility_includes_running_blender(self):
+        manifest_path = REPOSITORY_ROOT / "dimensions" / "blender_manifest.toml"
+        with manifest_path.open("rb") as manifest_file:
+            manifest = tomllib.load(manifest_file)
+
+        running_version = bpy.app.version[:3]
+        minimum_version = tuple(
+            int(component) for component in manifest["blender_version_min"].split(".")
+        )
+        self.assertGreaterEqual(running_version, minimum_version)
+
+        maximum = manifest.get("blender_version_max")
+        if maximum is not None:
+            maximum_version = tuple(int(component) for component in maximum.split("."))
+            self.assertLess(running_version, maximum_version)
+
     def _make_edit_object(self, name, vertices, edges=(), faces=()):
         mesh = bpy.data.meshes.new(f"{name}Mesh")
         mesh.from_pydata(vertices, edges, faces)

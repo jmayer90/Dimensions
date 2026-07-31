@@ -5,10 +5,19 @@ on:
   pull_request:
 
 jobs:
-  blender-5-1:
+  blender:
+    name: Blender ${{ matrix.blender.version }}
     runs-on: windows-latest
+    strategy:
+      matrix:
+        blender:
+          - version: 5.1.2
+            series: "5.1"
+          - version: 5.2.0
+            series: "5.2"
     env:
-      BLENDER_VERSION: 5.1.2
+      BLENDER_VERSION: ${{ matrix.blender.version }}
+      BLENDER_SERIES: ${{ matrix.blender.series }}
       BLENDER_DIR: C:\blender
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +25,7 @@ jobs:
         shell: powershell
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "blender.zip"
-          Invoke-WebRequest "https://download.blender.org/release/Blender5.1/blender-$env:BLENDER_VERSION-windows-x64.zip" -OutFile $archive
+          Invoke-WebRequest "https://download.blender.org/release/Blender$env:BLENDER_SERIES/blender-$env:BLENDER_VERSION-windows-x64.zip" -OutFile $archive
           Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP
           Move-Item (Join-Path $env:RUNNER_TEMP "blender-$env:BLENDER_VERSION-windows-x64") $env:BLENDER_DIR
       - name: Validate
@@ -25,6 +34,6 @@ jobs:
       - name: Upload validated extension package
         uses: actions/upload-artifact@v4
         with:
-          name: dimensions-extension
+          name: dimensions-extension-${{ matrix.blender.version }}
           path: build/dimensions-*.zip
           if-no-files-found: error

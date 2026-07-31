@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 — July 30, 2026
+
+- Fixed installation on Blender 5.2 by removing the exclusive `blender_version_max = "5.2.0"` compatibility ceiling.
+- Added Blender 5.2.0 to CI while retaining Blender 5.1.2 coverage.
+- Added a smoke regression that verifies the running Blender version is inside the extension manifest's declared compatibility range.
+
 ## 0.2.2 — July 17, 2026
 
 - Added marketplace metadata for the official `3D View` category, identified Cynic Wild as the maintainer, and intentionally omitted a manifest website.
