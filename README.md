@@ -1,56 +1,80 @@
 # Dimensions
 
-Dimensions is an experimental Blender 5.1+ extension focused on precise viewport dimensions and annotation. It provides persistent dimensions, saved measurements, construction guides, shared snapping, axis constraints, and scene-unit input without creating or cutting mesh geometry.
+A Blender extension for precise viewport dimensions, measurements, and construction guides — without creating or cutting mesh geometry.
 
-## What it does
+Dimensions gives you persistent, editable annotations that stay attached to your model as it changes. It's aimed at people who need to communicate sizes and angles from a Blender scene: product and furniture design, architectural massing, fabrication drawings, and anyone who has wished Blender's measure tool remembered anything.
 
-- Creates editable dimensions between vertices, object-local surface points, guides, measurements, or world points in Object or Mesh Edit Mode.
-- Creates a length from one selected edge, a live angle from any two non-parallel edges, and a live face-area leader with explicit label placement.
-- Keeps vertex dimensions associated with base-mesh vertices and falls back to their last known position if topology removes the original point.
-- Creates saved finite measurements and infinite construction guides.
-- Snaps to vertices, edges, midpoints, face centers, face points, guides, and measurement endpoints/midpoints/segments.
-- Accepts typed values such as `125mm`, `2ft`, or `5"`, with `A`, `X`, `Y`, and `Z` constraints.
-- Formats metric and imperial values and can show selected-mesh dimensions and evaluated volume in a viewport HUD.
-- Supports true and global-axis projected distances, angle radius/reflex controls, value prefixes/suffixes, and linear tolerances.
+**Status:** early and actively developed (`0.2.x`). The interaction model is settled; the property schema is not yet frozen, so annotations saved with one version may need to be recreated after an upgrade. Requires **Blender 5.1 or newer**.
+
+## Features
+
+- **Linear dimensions** between vertices, surface points, guides, measurements, or free world points, in Object or Mesh Edit Mode.
+- **Angle dimensions** from any two non-parallel edges — connected, intersecting only when extended, or skew in 3D — with minor, supplement, and reflex solutions.
+- **Area dimensions** with a live face-set binding and an explicit label placement you control.
+- **Measurements and construction guides** — saved finite measurements and infinite guides that other tools can snap to.
+- **Snapping** to vertices, edges, midpoints, face centers, face points, guides, and measurement endpoints, midpoints, and segments.
+- **Typed input** in scene units — `125mm`, `2ft`, `5"` — with `A`, `X`, `Y`, and `Z` axis constraints.
+- **Presentation control** — metric and imperial formatting, projected distances, value prefixes and suffixes, linear tolerances, and per-annotation style overrides.
+- **A viewport HUD** showing selected-mesh dimensions and evaluated volume.
+
+Annotations are ordinary Blender objects in dedicated `Dimensions` and `Construction Guides` collections, so they select, undo, save, and link like anything else in your scene.
 
 ## Install
 
-Build the extension archive from the repository root. The build script stages the extension, GPL license, and README; invokes Blender's official builder; validates the resulting archive; and rejects missing release files or Python cache files:
+Download the latest `dimensions-<version>.zip` from the [Releases](../../releases) page. In Blender, choose **Edit ▸ Preferences ▸ Add-ons ▸ Install from Disk**, select the ZIP, and enable **Dimensions**.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build_extension.ps1
-```
+Installing does not change Blender's global snapping, keymaps, or Auto Merge settings.
 
-In Blender, choose **Edit > Preferences > Add-ons > Install from Disk**, select the generated ZIP, and enable **Dimensions**. The add-on does not change Blender's global mesh-editing or Auto Merge settings.
+To build the archive yourself instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-The submission-ready archive is written to `build/dimensions-<version>.zip`. See [Publishing on Blender Extensions](docs/PUBLISHING.md) for the release checklist and upload process.
+## Getting started
 
-## Use
+Open the 3D Viewport sidebar with `N` and choose the **Dimensions** tab.
 
-Open the 3D Viewport sidebar with `N`, then choose the **Dimensions** tab.
+**A linear dimension:**
 
-1. Choose **Create Dimension**, **Create Angle Dimension**, or **Measure** in Object or Mesh Edit Mode. Construction guides remain an Object Mode tool; selection-based length, angle, and area actions are available in Mesh Edit Mode.
-2. Click a highlighted start point, then point toward the next point.
-3. Optionally press `A`, `X`, `Y`, or `Z`, or drag middle mouse after the first point to choose a global axis.
-4. Optionally type a scene-unit distance and press `Enter`; click also commits a valid stage.
+1. Click **Create Dimension** in Object or Mesh Edit Mode.
+2. Click a highlighted start point, then move toward the next point.
+3. Optionally press `A`, `X`, `Y`, or `Z` — or drag middle mouse after the first point — to lock to a global axis.
+4. Optionally type a distance and press `Enter`. Clicking also commits a valid stage.
 
-**Create Area Dimension** works in both modes. In Edit Mode, select faces first and run the tool, then place the label. In Object Mode, click a base-mesh face, then place the label; Shift-click builds a multi-face source and `Enter` proceeds to placement. During creation or **Move Label**, press `A`, `X`, `Y`, or `Z` and optionally type a scene-unit distance. A selected Area also exposes **Remake Area**, **Select Source Faces**, and **Capture**.
+In Mesh Edit Mode, **Create Dimension** is selection-first: with exactly one edge selected it commits a length immediately, and any other selection falls through to interactive picking.
 
-**Create Angle Dimension** acquires Edge A and Edge B, then places the arc radius. The edges may be connected, intersecting only when extended, or skew in 3D. Connected edges use their shared vertex; other edges derive a virtual center from their supporting lines. A selected Angle can switch between Minor, Supplement, and Reflex solutions or replace either source edge independently.
+**An area dimension** works in both modes. In Edit Mode, select faces first, run the tool, then place the label. In Object Mode, click a face — Shift-click to add more, `Enter` to proceed — then place the label. A selected area also exposes **Remake Area**, **Select Source Faces**, and **Capture**.
 
-Linear and Area annotation Empties are placement objects. Moving one with Blender's normal transform controls moves its presentation while its source anchors remain attached. Later source geometry or object transforms preserve that user placement offset.
+**An angle dimension** acquires Edge A, then Edge B, then the arc radius. Connected edges use their shared vertex; disconnected or skew edges derive a virtual center from their supporting lines. A selected angle can switch solution or replace either edge independently.
 
-`Esc` clears numeric input before stepping back or exiting. Right-click cancels one-shot annotation tools.
+### Keys
 
-Dimensions and guides are normal scene objects in dedicated `Dimensions` and `Construction Guides` collections. Select a dimension to edit its anchors, placement, text, visibility, and local style in the sidebar.
+| Key | Action |
+| --- | --- |
+| `A` `X` `Y` `Z` | Constrain to aligned or global axis |
+| Middle drag | Choose a projected global axis (after the first point) |
+| Type + `Enter` | Commit a scene-unit distance |
+| `Esc` | Clear typed input, then step back or exit |
+| Right-click | Cancel a one-shot tool |
 
-## Current limitations
+### Placement
 
-- Construction guide creation remains an Object Mode workflow; dimensions and measurements work in Object and Mesh Edit Mode.
-- Vertex anchors use persistent mesh point IDs. If topology removes an anchored point or duplicates its ID, resolution uses the closest stored position without showing a detached state. Surface anchors follow object transforms but not later deformation.
-- Live Area annotations currently bind base-mesh faces from one mesh object. Modifier-evaluated and multi-object area aggregation are not yet supported; topology that removes or ambiguously duplicates a bound face produces a visible Needs Repair state.
-- Object Mode projected-vertex snapping uses a per-viewport spatial cache and rejects occluded candidates with ray checks. Cache rebuilds after geometry, transform, or view changes can still be noticeable on very dense scenes.
-- Dimensions are viewport overlays and do not appear in final renders.
-- A full annotation/guide manager, local-axis and parallel/perpendicular inference, guide planes, and custom keymaps are not yet implemented.
+Linear and area annotations are placement objects. Move one with Blender's normal transform tools and you move its presentation — the source anchors stay attached, and the offset you set survives later changes to the source geometry or object transform.
 
-See [Design and Roadmap](docs/DESIGN.md) for architecture, invariants, known risks, and prioritized next work. The [Dimension and Measurement Tools Improvement Plan](docs/DIMENSION_TOOLS_PLAN.md) defines the Area and Angle redesign plus the path toward a fuller documentation toolset. Detailed interaction planning remains in [Interaction Toolkit Plan](docs/INTERACTION_TOOLKIT_PLAN.md) and [Measure and Construction Guides](docs/MEASURE_GUIDES_PLAN.md).
+## Known limitations
+
+- **Dimensions are viewport overlays and do not appear in renders.** A render or export path is planned but not built.
+- Construction guides are Object Mode only. Dimensions and measurements work in both modes.
+- Vertex anchors use persistent mesh point IDs. If topology removes an anchored point or duplicates its ID, the anchor resolves to the closest stored position rather than reporting a detached state. Surface anchors follow object transforms but not later deformation.
+- Live areas bind base-mesh faces from a single object. Modifier-evaluated and multi-object areas are not supported; lost or ambiguous faces surface a visible **Needs Repair** state rather than guessing.
+- Snap cache rebuilds after geometry, transform, or view changes can be noticeable in very dense scenes.
+- There is no annotation manager, no local-axis or parallel/perpendicular inference, no guide planes, and no custom keymaps yet.
+
+## Contributing
+
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test, and what the project is and isn't trying to be.
+
+- [docs/DESIGN.md](docs/DESIGN.md) — architecture, design invariants, known risks, and the prioritized roadmap. Read this first for anything non-trivial.
+- [docs/tickets/](docs/tickets/) — structured work tickets on the path to 1.0, each with acceptance criteria and a code map.
+- [docs/VERSIONING.md](docs/VERSIONING.md) — what moves the version number, and what 1.0 will mean.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).

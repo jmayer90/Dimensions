@@ -65,14 +65,16 @@ Annotations are Empty objects with presentation properties and an annotation kin
 
 ## Prioritized roadmap
 
+The items below are the standing direction. They are broken into executable work in [`tickets/`](tickets/), which maps each priority band to a milestone and a set of tickets with acceptance criteria.
+
 ### P0 — Trustworthy acquisition
 
-- Add an optional explicit rebind or convert-to-world action for users who need to override fallback anchor resolution.
-- Extend the implemented Live/Captured/Needs Repair model with a guided repair picker and source highlighting.
-- Add direct viewport handles for the implemented world-space Angle radius and Area label placement.
-- Define evaluated-modifier semantics for the implemented base-mesh live Area bindings.
-- Extend the implemented canonical-frame and placement-offset model with deliberate rotation and scale semantics.
-- Add foreground modal coverage for the implemented constrained Area and two-edge Angle workflows.
+- Add an explicit rebind or convert-to-world action for users who need to override fallback anchor resolution.
+- Extend the Live/Captured/Needs Repair model with a guided repair picker and source highlighting.
+- Add direct viewport handles for Angle radius and Area label placement.
+- Define evaluated-modifier semantics for live Area bindings.
+- Give the canonical-frame and placement-offset model deliberate rotation and scale semantics.
+- Add foreground modal coverage for the constrained Area and two-edge Angle workflows.
 - Add repeatable dense-scene performance budgets and foreground modal-event tests.
 - Complete foreground lifecycle QA for measurement proxies and annotations.
 
@@ -85,7 +87,7 @@ Annotations are Empty objects with presentation properties and an annotation kin
 
 ### P2 — Documentation-grade dimensions
 
-- Extend implemented true/global-axis projected length with local-axis and view-plane modes.
+- Extend true/global-axis projected length with local-axis and view-plane modes.
 - Add chain, baseline, radial, diameter, arc-length, coordinate, and elevation dimensions.
 - Add extension gaps and overshoot, arrow variants, label alignment, tolerance, prefix or suffix, and dual-unit display.
 - Provide a render or export path through generated curves and text, Grease Pencil, SVG, or PDF.
@@ -94,13 +96,9 @@ Annotations are Empty objects with presentation properties and an annotation kin
 
 Mesh-line drawing, face cutting, rectangles, Push/Pull, general Offset, Move/Copy arrays, Circle/Arc, and eraser-style mesh editing are geometry-authoring tools. They are not part of Dimensions. Any future implementation should start in a separate project rather than re-enter this extension incrementally.
 
-The detailed design sequence and acceptance criteria for the annotation overhaul are maintained in [Dimension and Measurement Tools Improvement Plan](DIMENSION_TOOLS_PLAN.md).
-
 ## Release gate
 
-### Version policy
-
-The manifest remains on the `0.2.x` release line until the project owner expressly approves a change to the minor component (the `2`). The patch component is the routine adjustment counter and may be incremented for each adjustment.
+Version policy, the triggers that move the minor component, and the full 1.0 checklist are defined in [Versioning and release policy](VERSIONING.md). In short: the manifest stays on `0.2.x` until a change breaks saved data, breaks the interaction contract, or adds a new product surface.
 
 A release candidate should pass:
 

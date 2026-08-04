@@ -1,7 +1,8 @@
-# AI Project Instructions
+# Agent instructions
 
-When a user makes a specific product, behavior, workflow, or architectural request, update the relevant durable documentation in the same change set unless the user explicitly says not to.
+Follow [CONTRIBUTING.md](CONTRIBUTING.md). It covers project scope, build and test commands, code style, and the documentation expectations that apply to every change.
 
-Durable documentation includes `README.md`, files under `docs/`, extension manifests, release notes, and project guidance files such as this one. Keep docs aligned with behavior changes, newly discovered limitations, accepted design direction, and deferred follow-up work. Ensure to specifically track changes in the change log and check against and update any design decisions.
+Two points bear repeating because they are the most common failure modes here:
 
-For bug fixes, update docs when the fix changes user-visible behavior or corrects an existing documented claim. For design discussions that create a clear product direction, add or update a plan document under `docs/`.
+- **Documentation is part of the change set.** When a request alters product behavior, a workflow, or the architecture, update the affected durable docs — `README.md`, files under `docs/`, the extension manifest, and this file — in the same change. Always add a `docs/CHANGELOG.md` entry for user-visible changes, and check the change against the design invariants and roadmap in `docs/DESIGN.md`.
+- **Scope is enforced.** Dimensions never modifies mesh geometry. Do not add geometry-authoring features, however small the increment.

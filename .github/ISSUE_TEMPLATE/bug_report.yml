@@ -1,0 +1,73 @@
+name: Bug report
+description: Something in Dimensions behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Viewport bugs are much easier to fix with a `.blend` file or a short screen recording attached — please include one if you can.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Start from a fresh Blender file if possible.
+      placeholder: |
+        1. Add a default cube
+        2. Enter Edit Mode and select one edge
+        3. Click Create Dimension
+        4. ...
+    validations:
+      required: true
+
+  - type: input
+    id: blender-version
+    attributes:
+      label: Blender version
+      placeholder: "5.1.2"
+    validations:
+      required: true
+
+  - type: input
+    id: addon-version
+    attributes:
+      label: Dimensions version
+      description: Shown in Edit ▸ Preferences ▸ Add-ons.
+      placeholder: "0.2.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: >
+        If Blender reported an error, paste it here. On Windows use
+        Window ▸ Toggle System Console; on macOS and Linux, launch Blender from a terminal.
+      render: text
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Scene complexity, other add-ons enabled, whether it happens every time.
