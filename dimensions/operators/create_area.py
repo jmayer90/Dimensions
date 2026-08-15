@@ -1,6 +1,8 @@
 import bmesh
 import bpy
 from mathutils import Vector
+
+from .. import messages
 from mathutils.geometry import intersect_line_line
 
 from ..anchors import resolve_anchor, set_object_anchor
@@ -69,16 +71,16 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
 
     def invoke(self, context, _event):
         if not has_view3d_window_region(context):
-            self.report({"ERROR"}, "Run this operator from a 3D View")
+            self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
         if context.mode not in {"OBJECT", "EDIT_MESH"}:
-            self.report({"ERROR"}, "Area dimensions work in Object Mode or Mesh Edit Mode")
+            self.report(messages.WARNING, messages.AREA_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
         self.target_name = ""
         if self.replace_active:
             active = context.view_layer.objects.active
             if not is_dimension_object(active) or active.dimension_props.annotation_kind != "AREA":
-                self.report({"ERROR"}, "Select an Area dimension to remake")
+                self.report(messages.WARNING, messages.SELECT_AREA_DIMENSION)
                 return {"CANCELLED"}
             self.target_name = active.name
 
@@ -205,13 +207,13 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
                 source = hit.get("object")
                 face_index = hit.get("face_index", -1)
         if source is None or source.type != "MESH" or face_index < 0:
-            self.report({"WARNING"}, "Point at a base-mesh face")
+            self.report(messages.WARNING, messages.POINT_BASE_MESH_FACE)
             return {"RUNNING_MODAL"}
         if source.modifiers and context.mode == "OBJECT":
-            self.report({"WARNING"}, "Object Mode Area currently requires an unmodified base mesh")
+            self.report(messages.WARNING, messages.AREA_BASE_MESH_REQUIRED)
             return {"RUNNING_MODAL"}
         if self.source_object is not None and source != self.source_object:
-            self.report({"WARNING"}, "One Area dimension can bind faces from only one object")
+            self.report(messages.WARNING, messages.AREA_SINGLE_OBJECT_REQUIRED)
             return {"RUNNING_MODAL"}
         self.source_object = source
         if event.shift:
@@ -226,7 +228,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
             self.face_indices.append(face_index)
         self.area_result = evaluate_area_face_indices(source, self.face_indices)
         if self.area_result is None:
-            self.report({"WARNING"}, "Selected faces have no measurable area")
+            self.report(messages.WARNING, messages.AREA_FACES_UNMEASURABLE)
             return {"RUNNING_MODAL"}
         self.state = "PLACE_LABEL"
         self._update_preview()
@@ -234,7 +236,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
 
     def _commit(self, context):
         if self.distance_text and not self.distance_input_valid:
-            self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+            self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
             return {"RUNNING_MODAL"}
         if self.label_snap is None or self.source_object is None or self.area_result is None:
             return {"RUNNING_MODAL"}
@@ -245,7 +247,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         props.annotation_kind = "AREA"
         result = bind_area_face_indices(props, self.source_object, self.face_indices)
         if result is None:
-            self.report({"ERROR"}, "Area source became invalid before commit")
+            self.report(messages.WARNING, messages.AREA_SOURCE_INVALID)
             clear_preview_state()
             return {"CANCELLED"}
         props.area_value = result["area"]
@@ -266,7 +268,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
                 selected.select_set(False)
             annotation.select_set(True)
             context.view_layer.objects.active = annotation
-        self.report({"INFO"}, f"{'Remade' if self.target_name else 'Created'} Area from {len(self.face_indices)} face(s)")
+        self.report(messages.INFO, messages.created_area(len(self.face_indices), bool(self.target_name)))
         return {"FINISHED"}
 
     def _update_preview(self):
@@ -363,7 +365,7 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
             return {"CANCELLED"}
         result = evaluate_area_binding(annotation.dimension_props)
         if result is None:
-            self.report({"ERROR"}, "Repair the Area source before moving its label")
+            self.report(messages.WARNING, messages.AREA_SOURCE_INVALID)
             clear_preview_state()
             return {"CANCELLED"}
         axis = axis_from_event(event)
@@ -417,7 +419,7 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "PRESS" and self.hover_snap is not None:
             if self.distance_text and not self.distance_input_valid:
-                self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+                self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
                 return {"RUNNING_MODAL"}
             props = annotation.dimension_props
             set_object_anchor(props.end, props.area_source_object, self.hover_snap["world_co"])

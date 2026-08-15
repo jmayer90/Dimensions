@@ -74,7 +74,8 @@ class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
         layout.prop(settings, "precision")
         layout.prop(settings, "text_placement")
         layout.prop(settings, "snap_pixel_radius")
-        layout.prop(settings, "enable_click_select")
+        preferences = layout.operator("preferences.addon_show", text="Open Add-on Preferences", icon="PREFERENCES")
+        preferences.module = "dimensions"
 
 
 class CADDIM_PT_MeshSizeHUD(CADDIM_PT_PanelBase, bpy.types.Panel):
@@ -138,6 +139,9 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
         props = active_object.dimension_props
         layout.use_property_split = True
         layout.use_property_decorate = False
+        if active_object.library is not None:
+            layout.label(text="Linked annotation: read-only", icon="LOCKED")
+            return
         layout.label(text="Changes below affect only this dimension.")
         layout.prop(active_object, "name", text="Name")
         annotation_kind = getattr(props, "annotation_kind", "LINEAR")

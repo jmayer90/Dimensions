@@ -1,5 +1,6 @@
 import bpy
 
+from .. import messages
 from ..anchors import resolve_anchor, set_anchor_from_snap
 from ..drawing import clear_preview_state, set_preview_state
 from ..properties import is_dimension_object
@@ -22,16 +23,16 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
 
     def invoke(self, context, event):
         if context.area is None or context.area.type != "VIEW_3D":
-            self.report({"ERROR"}, "Run this operator from a 3D View")
+            self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
 
         if context.mode != "OBJECT":
-            self.report({"ERROR"}, "Anchor reattachment currently works only in Object Mode")
+            self.report(messages.WARNING, messages.REATTACH_REQUIRE_OBJECT_MODE)
             return {"CANCELLED"}
 
         active_object = context.view_layer.objects.active
         if not is_dimension_object(active_object):
-            self.report({"ERROR"}, "Select a dimension first")
+            self.report(messages.WARNING, messages.SELECT_DIMENSION_FIRST)
             return {"CANCELLED"}
 
         self.dimension_object = active_object
@@ -70,7 +71,7 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             anchor = self._get_target_anchor()
             set_anchor_from_snap(anchor, self.hover_snap)
             clear_preview_state()
-            self.report({"INFO"}, f"Reattached {self.anchor_name.lower()} anchor")
+            self.report(messages.INFO, messages.reattached_anchor(self.anchor_name))
             return {"FINISHED"}
 
         if event.type in {"RIGHTMOUSE", "ESC"}:

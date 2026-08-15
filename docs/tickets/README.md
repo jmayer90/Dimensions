@@ -37,6 +37,8 @@ Invisible to users, blocking for everything else. Build here before building on 
 | [FND-09](FND-09-posix-scripts.md) | Cross-platform build and validate scripts | S | — |
 | [FND-10](FND-10-error-reporting.md) | Consistent, actionable error reporting | S | — |
 
+M1 is complete. [FND-11](FND-11-snap-cache-build-cost.md) was filed out of `FND-08`: query and draw budgets are met and measured, but building the projected snap cache on a 1M-vertex scene misses its budget. It carries into M2 rather than blocking M1, because scenes at or below 100k vertices are within budget today.
+
 ### M2 — Fluency
 
 The difference between a tool that works and one people keep using.

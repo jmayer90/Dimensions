@@ -19,6 +19,9 @@ try {
     & $Blender --background --factory-startup --python tests\blender_smoke.py
     if ($LASTEXITCODE -ne 0) { throw "Blender smoke tests failed" }
 
+    & $Blender --background --factory-startup --python tests\blender_modal.py
+    if ($LASTEXITCODE -ne 0) { throw "Blender modal interaction tests failed" }
+
     & $Blender --background --factory-startup --python tests\blender_lifecycle.py
     if ($LASTEXITCODE -ne 0) { throw "Blender lifecycle tests failed" }
 

@@ -3,6 +3,7 @@ import tomllib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import bmesh
 import bpy
@@ -12,8 +13,11 @@ from mathutils import Matrix, Vector
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dimensions
+from dimensions import drawing, keymaps
 from dimensions.collections import (
     create_dimension_object,
     create_guide_object,
@@ -23,10 +27,14 @@ from dimensions.collections import (
     get_or_create_guide_collection,
 )
 from dimensions.anchors import resolve_anchor, set_anchor, set_anchor_from_snap, set_world_anchor
+from dimensions.constants import CURRENT_SCHEMA_VERSION
 from dimensions.area_binding import bind_area_face_indices, evaluate_area_binding
 from dimensions.angle_binding import derive_angle_from_world_edges, resolve_angle_source
 from dimensions.dimension_geometry import get_angle_world_geometry
+from dimensions.collections import get_scene_collection
 from dimensions.drawing import _snap_highlight_geometry
+from dimensions.properties import is_dimension_object
+from support import make_context
 from dimensions.interaction import (
     axis_from_event,
     constrained_delta,
@@ -34,6 +42,8 @@ from dimensions.interaction import (
     nearest_axis_from_screen_vectors,
     update_distance_text,
 )
+from dimensions.migrations import migrate_scene
+from dimensions.modal_state import PointPlacementState
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
 from dimensions.operators.create_area import _constrained_label_world
 from dimensions.operators.create_guide import CADDIM_OT_CreateGuide
@@ -114,6 +124,60 @@ def _vertex_snap(obj, x, y, z=0.0):
 
 
 class DimensionsBlenderSmokeTests(unittest.TestCase):
+    def test_operator_reports_use_the_shared_message_catalog(self):
+        for source_path in (REPOSITORY_ROOT / "dimensions" / "operators").glob("*.py"):
+            source = source_path.read_text(encoding="utf-8")
+            for line in source.splitlines():
+                if "self.report(" in line:
+                    self.assertIn("messages.", line, f"{source_path.name}: {line.strip()}")
+
+    def test_point_placement_state_machine_covers_shared_escape_and_step_back_contract(self):
+        state = PointPlacementState()
+        self.assertEqual(state.accept_point(), "PICK_START_ACCEPTED")
+        self.assertEqual(state.stage, PointPlacementState.PICK_END)
+        state.set_numeric_text("25mm")
+        self.assertEqual(state.escape(), "NUMERIC_CLEARED")
+        self.assertEqual(state.stage, PointPlacementState.PICK_END)
+        self.assertEqual(state.step_back(), "STEPPED_BACK")
+        self.assertEqual(state.stage, PointPlacementState.PICK_START)
+        self.assertEqual(state.step_back(), "CANCELLED")
+    def test_schema_migration_stamps_legacy_dimension_data_once(self):
+        mesh_object = self._make_object(
+            "Schema Migration Source",
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
+            [(0, 1)],
+        )
+        dimension = bpy.data.objects.new("Schema Migration Dimension", None)
+        bpy.context.scene.collection.objects.link(dimension)
+        self.addCleanup(bpy.data.objects.remove, dimension, do_unlink=True)
+        dimension.dimension_props.enabled = True
+        set_anchor(dimension.dimension_props.start, mesh_object, 0)
+        dimension.dimension_props.start.vertex_id = 0
+        settings = bpy.context.scene.dimensions_settings
+        original_version = settings.schema_version
+        settings.schema_version = 0
+
+        self.assertTrue(migrate_scene(bpy.context.scene))
+        self.assertEqual(settings.schema_version, CURRENT_SCHEMA_VERSION)
+        self.assertGreater(dimension.dimension_props.start.vertex_id, 0)
+        self.assertFalse(migrate_scene(bpy.context.scene))
+
+        settings.schema_version = original_version
+
+    def test_newer_schema_is_not_modified(self):
+        dimension = bpy.data.objects.new("Future Schema Dimension", None)
+        bpy.context.scene.collection.objects.link(dimension)
+        self.addCleanup(bpy.data.objects.remove, dimension, do_unlink=True)
+        dimension.dimension_props.enabled = True
+        settings = bpy.context.scene.dimensions_settings
+        original_version = settings.schema_version
+        settings.schema_version = CURRENT_SCHEMA_VERSION + 1
+
+        self.assertFalse(migrate_scene(bpy.context.scene))
+        self.assertEqual(settings.schema_version, CURRENT_SCHEMA_VERSION + 1)
+
+        settings.schema_version = original_version
+
     def test_manifest_compatibility_includes_running_blender(self):
         manifest_path = REPOSITORY_ROOT / "dimensions" / "blender_manifest.toml"
         with manifest_path.open("rb") as manifest_file:
@@ -951,10 +1015,250 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
             self._remove_edit_object(obj, mesh)
 
 
+class DimensionsDrawCacheTests(unittest.TestCase):
+    """FND-03: draw cost must scale with annotations, not with scene size."""
+
+    def setUp(self):
+        self.context = make_context(scene=bpy.context.scene)
+        self.context.view_layer = bpy.context.view_layer
+        self.created = []
+        drawing.invalidate_dimension_geometry_cache()
+
+    def tearDown(self):
+        for obj in self.created:
+            if obj.name in bpy.data.objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        drawing.invalidate_dimension_geometry_cache()
+
+    def _make_dimension(self, start=(0.0, 0.0, 0.0), end=(1.0, 0.0, 0.0)):
+        obj = create_dimension_object(self.context, "DIM Cache Test")
+        set_world_anchor(obj.dimension_props.start, Vector(start))
+        set_world_anchor(obj.dimension_props.end, Vector(end))
+        self.created.append(obj)
+        return obj
+
+    def test_geometry_is_not_rebuilt_when_neither_sources_nor_view_changed(self):
+        dimension = self._make_dimension()
+        drawing.get_cached_dimension_geometry(self.context, dimension)
+        after_first = drawing.geometry_build_count()
+
+        for _repeat in range(5):
+            drawing.get_cached_dimension_geometry(self.context, dimension)
+        self.assertEqual(drawing.geometry_build_count(), after_first)
+
+    def test_a_view_change_rebuilds_geometry_for_that_viewport_only(self):
+        dimension = self._make_dimension()
+        drawing.get_cached_dimension_geometry(self.context, dimension)
+        before = drawing.geometry_build_count()
+
+        self.context.region_data.perspective_matrix = Matrix.Translation(Vector((0.0, 0.0, 5.0)))
+        drawing.get_cached_dimension_geometry(self.context, dimension)
+        self.assertEqual(drawing.geometry_build_count(), before + 1)
+
+    def test_the_cache_stays_bounded_across_repeated_view_changes(self):
+        dimension = self._make_dimension()
+        for step in range(25):
+            self.context.region_data.perspective_matrix = Matrix.Translation(
+                Vector((0.0, 0.0, float(step)))
+            )
+            drawing.get_cached_dimension_geometry(self.context, dimension)
+        # One viewport means one cache entry, however far the view was orbited.
+        self.assertEqual(len(drawing._dimension_geometry_cache), 1)
+
+    def test_depsgraph_invalidation_forces_a_rebuild(self):
+        dimension = self._make_dimension()
+        drawing.get_cached_dimension_geometry(self.context, dimension)
+        before = drawing.geometry_build_count()
+
+        drawing.invalidate_dimension_geometry_cache()
+        drawing.get_cached_dimension_geometry(self.context, dimension)
+        self.assertEqual(drawing.geometry_build_count(), before + 1)
+
+    def test_two_viewports_do_not_share_cached_geometry(self):
+        dimension = self._make_dimension()
+        other = make_context(scene=bpy.context.scene)
+        drawing.get_cached_dimension_geometry(self.context, dimension)
+        before = drawing.geometry_build_count()
+
+        drawing.get_cached_dimension_geometry(other, dimension)
+        self.assertEqual(drawing.geometry_build_count(), before + 1)
+        self.assertEqual(len(drawing._dimension_geometry_cache), 2)
+
+    def test_annotations_sharing_a_color_collapse_into_one_batch(self):
+        batcher = drawing.SegmentBatcher(shader=None)
+        selected = (1.0, 0.6, 0.0, 1.0)
+        unselected = (0.1, 0.7, 1.0, 1.0)
+        for index in range(50):
+            color = selected if index % 2 else unselected
+            batcher.add_segments(
+                [Vector((0.0, float(index))), Vector((10.0, float(index)))],
+                color,
+                2.0,
+            )
+        self.assertEqual(batcher.batch_count, 2)
+
+    def test_differing_line_widths_stay_in_separate_batches(self):
+        batcher = drawing.SegmentBatcher(shader=None)
+        color = (1.0, 1.0, 1.0, 1.0)
+        batcher.add_segments([Vector((0.0, 0.0)), Vector((1.0, 0.0))], color, 1.0)
+        batcher.add_segments([Vector((0.0, 1.0)), Vector((1.0, 1.0))], color, 3.0)
+        self.assertEqual(batcher.batch_count, 2)
+
+    def test_text_metrics_are_measured_once_per_font_size(self):
+        drawing._text_metrics_cache.clear()
+        first = drawing._text_dimensions("1.000 m", 14)
+        self.assertEqual(len(drawing._text_metrics_cache), 1)
+        for _repeat in range(10):
+            drawing._text_dimensions("1.000 m", 14)
+        self.assertEqual(len(drawing._text_metrics_cache), 1)
+        self.assertEqual(drawing._text_dimensions("1.000 m", 14), first)
+
+    def test_the_draw_loop_reads_only_the_dimensions_collection(self):
+        collection = get_or_create_dimension_collection(self.context)
+        self.assertIsNotNone(get_scene_collection(bpy.context.scene, "DIMENSIONS"))
+        bystanders = []
+        try:
+            for index in range(20):
+                mesh = bpy.data.meshes.new(f"Bystander {index}")
+                obj = bpy.data.objects.new(f"Bystander {index}", mesh)
+                bpy.context.scene.collection.objects.link(obj)
+                bystanders.append(obj)
+            drawn = [obj for obj in collection.all_objects if is_dimension_object(obj)]
+            self.assertTrue(all(obj not in drawn for obj in bystanders))
+        finally:
+            for obj in bystanders:
+                mesh = obj.data
+                bpy.data.objects.remove(obj, do_unlink=True)
+                bpy.data.meshes.remove(mesh)
+
+
+class DimensionsKeymapTests(unittest.TestCase):
+    """FND-05: registered keymaps that leak nothing and collide with nothing."""
+
+    def test_registered_items_cover_every_documented_modal_key(self):
+        bound = {
+            item.properties.action
+            for _keymap, item in keymaps._modal_keymap_items
+        }
+        self.assertEqual(
+            bound,
+            {
+                "CONSTRAIN_ALIGNED",
+                "CONSTRAIN_X",
+                "CONSTRAIN_Y",
+                "CONSTRAIN_Z",
+                "CONFIRM",
+                "STEP_BACK",
+                "CANCEL",
+                "CANCEL_IMMEDIATE",
+            },
+        )
+
+    def test_no_default_binding_can_collide_with_blender(self):
+        """The collision check the ticket asks to be documented, run as a test.
+
+        Nothing this add-on registers can shadow a Blender preset binding: the
+        invocation entries ship unbound and inactive, and the modal actions live in a
+        private map Blender never dispatches from.
+        """
+        for _keymap, item in keymaps._keymap_items:
+            self.assertEqual(item.type, "NONE")
+            self.assertFalse(item.active)
+        for keymap, item in keymaps._modal_keymap_items:
+            self.assertEqual(keymap.name, keymaps.MODAL_KEYMAP_NAME)
+            self.assertEqual(item.idname, "dimensions.modal_action")
+
+    def test_repeated_enable_and_disable_cycles_leak_no_items(self):
+        keymaps.unregister_keymaps()
+        self.assertEqual(len(keymaps.registered_keymap_items()), 0)
+        for _cycle in range(3):
+            keymaps.register_keymaps()
+            first = len(keymaps.registered_keymap_items())
+            keymaps.unregister_keymaps()
+            self.assertEqual(len(keymaps.registered_keymap_items()), 0)
+        keymaps.register_keymaps()
+        self.assertEqual(len(keymaps.registered_keymap_items()), first)
+
+    def test_disabling_removes_the_private_action_map_container(self):
+        keymaps.unregister_keymaps()
+        keyconfig = bpy.context.window_manager.keyconfigs.addon
+        self.assertIsNone(keyconfig.keymaps.get(keymaps.MODAL_KEYMAP_NAME))
+        keymaps.register_keymaps()
+        self.assertIsNotNone(keyconfig.keymaps.get(keymaps.MODAL_KEYMAP_NAME))
+
+    def test_modal_actions_resolve_through_the_keymap_not_hard_coded_types(self):
+        for _keymap, item in keymaps._modal_keymap_items:
+            event = SimpleNamespace(type=item.type, value=item.value)
+            self.assertEqual(
+                keymaps.modal_action_from_event(event),
+                item.properties.action,
+            )
+
+
+class DimensionsPackagingTests(unittest.TestCase):
+    """Guard the differences between running from the repository and from an install.
+
+    The suite imports the add-on as a top-level ``dimensions`` package, while Blender
+    installs it as ``bl_ext.<repository>.dimensions`` and registers it under a
+    restricted ``bpy.data``. Both differences have hidden real registration failures.
+    """
+
+    def test_addon_id_is_the_full_package_name(self):
+        from dimensions import preferences
+
+        self.assertEqual(preferences.ADDON_ID, preferences.__package__)
+
+    def test_preferences_bl_idname_matches_the_addon_id(self):
+        from dimensions import preferences
+
+        self.assertEqual(
+            preferences.DIMENSIONS_AddonPreferences.bl_idname,
+            preferences.ADDON_ID,
+        )
+
+    def test_get_preferences_never_raises_without_a_registered_addon(self):
+        from dimensions.preferences import DEFAULT_PREFERENCES, get_preferences
+
+        self.assertIs(get_preferences(SimpleNamespace()), DEFAULT_PREFERENCES)
+        self.assertIsNotNone(get_preferences(None))
+
+    def test_registering_migrations_survives_restricted_blend_data(self):
+        from dimensions import migrations
+
+        class _RestrictedData:
+            @property
+            def scenes(self):
+                raise AttributeError("'_RestrictData' object has no attribute 'scenes'")
+
+        registered = []
+        fake_bpy = SimpleNamespace(
+            data=_RestrictedData(),
+            app=SimpleNamespace(
+                handlers=SimpleNamespace(load_post=[]),
+                timers=SimpleNamespace(
+                    register=lambda function, first_interval=0.0: registered.append(function),
+                    is_registered=lambda _function: False,
+                ),
+            ),
+        )
+        with patch.object(migrations, "bpy", fake_bpy):
+            migrations.register_migrations()
+        self.assertEqual(registered, [migrations._run_deferred_migration])
+
+
 def main():
     dimensions.register()
     try:
-        suite = unittest.defaultTestLoader.loadTestsFromTestCase(DimensionsBlenderSmokeTests)
+        loader = unittest.defaultTestLoader
+        suite = unittest.TestSuite(
+            loader.loadTestsFromTestCase(case)
+            for case in (
+                DimensionsBlenderSmokeTests,
+                DimensionsDrawCacheTests,
+                DimensionsKeymapTests,
+                DimensionsPackagingTests,
+            )
+        )
         result = unittest.TextTestRunner(verbosity=2).run(suite)
     finally:
         dimensions.unregister()

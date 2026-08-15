@@ -1,16 +1,21 @@
 import bpy
 
 from .drawing import register_draw_handler, unregister_draw_handler
-from .operators.click_select import register_click_select, unregister_click_select
+from .keymaps import classes as keymap_classes
+from .keymaps import register_keymaps, unregister_keymaps
+from .migrations import register_migrations, unregister_migrations
 from .operators import classes as operator_classes
 from .properties import classes as property_classes
 from .properties import register_properties, unregister_properties
+from .preferences import classes as preference_classes
 from .tools import register_tools, unregister_tools
 from .ui import classes as ui_classes
 
 
 CLASSES = (
     *property_classes,
+    *keymap_classes,
+    *preference_classes,
     *operator_classes,
     *ui_classes,
 )
@@ -20,9 +25,10 @@ _registered_components = []
 
 _COMPONENTS = (
     (register_properties, unregister_properties),
+    (register_migrations, unregister_migrations),
     (register_tools, unregister_tools),
+    (register_keymaps, unregister_keymaps),
     (register_draw_handler, unregister_draw_handler),
-    (register_click_select, unregister_click_select),
 )
 
 

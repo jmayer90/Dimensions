@@ -6,10 +6,11 @@ on:
 
 jobs:
   blender:
-    name: Blender ${{ matrix.blender.version }}
-    runs-on: windows-latest
+    name: ${{ matrix.os }} / Blender ${{ matrix.blender.version }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
         blender:
           - version: 5.1.2
             series: "5.1"
@@ -18,22 +19,51 @@ jobs:
     env:
       BLENDER_VERSION: ${{ matrix.blender.version }}
       BLENDER_SERIES: ${{ matrix.blender.series }}
-      BLENDER_DIR: C:\blender
+      BLENDER_DIR: ${{ runner.temp }}/blender
     steps:
       - uses: actions/checkout@v4
-      - name: Download Blender
+      - name: Download Blender (Windows)
+        if: runner.os == 'Windows'
         shell: powershell
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "blender.zip"
           Invoke-WebRequest "https://download.blender.org/release/Blender$env:BLENDER_SERIES/blender-$env:BLENDER_VERSION-windows-x64.zip" -OutFile $archive
           Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP
           Move-Item (Join-Path $env:RUNNER_TEMP "blender-$env:BLENDER_VERSION-windows-x64") $env:BLENDER_DIR
-      - name: Validate
+      - name: Download Blender (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/blender.tar.xz"
+          curl --fail --location "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" --output "$archive"
+          tar -xf "$archive" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/blender-${BLENDER_VERSION}-linux-x64" "$BLENDER_DIR"
+      - name: Download Blender (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/blender.dmg"
+          mount_point="$RUNNER_TEMP/blender-mount"
+          mkdir -p "$mount_point"
+          curl --fail --location "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-macos-arm64.dmg" --output "$archive"
+          hdiutil attach "$archive" -mountpoint "$mount_point" -nobrowse
+          cp -R "$mount_point/Blender.app" "$BLENDER_DIR.app"
+          hdiutil detach "$mount_point"
+      - name: Validate (Windows)
+        if: runner.os == 'Windows'
         shell: powershell
         run: powershell -ExecutionPolicy Bypass -File scripts\validate.ps1 -Blender "$env:BLENDER_DIR\blender.exe"
+      - name: Validate (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: scripts/validate.sh --blender "$BLENDER_DIR/blender"
+      - name: Validate (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: scripts/validate.sh --blender "$BLENDER_DIR.app/Contents/MacOS/Blender"
       - name: Upload validated extension package
         uses: actions/upload-artifact@v4
         with:
-          name: dimensions-extension-${{ matrix.blender.version }}
+          name: dimensions-extension-${{ runner.os }}-${{ matrix.blender.version }}
           path: build/dimensions-*.zip
           if-no-files-found: error

@@ -1,5 +1,6 @@
 import bpy
 
+from .. import messages
 from ..anchors import set_world_anchor
 from ..collections import create_measurement_object, ensure_measurement_snap_proxy
 from ..drawing import clear_measure_state, set_measure_state
@@ -24,7 +25,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
 
     def invoke(self, context, event):
         if context.area is None or context.area.type != "VIEW_3D" or context.mode not in {"OBJECT", "EDIT_MESH"}:
-            self.report({"ERROR"}, "Measure works in Object Mode or Mesh Edit Mode from a 3D View")
+            self.report(messages.WARNING, messages.MEASURE_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
 
         self.state = "PICK_START"
@@ -61,7 +62,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             self.axis = axis
             self._update_effective_end(context)
             self._update_overlay(context)
-            self.report({"INFO"}, f"Measurement direction: {self.axis.title()}")
+            self.report(messages.INFO, messages.measurement_direction(self.axis.title()))
             return {"RUNNING_MODAL"}
 
         if self.state == "PICK_END":
@@ -148,10 +149,10 @@ class CADDIM_OT_Measure(bpy.types.Operator):
     def _commit(self, context):
         self._update_effective_end(context)
         if self.distance_text.strip() and not self.distance_input_valid:
-            self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+            self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
             return {"RUNNING_MODAL"}
         if self.start_world is None or self.end_world is None or (self.end_world - self.start_world).length < 1e-6:
-            self.report({"WARNING"}, "Choose a direction and a non-zero measurement distance")
+            self.report(messages.WARNING, messages.MEASUREMENT_DIRECTION_DISTANCE_REQUIRED)
             return {"RUNNING_MODAL"}
 
         obj = create_measurement_object(context)
@@ -165,7 +166,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             obj.select_set(True)
             context.view_layer.objects.active = obj
         clear_measure_state()
-        self.report({"INFO"}, "Created persistent measurement")
+        self.report(messages.INFO, messages.CREATED_MEASUREMENT)
         return {"FINISHED"}
 
     def _update_axis_gesture(self, context, event):

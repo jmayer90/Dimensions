@@ -5,6 +5,7 @@ from mathutils.geometry import intersect_line_line, intersect_line_plane
 from mathutils import Vector
 
 from .constants import DEFAULT_SNAP_PIXEL_THRESHOLD
+from .preferences import get_preferences
 from .anchors import resolve_anchor
 from .collections import MEASUREMENT_SNAP_PROXY_FLAG
 from .projected_snap import nearest_visible_projected_vertex
@@ -183,7 +184,9 @@ def _snap_candidate_score(candidate, mouse):
     return candidate.get("priority", 100), distance
 
 
-def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=DEFAULT_SNAP_PIXEL_THRESHOLD):
+def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=None):
+    if pixel_threshold is None:
+        pixel_threshold = get_preferences(context).snap_pixel_threshold
     hit = raycast_from_mouse(context, mouse_x, mouse_y)
     if hit is None:
         if context.mode == "EDIT_MESH" and context.edit_object is not None:

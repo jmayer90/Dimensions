@@ -3,6 +3,7 @@ import bpy
 
 from mathutils import Vector
 
+from .. import messages
 from ..angle_binding import derive_angle_from_world_edges, set_angle_edge
 from ..collections import create_dimension_object
 from ..drawing import clear_preview_state, set_preview_state
@@ -60,17 +61,17 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
 
     def invoke(self, context, _event):
         if not has_view3d_window_region(context):
-            self.report({"ERROR"}, "Run this operator from a 3D View")
+            self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
         if context.mode not in {"OBJECT", "EDIT_MESH"}:
-            self.report({"ERROR"}, "Angle dimensions work in Object Mode or Mesh Edit Mode")
+            self.report(messages.WARNING, messages.ANGLE_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
         self.target_name = ""
         self.angle_mode = "MINOR"
         if self.replace_active:
             active = context.view_layer.objects.active
             if not is_dimension_object(active) or active.dimension_props.annotation_kind != "ANGLE":
-                self.report({"ERROR"}, "Select an Angle dimension to remake")
+                self.report(messages.WARNING, messages.SELECT_ANGLE_DIMENSION)
                 return {"CANCELLED"}
             self.target_name = active.name
             self.angle_mode = active.dimension_props.angle_mode
@@ -128,18 +129,18 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
             if self.state == "PICK_EDGE_A":
                 if self.hover_snap is None:
-                    self.report({"WARNING"}, "Point at the first mesh edge")
+                    self.report(messages.WARNING, messages.POINT_FIRST_EDGE)
                     return {"RUNNING_MODAL"}
                 self.edge_a_snap = copy_snap(self.hover_snap)
                 self.state = "PICK_EDGE_B"
             elif self.state == "PICK_EDGE_B":
                 if self.hover_snap is None:
-                    self.report({"WARNING"}, "Point at the second mesh edge")
+                    self.report(messages.WARNING, messages.POINT_SECOND_EDGE)
                     return {"RUNNING_MODAL"}
                 self.edge_b_snap = copy_snap(self.hover_snap)
                 source = self._derived_source()
                 if source is None:
-                    self.report({"WARNING"}, "The selected edges are parallel or degenerate")
+                    self.report(messages.WARNING, messages.POINT_NON_PARALLEL_EDGES)
                     return {"RUNNING_MODAL"}
                 self.radius = max(0.001, min(
                     (source["start"] - source["center"]).length,
@@ -201,7 +202,7 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
                 selected.select_set(False)
             annotation.select_set(True)
             context.view_layer.objects.active = annotation
-        self.report({"INFO"}, f"{'Remade' if self.target_name else 'Created'} two-edge angle dimension")
+        self.report(messages.INFO, messages.created_angle(bool(self.target_name)))
         return {"FINISHED"}
 
     def _update_preview(self):

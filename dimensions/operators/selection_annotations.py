@@ -2,6 +2,7 @@ import bmesh
 import bpy
 from mathutils import Vector
 
+from .. import messages
 from ..anchors import set_anchor, set_object_anchor
 from ..area_binding import FACE_ID_ATTRIBUTE, bind_area_faces, evaluate_area_binding
 from ..angle_binding import derive_angle_from_world_edges, set_angle_edge
@@ -72,9 +73,9 @@ class DIMENSIONS_OT_DimensionSelectedEdge(bpy.types.Operator):
     def execute(self, context):
         dimension = create_dimension_from_selected_edge(context)
         if dimension is None:
-            self.report({"ERROR"}, "Select exactly one edge")
+            self.report(messages.WARNING, messages.SELECT_ONE_EDGE)
             return {"CANCELLED"}
-        self.report({"INFO"}, "Created dimension from selected edge")
+        self.report(messages.INFO, messages.CREATED_SELECTED_EDGE)
         return {"FINISHED"}
 
 
@@ -95,7 +96,7 @@ class DIMENSIONS_OT_AreaSelectedFaces(bpy.types.Operator):
         obj, bm = _selected_bmesh(context)
         faces = [face for face in bm.faces if face.select and not face.hide]
         if not faces:
-            self.report({"ERROR"}, "Select one or more faces")
+            self.report(messages.WARNING, messages.SELECT_ONE_OR_MORE_FACES)
             return {"CANCELLED"}
 
         face_indices = [face.index for face in faces]
@@ -108,7 +109,7 @@ class DIMENSIONS_OT_AreaSelectedFaces(bpy.types.Operator):
         result = bind_area_faces(props, obj, faces)
         if result is None:
             bpy.data.objects.remove(annotation, do_unlink=True)
-            self.report({"ERROR"}, "Selected faces have no measurable area")
+            self.report(messages.WARNING, messages.AREA_FACES_UNMEASURABLE)
             return {"CANCELLED"}
 
         total_area = result["area"]
@@ -127,7 +128,7 @@ class DIMENSIONS_OT_AreaSelectedFaces(bpy.types.Operator):
         set_object_anchor(props.start, obj, center)
         set_object_anchor(props.end, obj, label_point)
         annotation.location = label_point
-        self.report({"INFO"}, f"Created area annotation from {len(faces)} face(s)")
+        self.report(messages.INFO, messages.created_area(len(faces)))
         return {"FINISHED"}
 
 
@@ -155,21 +156,21 @@ class DIMENSIONS_OT_RebindAreaFromSelection(bpy.types.Operator):
         source = context.edit_object
         annotation = bpy.data.objects.get(_pending_area_annotation_name) if source else None
         if source is None or annotation is None:
-            self.report({"ERROR"}, "Use Select Source Faces from an Area annotation first")
+            self.report(messages.WARNING, messages.SELECT_AREA_BEFORE_SOURCES)
             return {"CANCELLED"}
         bm = bmesh.from_edit_mesh(source.data)
         faces = [face for face in bm.faces if face.select and not face.hide]
         if not faces:
-            self.report({"ERROR"}, "Select one or more source faces")
+            self.report(messages.WARNING, messages.SELECT_AREA_SOURCES)
             return {"CANCELLED"}
         result = bind_area_faces(annotation.dimension_props, source, faces)
         if result is None:
-            self.report({"ERROR"}, "Selected faces have no measurable area")
+            self.report(messages.WARNING, messages.AREA_FACES_UNMEASURABLE)
             return {"CANCELLED"}
         annotation.dimension_props.area_value = result["area"]
         annotation.dimension_props.area_face_count = result["face_count"]
         _pending_area_annotation_name = ""
-        self.report({"INFO"}, f"Rebound Area to {len(faces)} face(s)")
+        self.report(messages.INFO, messages.rebound_area(len(faces)))
         return {"FINISHED"}
 
 
@@ -197,7 +198,7 @@ class DIMENSIONS_OT_CaptureArea(bpy.types.Operator):
             props.area_value = result["area"]
             props.area_face_count = result["face_count"]
         props.measurement_state = "CAPTURED"
-        self.report({"INFO"}, "Captured Area value")
+        self.report(messages.INFO, messages.CAPTURED_AREA_VALUE)
         return {"FINISHED"}
 
 
@@ -238,7 +239,7 @@ class DIMENSIONS_OT_SelectAreaSource(bpy.types.Operator):
             face.select = bool(layer is not None and face[layer] in wanted)
         bmesh.update_edit_mesh(source.data, loop_triangles=False, destructive=False)
         _pending_area_annotation_name = annotation.name
-        self.report({"INFO"}, f"Selected {sum(face.select for face in bm.faces)} bound face(s)")
+        self.report(messages.INFO, messages.SELECTED_BOUND_FACES)
         return {"FINISHED"}
 
 
@@ -259,12 +260,12 @@ class DIMENSIONS_OT_AngleSelectedEdges(bpy.types.Operator):
         obj, bm = _selected_bmesh(context)
         edges = [edge for edge in bm.edges if edge.select and not edge.hide]
         if len(edges) != 2:
-            self.report({"ERROR"}, "Select exactly two edges")
+            self.report(messages.WARNING, messages.SELECT_TWO_NON_PARALLEL_EDGES)
             return {"CANCELLED"}
         world_edges = [tuple(obj.matrix_world @ vertex.co for vertex in edge.verts) for edge in edges]
         source = derive_angle_from_world_edges(*world_edges[0], *world_edges[1], "MINOR")
         if source is None:
-            self.report({"ERROR"}, "Selected edges must define a non-parallel angle")
+            self.report(messages.WARNING, messages.SELECT_TWO_NON_PARALLEL_EDGES)
             return {"CANCELLED"}
         annotation = create_dimension_object(context, "ANGLE Selected Edges")
         props = annotation.dimension_props
@@ -276,7 +277,7 @@ class DIMENSIONS_OT_AngleSelectedEdges(bpy.types.Operator):
         props.angle_radius = max(0.001, min(first_length, second_length) * 0.35)
         props.measurement_state = "LIVE"
         annotation.location = source["center"]
-        self.report({"INFO"}, "Created angle dimension from selected edges")
+        self.report(messages.INFO, messages.CREATED_SELECTED_ANGLE)
         return {"FINISHED"}
 
 

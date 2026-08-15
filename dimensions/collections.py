@@ -8,6 +8,7 @@ from .constants import (
     GUIDE_COLLECTION_NAME,
 )
 from .properties import apply_scene_style_to_dimension
+from .preferences import get_preferences
 
 
 MEASUREMENT_SNAP_PROXY_FLAG = "dimensions_measurement_snap_proxy"
@@ -50,12 +51,26 @@ def get_or_create_dimension_collection(context):
     )
 
 
+def get_scene_collection(scene, role):
+    """Return a Dimensions-owned collection without creating data during drawing."""
+    if scene is None:
+        return None
+    return next(
+        (
+            collection
+            for collection in scene.collection.children_recursive
+            if collection.get("dimensions_collection_role") == role
+        ),
+        None,
+    )
+
+
 def create_dimension_object(context, name="DIM Dimension"):
     collection = get_or_create_dimension_collection(context)
 
     dimension_object = bpy.data.objects.new(name, object_data=None)
     dimension_object.empty_display_type = DEFAULT_EMPTY_DISPLAY_TYPE
-    dimension_object.empty_display_size = DEFAULT_EMPTY_DISPLAY_SIZE
+    dimension_object.empty_display_size = get_preferences(context).empty_display_size
     dimension_object.hide_render = True
 
     collection.objects.link(dimension_object)
@@ -65,6 +80,9 @@ def create_dimension_object(context, name="DIM Dimension"):
         settings = getattr(context.scene, "dimensions_settings", None)
         if settings is not None:
             apply_scene_style_to_dimension(settings, dimension_object.dimension_props)
+        from .migrations import stamp_scene_if_needed
+
+        stamp_scene_if_needed(context.scene)
 
     return dimension_object
 
@@ -81,10 +99,13 @@ def create_guide_object(context, name="GUIDE Construction Line"):
     collection = get_or_create_guide_collection(context)
     guide_object = bpy.data.objects.new(name, object_data=None)
     guide_object.empty_display_type = DEFAULT_EMPTY_DISPLAY_TYPE
-    guide_object.empty_display_size = DEFAULT_EMPTY_DISPLAY_SIZE
+    guide_object.empty_display_size = get_preferences(context).empty_display_size
     guide_object.hide_render = True
     collection.objects.link(guide_object)
     guide_object.guide_props.enabled = True
+    from .migrations import stamp_scene_if_needed
+
+    stamp_scene_if_needed(context.scene)
     return guide_object
 
 

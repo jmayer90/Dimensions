@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "dimensions"
-version = "0.2.3"
+version = "0.3.0"
 name = "Dimensions"
 tagline = "Precision dimensions, guides, and measurements"
 maintainer = "Cynic Wild"

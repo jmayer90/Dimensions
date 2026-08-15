@@ -1,5 +1,6 @@
 import bpy
 
+from .. import messages
 from ..anchors import set_anchor_from_snap
 from ..collections import create_guide_object, remove_measurement_snap_proxies
 from ..drawing import clear_guide_preview_state, set_guide_preview_state
@@ -22,7 +23,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
 
     def invoke(self, context, event):
         if context.area is None or context.area.type != "VIEW_3D" or context.mode != "OBJECT":
-            self.report({"ERROR"}, "Construction guides work in Object Mode from a 3D View")
+            self.report(messages.WARNING, messages.GUIDE_REQUIRE_OBJECT_MODE)
             return {"CANCELLED"}
         self.axis = "ALIGNED"
         self.start_snap = None
@@ -55,7 +56,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         if axis is not None:
             self.axis = axis
             self._update_preview(context)
-            self.report({"INFO"}, f"Guide direction: {self.axis.title()}")
+            self.report(messages.INFO, messages.guide_direction(self.axis.title()))
             return {"RUNNING_MODAL"}
 
         if self.state == "PICK_END":
@@ -134,10 +135,10 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         end_snap = self._effective_end_snap(context)
         if end_snap is None:
             if self.distance_text:
-                self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+                self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
             return {"RUNNING_MODAL"}
         if (end_snap["world_co"] - self.start_snap["world_co"]).length < 1e-6:
-            self.report({"WARNING"}, "Choose a direction and a non-zero guide distance")
+            self.report(messages.WARNING, messages.GUIDE_DIRECTION_DISTANCE_REQUIRED)
             return {"RUNNING_MODAL"}
         self._create(context, end_snap)
         clear_guide_preview_state()
@@ -197,7 +198,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             selected.select_set(False)
         obj.select_set(True)
         context.view_layer.objects.active = obj
-        self.report({"INFO"}, "Created construction guide")
+        self.report(messages.INFO, messages.CREATED_GUIDE)
 
     def _update_preview(self, context=None):
         state = {
@@ -242,7 +243,7 @@ class CADDIM_OT_ClearGuides(bpy.types.Operator):
         ]
         for obj in guide_objects:
             bpy.data.objects.remove(obj, do_unlink=True)
-        self.report({"INFO"}, f"Removed {len(guide_objects)} construction guide(s)")
+        self.report(messages.INFO, messages.cleared_guides(len(guide_objects)))
         return {"FINISHED"}
 
 
@@ -262,5 +263,5 @@ class CADDIM_OT_ClearMeasurements(bpy.types.Operator):
         for obj in measurement_objects:
             remove_measurement_snap_proxies(obj)
             bpy.data.objects.remove(obj, do_unlink=True)
-        self.report({"INFO"}, f"Removed {len(measurement_objects)} measurement(s)")
+        self.report(messages.INFO, messages.cleared_measurements(len(measurement_objects)))
         return {"FINISHED"}

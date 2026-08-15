@@ -1,5 +1,6 @@
 import bpy
 
+from .. import messages
 from ..properties import (
     apply_dimension_style_to_scene,
     apply_scene_style_to_dimension,
@@ -23,7 +24,7 @@ class CADDIM_OT_ResetStyleToGlobal(bpy.types.Operator):
             context.scene.dimensions_settings,
             dimension_object.dimension_props,
         )
-        self.report({"INFO"}, "Reset selected dimension to the global style")
+        self.report(messages.INFO, messages.RESET_GLOBAL_STYLE)
         return {"FINISHED"}
 
 
@@ -43,7 +44,7 @@ class CADDIM_OT_ApplyGlobalStyleToAll(bpy.types.Operator):
             apply_scene_style_to_dimension(settings, obj.dimension_props)
             count += 1
 
-        self.report({"INFO"}, f"Applied global style to {count} dimension(s)")
+        self.report(messages.INFO, messages.applied_global_style(count))
         return {"FINISHED"}
 
 
@@ -63,7 +64,7 @@ class CADDIM_OT_CopyStyleToGlobal(bpy.types.Operator):
             dimension_object.dimension_props,
             context.scene.dimensions_settings,
         )
-        self.report({"INFO"}, "Copied selected dimension style to global defaults")
+        self.report(messages.INFO, messages.COPIED_GLOBAL_STYLE)
         return {"FINISHED"}
 
 

@@ -25,11 +25,15 @@ Download the latest `dimensions-<version>.zip` from the [Releases](../../release
 
 Installing does not change Blender's global snapping, keymaps, or Auto Merge settings.
 
-To build the archive yourself instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
+To build the archive yourself instead, see [CONTRIBUTING.md](CONTRIBUTING.md). Windows uses PowerShell; Linux and macOS can use the included POSIX build and validation scripts.
 
 ## Getting started
 
 Open the 3D Viewport sidebar with `N` and choose the **Dimensions** tab.
+
+Use **Edit ▸ Preferences ▸ Add-ons ▸ Dimensions** to tune snap and selection radii plus defaults for new annotations. Scene and per-annotation settings remain part of the `.blend` file.
+
+To select an existing annotation directly in the viewport, activate **Dimensions Selection** from the 3D View toolbar in Object Mode. Clicks that do not hit a Dimensions object continue to Blender's normal selection tool.
 
 **A linear dimension:**
 
@@ -54,6 +58,8 @@ In Mesh Edit Mode, **Create Dimension** is selection-first: with exactly one edg
 | `Esc` | Clear typed input, then step back or exit |
 | Right-click | Cancel a one-shot tool |
 
+Every key in this table is rebindable, and the modal keys take effect as soon as you change them — no restart. Creation shortcuts ship unbound, as disabled entries in the Dimensions add-on Keymap preferences, so nothing Dimensions installs can shadow a binding you already use.
+
 ### Placement
 
 Linear and area annotations are placement objects. Move one with Blender's normal transform tools and you move its presentation — the source anchors stay attached, and the offset you set survives later changes to the source geometry or object transform.
@@ -64,8 +70,9 @@ Linear and area annotations are placement objects. Move one with Blender's norma
 - Construction guides are Object Mode only. Dimensions and measurements work in both modes.
 - Vertex anchors use persistent mesh point IDs. If topology removes an anchored point or duplicates its ID, the anchor resolves to the closest stored position rather than reporting a detached state. Surface anchors follow object transforms but not later deformation.
 - Live areas bind base-mesh faces from a single object. Modifier-evaluated and multi-object areas are not supported; lost or ambiguous faces surface a visible **Needs Repair** state rather than guessing.
-- Snap cache rebuilds after geometry, transform, or view changes can be noticeable in very dense scenes.
-- There is no annotation manager, no local-axis or parallel/perpendicular inference, no guide planes, and no custom keymaps yet.
+- **Snapping becomes slow to start on scenes above roughly 100,000 visible vertices.** The first snap query in a new view builds a source cache: about 0.4 s at 100k vertices, but around 4.9 s at 1 million. Once built, individual snaps are effectively instant (0.013 ms) and moving the view alone does not rebuild the cache. See [`docs/DESIGN.md`](docs/DESIGN.md#measured-performance) for the full measurements.
+- Overlay drawing is measured at 500 visible dimensions and holds above 30 fps; draw cost does not depend on how many other objects the scene contains.
+- There is no annotation manager, no local-axis or parallel/perpendicular inference, or guide planes yet.
 
 ## Contributing
 

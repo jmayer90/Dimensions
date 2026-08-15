@@ -69,8 +69,9 @@ def _refresh_anchor_vertex_id(anchor):
 
 def update_dimension_display(_dimension, context):
     try:
-        from .drawing import tag_redraw_all_view3d
+        from .drawing import invalidate_dimension_geometry_cache, tag_redraw_all_view3d
 
+        invalidate_dimension_geometry_cache()
         tag_redraw_all_view3d()
     except (ImportError, RuntimeError):
         if context is not None and context.area is not None:
@@ -469,6 +470,14 @@ class CADDIM_PG_Guide(bpy.types.PropertyGroup):
 
 
 class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
+    schema_version: bpy.props.IntProperty(
+        name="Dimensions Schema Version",
+        description="Internal version of persistent Dimensions scene data",
+        default=0,
+        min=0,
+        options={"HIDDEN"},
+    )
+
     unit_style: bpy.props.EnumProperty(
         name="Unit Style",
         items=[
@@ -646,13 +655,6 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
         default=28,
         min=0,
         max=1000,
-        update=update_dimension_display,
-    )
-
-    enable_click_select: bpy.props.BoolProperty(
-        name="Select Annotations in Viewport",
-        description="Allow clicking a drawn dimension or guide to select its scene object",
-        default=True,
         update=update_dimension_display,
     )
 

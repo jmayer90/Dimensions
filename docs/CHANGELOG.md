@@ -2,6 +2,29 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
+## 0.3.0 — Unreleased
+
+- Added POSIX build and validation scripts for Linux and macOS, alongside the existing PowerShell workflow.
+- Added scene-level schema versioning and load-time migration for legacy persistent vertex anchors.
+- Replaced the always-running viewport selection modal with the explicit **Dimensions Selection** toolbar tool.
+- Added per-user add-on preferences for interaction target sizes and defaults for new annotation presentation.
+- Added removable, customizable add-on keymap entries for Dimensions creation tools.
+- Cleared transient viewport and snap caches after undo and redo, and made linked annotations read-only in the local editor.
+- Made annotation and guide drawing iterate their scene-owned collections instead of every object in the scene.
+- Cached projected dimension geometry per viewport/view and invalidate it on source, style, undo, and redo changes.
+- Registered the shared axis and confirm modal actions so compatible Dimensions tools honor customized modal bindings.
+- Centralized all operator status messages, using actionable warnings for recoverable input and reserving errors for unexpected failures.
+- Added pure point-placement state coverage for the shared cancel and step-back interaction contract, plus named lifecycle tests for persistent measurement proxies.
+- Added opt-in dense-scene snap profiling and a deterministic reference-scene generator; pure view changes now reuse world-space snap sources instead of rebuilding them.
+- Fixed the add-on failing to enable at all: registration read `bpy.data.scenes` while Blender still restricts it, so enabling Dimensions raised `AttributeError` and rolled the whole registration back. Scenes already open when the add-on is enabled are now migrated on the next event loop tick.
+- Fixed add-on preferences never taking effect once installed as an extension. Preferences were looked up under `bl_ext` rather than the full package name, so every configured value silently fell back to its default.
+- Fixed picking the same point twice for a linear dimension refusing the stage without saying why; it now reports that a different end point is required.
+- Batched annotation drawing by color and line width, so the usual selected/unselected split costs about two GPU batches regardless of annotation count. Label layout and font metrics are cached instead of recomputed every frame.
+- Bounded the annotation geometry cache to one entry per viewport. Orbiting previously added a cache entry per annotation per frame and never released them.
+- Made modal keys genuinely rebindable: the `Dimensions Modal` action map is read through the user key configuration on every event, and the preferences Keymap section now shows editable key rows instead of read-only properties.
+- Measured and documented draw and snapping performance in `docs/DESIGN.md`. Overlay draw cost is now independent of scene size (0.310 ms/frame with 10,000 non-annotation objects versus 0.312 ms/frame with 10), and the 500-dimension budget is met at 58 fps worst case. Snap queries run at 0.013 ms against an 8 ms budget; the 1M-vertex cache build misses its budget and is tracked as `FND-11`.
+- Expanded the test suites from 47 to 92 tests: 58 in `blender_smoke.py` (draw caching and batching, keymap registration and collision, and extension-packaging regressions), 25 in the new `blender_modal.py` (pick-pick-place, axis locks before and after each point, typed distance around an axis choice, invalid input, escape and step-back from every stage, and cancellation leaving no objects behind), and 9 in `blender_lifecycle.py` (now including migration of a released-file fixture).
+
 ## 0.2.3 — July 30, 2026
 
 - Fixed installation on Blender 5.2 by removing the `blender_version_max = "5.2.0"` compatibility ceiling.

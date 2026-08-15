@@ -25,6 +25,8 @@ from .dimension_geometry import (
     sanitize_plane_normal,
 )
 from .properties import is_dimension_object, is_guide_object
+from .preferences import get_preferences
+from .collections import get_scene_collection
 from .snapping import construction_segment_world, find_nearest_guide_point, guide_is_visible, guide_segment_world
 from .scene_sync import register_scene_sync, unregister_scene_sync
 from .units import format_area, format_length, format_volume
@@ -43,6 +45,68 @@ from .viewport_state import (
 
 _pixel_draw_handler = None
 _world_draw_handler = None
+# One entry per viewport, holding the view it was built for. A viewport whose view
+# changed drops its own geometry without disturbing any other viewport, so the cache
+# stays bounded by the number of open 3D views rather than growing on every orbit.
+_dimension_geometry_cache = {}
+_text_layout_cache = {}
+_text_metrics_cache = {}
+_geometry_build_count = 0
+_MAX_TEXT_LAYOUT_ENTRIES = 4096
+
+
+def invalidate_dimension_geometry_cache():
+    _dimension_geometry_cache.clear()
+    _text_layout_cache.clear()
+
+
+def geometry_build_count():
+    """Number of full geometry rebuilds since registration, for cache tests."""
+    return _geometry_build_count
+
+
+class SegmentBatcher:
+    """Accumulate line segments so annotations sharing a color and width cost one batch.
+
+    Annotation overlays are overwhelmingly two colors — selected and unselected — so
+    collapsing them turns a per-annotation upload into a per-color upload. Text is
+    collected alongside and drawn after the lines, because ``blf`` cannot be batched.
+    """
+
+    def __init__(self, shader):
+        self._shader = shader
+        self._segments = {}
+        self._text_items = []
+
+    def add_segments(self, segments, color, line_width=DEFAULT_LINE_WIDTH):
+        if not segments:
+            return
+        key = (tuple(round(float(channel), 6) for channel in color), round(float(line_width), 3))
+        self._segments.setdefault(key, []).extend(segments)
+
+    def add_text(self, text, position, color, text_size=DEFAULT_TEXT_SIZE, align="CENTER"):
+        self._text_items.append((text, position, tuple(color), text_size, align))
+
+    @property
+    def batch_count(self):
+        return len(self._segments)
+
+    def flush(self):
+        for (color, line_width), segments in self._segments.items():
+            gpu.state.line_width_set(line_width)
+            batch = batch_for_shader(self._shader, "LINES", {"pos": segments})
+            self._shader.bind()
+            self._shader.uniform_float("color", color)
+            batch.draw(self._shader)
+        self._segments.clear()
+        for text, position, color, text_size, align in self._text_items:
+            if align == "LEFT":
+                _draw_text_left(text, position, color, text_size)
+            elif align == "RIGHT":
+                _draw_text_right(text, position, color, text_size)
+            else:
+                _draw_text(text, position, color, text_size)
+        self._text_items.clear()
 
 
 def set_preview_state(preview_state):
@@ -96,6 +160,8 @@ def unregister_draw_handler():
 
     unregister_scene_sync()
     clear_all_states()
+    invalidate_dimension_geometry_cache()
+    _text_metrics_cache.clear()
 
     if _pixel_draw_handler is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_pixel_draw_handler, "WINDOW")
@@ -107,6 +173,8 @@ def unregister_draw_handler():
 
 
 def build_dimension_geometry_for_object(context, dimension_object):
+    global _geometry_build_count
+    _geometry_build_count += 1
     props = dimension_object.dimension_props
 
     if getattr(props, "annotation_kind", "LINEAR") == "AREA":
@@ -167,6 +235,29 @@ def build_dimension_geometry_for_object(context, dimension_object):
     screen_geometry["tolerance_upper"] = props.tolerance_upper
     screen_geometry["tolerance_lower"] = props.tolerance_lower
     return screen_geometry
+
+
+def get_cached_dimension_geometry(context, dimension_object):
+    """Build screen geometry once per unchanged annotation and viewport view."""
+    region = getattr(context, "region", None)
+    region_data = getattr(context, "region_data", None)
+    if region is None or region_data is None or not hasattr(region_data, "perspective_matrix"):
+        return build_dimension_geometry_for_object(context, dimension_object)
+    viewport_key = (
+        getattr(getattr(context, "window", None), "as_pointer", lambda: 0)(),
+        getattr(getattr(context, "area", None), "as_pointer", lambda: 0)(),
+        getattr(region, "as_pointer", lambda: id(region))(),
+    )
+    view = tuple(round(value, 7) for row in region_data.perspective_matrix for value in row)
+    cached = _dimension_geometry_cache.get(viewport_key)
+    if cached is None or cached["view"] != view:
+        cached = {"view": view, "entries": {}}
+        _dimension_geometry_cache[viewport_key] = cached
+    entries = cached["entries"]
+    key = dimension_object.as_pointer()
+    if key not in entries:
+        entries[key] = build_dimension_geometry_for_object(context, dimension_object)
+    return entries[key]
 
 
 def _annotation_style(context, props, geometry):
@@ -290,7 +381,9 @@ def draw_dimensions():
     gpu.state.line_width_set(DEFAULT_LINE_WIDTH)
 
     try:
-        for obj in context.scene.objects:
+        batcher = SegmentBatcher(shader)
+        collection = get_scene_collection(context.scene, "DIMENSIONS")
+        for obj in () if collection is None else collection.all_objects:
             if not is_dimension_object(obj):
                 continue
 
@@ -298,12 +391,13 @@ def draw_dimensions():
             if not props.visible or not _object_visible_in_viewport(context, obj):
                 continue
 
-            geometry = build_dimension_geometry_for_object(context, obj)
+            geometry = get_cached_dimension_geometry(context, obj)
             if geometry is None:
                 continue
 
             color = props.selected_color if obj.select_get() else props.color
-            _draw_dimension_geometry(context, shader, geometry, color, geometry["precision"])
+            _collect_dimension_geometry(context, batcher, geometry, color, geometry["precision"])
+        batcher.flush()
 
         if preview_state is not None:
             _draw_preview(context, shader, preview_state)
@@ -371,13 +465,16 @@ def _draw_construction_guides(context, shader):
     settings = getattr(context.scene, "dimensions_settings", None)
     if settings is None or not settings.show_construction_guides:
         return
-    for obj in context.scene.objects:
+    batcher = SegmentBatcher(shader)
+    collection = get_scene_collection(context.scene, "GUIDES")
+    for obj in () if collection is None else collection.all_objects:
         if not guide_is_visible(context, obj):
             continue
         segment = guide_segment_world(obj)
         if segment is None:
             continue
-        _draw_world_segment(shader, segment[0], segment[1], settings.guide_color, settings.guide_line_width)
+        batcher.add_segments(list(segment), settings.guide_color, settings.guide_line_width)
+    batcher.flush()
 
 
 def _draw_guide_preview_marker(shader, state):
@@ -756,7 +853,8 @@ def _draw_persistent_measurements(context):
     precision = settings.precision
     text_size = settings.dimension_text_size
     color = tuple(settings.guide_color)
-    for obj in context.scene.objects:
+    collection = get_scene_collection(context.scene, "GUIDES")
+    for obj in () if collection is None else collection.all_objects:
         if not guide_is_visible(context, obj):
             continue
         if getattr(obj.guide_props, "kind", "GUIDE") != "MEASUREMENT":
@@ -775,12 +873,12 @@ def _draw_persistent_measurements(context):
         _draw_text(format_length(context, (end_world - start_world).length, precision), label_position, color, text_size)
 
 
-def _draw_dimension_geometry(context, shader, geometry, color, precision):
+def _collect_dimension_geometry(context, batcher, geometry, color, precision):
     if geometry.get("annotation_kind") == "AREA":
-        _draw_area_geometry(context, shader, geometry, color, precision)
+        _collect_area_geometry(context, batcher, geometry, color, precision)
         return
     if geometry.get("annotation_kind") == "ANGLE":
-        _draw_angle_geometry(shader, geometry, color, precision)
+        _collect_angle_geometry(batcher, geometry, color, precision)
         return
     label = _format_linear_dimension_label(context, geometry, precision)
     text_layout = _build_text_layout(
@@ -803,26 +901,19 @@ def _draw_dimension_geometry(context, shader, geometry, color, precision):
     line_segments.extend(_build_arrow_segments(geometry["line_start_screen"], geometry["line_direction_screen"], arrow_size))
     line_segments.extend(_build_arrow_segments(geometry["line_end_screen"], -geometry["line_direction_screen"], arrow_size))
 
-    gpu.state.line_width_set(geometry.get("line_width", DEFAULT_LINE_WIDTH))
-    batch = batch_for_shader(shader, "LINES", {"pos": line_segments})
-    shader.bind()
-    shader.uniform_float("color", color)
-    batch.draw(shader)
+    batcher.add_segments(line_segments, color, geometry.get("line_width", DEFAULT_LINE_WIDTH))
 
     text_size = geometry.get("text_size", DEFAULT_TEXT_SIZE)
     for text, position in text_layout["text_items"]:
-        _draw_text(text, position, color, text_size)
+        batcher.add_text(text, position, color, text_size)
 
 
-def _draw_area_geometry(context, shader, geometry, color, precision):
+def _collect_area_geometry(context, batcher, geometry, color, precision):
     start = geometry["leader_start_screen"]
     end = geometry["leader_end_screen"]
-    gpu.state.line_width_set(geometry.get("line_width", DEFAULT_LINE_WIDTH))
-    batch = batch_for_shader(shader, "LINES", {"pos": [start, end]})
-    shader.bind()
-    shader.uniform_float("color", color)
-    batch.draw(shader)
-    _draw_marker(shader, start, color)
+    line_width = geometry.get("line_width", DEFAULT_LINE_WIDTH)
+    batcher.add_segments([start, end], color, line_width)
+    batcher.add_segments(_marker_segments(start), color, line_width)
     state = geometry.get("measurement_state", "CAPTURED")
     state_suffix = "" if state == "LIVE" else ("  [Captured]" if state == "CAPTURED" else "  [Needs Repair]")
     face_suffix = f"  ({geometry.get('face_count', 0)} faces)" if geometry.get("face_count", 0) > 1 else ""
@@ -831,20 +922,22 @@ def _draw_area_geometry(context, shader, geometry, color, precision):
     custom_text = geometry.get("custom_text", "")
     if custom_text:
         label = f"{custom_text}  {label}"
-    _draw_text_left(label, end + Vector((6.0, 2.0)), color, geometry.get("text_size", DEFAULT_TEXT_SIZE))
+    batcher.add_text(
+        label,
+        end + Vector((6.0, 2.0)),
+        color,
+        geometry.get("text_size", DEFAULT_TEXT_SIZE),
+        align="LEFT",
+    )
 
 
-def _draw_angle_geometry(shader, geometry, color, precision):
+def _collect_angle_geometry(batcher, geometry, color, precision):
     center = geometry["center_screen"]
     points = [center, geometry["start_screen"], center, geometry["end_screen"]]
     arc = geometry["arc_points"]
     for start, end in zip(arc, arc[1:]):
         points.extend((start, end))
-    gpu.state.line_width_set(geometry.get("line_width", DEFAULT_LINE_WIDTH))
-    batch = batch_for_shader(shader, "LINES", {"pos": points})
-    shader.bind()
-    shader.uniform_float("color", color)
-    batch.draw(shader)
+    batcher.add_segments(points, color, geometry.get("line_width", DEFAULT_LINE_WIDTH))
     label = (
         "Angle [Needs Repair]"
         if geometry.get("invalid")
@@ -853,7 +946,7 @@ def _draw_angle_geometry(shader, geometry, color, precision):
     custom_text = geometry.get("custom_text", "")
     if custom_text:
         label = f"{custom_text}  {label}"
-    _draw_text(label, geometry["label_position"], color, geometry.get("text_size", DEFAULT_TEXT_SIZE))
+    batcher.add_text(label, geometry["label_position"], color, geometry.get("text_size", DEFAULT_TEXT_SIZE))
 
 
 def _draw_preview(context, shader, preview_state):
@@ -870,7 +963,8 @@ def _draw_preview(context, shader, preview_state):
         end_screen = _project_world_to_screen(context, end_world)
         if start_screen is None or end_screen is None:
             return
-        _draw_area_geometry(context, shader, {
+        preview_batcher = SegmentBatcher(shader)
+        _collect_area_geometry(context, preview_batcher, {
             "leader_start_screen": start_screen,
             "leader_end_screen": end_screen,
             "value": preview_state.get("area_value", 0.0),
@@ -879,6 +973,7 @@ def _draw_preview(context, shader, preview_state):
             "line_width": DEFAULT_LINE_WIDTH,
             "text_size": DEFAULT_TEXT_SIZE,
         }, (1.0, 0.48, 0.20, 1.0), DEFAULT_PRECISION)
+        preview_batcher.flush()
         return
     if preview_state.get("annotation_kind") == "ANGLE":
         center_world = preview_state.get("center_world")
@@ -905,7 +1000,9 @@ def _draw_preview(context, shader, preview_state):
         }
         if any(value is None for value in (geometry["center_screen"], geometry["start_screen"], geometry["end_screen"], geometry["label_position"])) or any(point is None for point in geometry["arc_points"]):
             return
-        _draw_angle_geometry(shader, geometry, (1.0, 0.48, 0.20, 1.0), DEFAULT_PRECISION)
+        preview_batcher = SegmentBatcher(shader)
+        _collect_angle_geometry(preview_batcher, geometry, (1.0, 0.48, 0.20, 1.0), DEFAULT_PRECISION)
+        preview_batcher.flush()
         return
     if start_world is None or end_world is None:
         return
@@ -1041,11 +1138,14 @@ def _draw_selected_object_overlay(context):
         current_y -= line_y
 
 
-def find_dimension_hit(context, mouse_x, mouse_y, threshold=DEFAULT_SELECTION_PIXEL_THRESHOLD):
+def find_dimension_hit(context, mouse_x, mouse_y, threshold=None):
+    if threshold is None:
+        threshold = get_preferences(context).selection_pixel_threshold
     mouse = Vector((mouse_x, mouse_y))
     best = None
 
-    for obj in context.scene.objects:
+    collection = get_scene_collection(context.scene, "DIMENSIONS")
+    for obj in () if collection is None else collection.all_objects:
         if not is_dimension_object(obj):
             continue
 
@@ -1053,7 +1153,7 @@ def find_dimension_hit(context, mouse_x, mouse_y, threshold=DEFAULT_SELECTION_PI
         if not props.visible or not _object_visible_in_viewport(context, obj):
             continue
 
-        geometry = build_dimension_geometry_for_object(context, obj)
+        geometry = get_cached_dimension_geometry(context, obj)
         if geometry is None:
             continue
 
@@ -1067,7 +1167,9 @@ def find_dimension_hit(context, mouse_x, mouse_y, threshold=DEFAULT_SELECTION_PI
     return None if best is None else best[1]
 
 
-def find_guide_hit(context, mouse_x, mouse_y, threshold=DEFAULT_SELECTION_PIXEL_THRESHOLD):
+def find_guide_hit(context, mouse_x, mouse_y, threshold=None):
+    if threshold is None:
+        threshold = get_preferences(context).selection_pixel_threshold
     snap = find_nearest_guide_point(context, mouse_x, mouse_y, threshold)
     return None if snap is None else snap.get("guide_object")
 
@@ -1129,8 +1231,25 @@ def _build_text_layout(
     text_size=DEFAULT_TEXT_SIZE,
     arrow_size=DEFAULT_ARROW_SIZE,
 ):
-    font_id = 0
-    blf.size(font_id, text_size)
+    line_start = geometry["line_start_screen"]
+    line_end = geometry["line_end_screen"]
+    line_mid = geometry["line_mid_screen"]
+    line_direction = geometry["line_direction_screen"]
+    cache_key = (
+        value_text,
+        placement,
+        custom_text,
+        custom_text_position,
+        round(float(text_size), 3),
+        round(float(arrow_size), 3),
+        _rounded_point(line_start),
+        _rounded_point(line_end),
+        _rounded_point(line_mid),
+        _rounded_point(line_direction),
+    )
+    cached = _text_layout_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     text_lines = [value_text]
     if custom_text:
@@ -1139,10 +1258,7 @@ def _build_text_layout(
         else:
             text_lines.insert(0, custom_text)
 
-    text_metrics = [
-        (text, *blf.dimensions(font_id, text))
-        for text in text_lines
-    ]
+    text_metrics = [(text, *_text_dimensions(text, text_size)) for text in text_lines]
     line_spacing = 3.0 if len(text_metrics) > 1 else 0.0
     block_width = max(width for _text, width, _height in text_metrics)
     block_height = (
@@ -1150,10 +1266,6 @@ def _build_text_layout(
         + line_spacing * (len(text_metrics) - 1)
     )
 
-    line_start = geometry["line_start_screen"]
-    line_end = geometry["line_end_screen"]
-    line_mid = geometry["line_mid_screen"]
-    line_direction = geometry["line_direction_screen"]
     full_line = [line_start, line_end]
     text_half_extent_along_line = (
         abs(line_direction.x) * block_width * 0.5
@@ -1200,21 +1312,46 @@ def _build_text_layout(
         text_items.append((text, text_position))
         current_y -= height + line_spacing
 
-    return {
+    layout = {
         "line_segments": line_segments,
         "text_items": text_items,
         "text_position": block_center,
     }
+    # Keys include screen positions, so an orbit produces a fresh key per frame.
+    # Cap the cache rather than letting a long drag grow it without bound.
+    if len(_text_layout_cache) >= _MAX_TEXT_LAYOUT_ENTRIES:
+        _text_layout_cache.clear()
+    _text_layout_cache[cache_key] = layout
+    return layout
 
 
-def _draw_marker(shader, position, color):
-    size = DEFAULT_HOVER_MARKER_SIZE
-    marker_segments = [
+def _rounded_point(point):
+    return (round(float(point.x), 3), round(float(point.y), 3))
+
+
+def _text_dimensions(text, text_size):
+    """Measure a string once per font size. Font metrics do not depend on the view."""
+    key = (text, round(float(text_size), 3))
+    metrics = _text_metrics_cache.get(key)
+    if metrics is None:
+        font_id = 0
+        blf.size(font_id, text_size)
+        metrics = blf.dimensions(font_id, text)
+        _text_metrics_cache[key] = metrics
+    return metrics
+
+
+def _marker_segments(position, size=DEFAULT_HOVER_MARKER_SIZE):
+    return [
         Vector((position.x - size, position.y)),
         Vector((position.x + size, position.y)),
         Vector((position.x, position.y - size)),
         Vector((position.x, position.y + size)),
     ]
+
+
+def _draw_marker(shader, position, color):
+    marker_segments = _marker_segments(position)
     batch = batch_for_shader(shader, "LINES", {"pos": marker_segments})
     shader.bind()
     shader.uniform_float("color", color)

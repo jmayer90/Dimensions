@@ -1,4 +1,4 @@
-from .click_select import DIMENSIONS_OT_ClickSelectModal
+from .click_select import DIMENSIONS_OT_ClickSelect
 from .create_dimension import CADDIM_OT_CreateDimension
 from .create_angle import DIMENSIONS_OT_CreateAngle, DIMENSIONS_OT_ReplaceAngleEdge
 from .create_area import DIMENSIONS_OT_CreateArea, DIMENSIONS_OT_MoveAreaLabel
@@ -10,7 +10,7 @@ from .selection_annotations import classes as selection_annotation_classes
 
 
 classes = (
-    DIMENSIONS_OT_ClickSelectModal,
+    DIMENSIONS_OT_ClickSelect,
     CADDIM_OT_CreateDimension,
     DIMENSIONS_OT_CreateAngle,
     DIMENSIONS_OT_ReplaceAngleEdge,

@@ -13,7 +13,11 @@ _DISTANCE_CHARACTERS = "0123456789.-/'\" abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM
 
 
 def is_confirm_event(event):
-    return event.value == "PRESS" and event.type in CONFIRM_EVENTS
+    from .keymaps import modal_action_from_event
+
+    return modal_action_from_event(event) == "CONFIRM" or (
+        event.value == "PRESS" and event.type in CONFIRM_EVENTS
+    )
 
 
 def is_navigation_event(event):
@@ -22,9 +26,19 @@ def is_navigation_event(event):
 
 def axis_from_event(event):
     """Return a Blender-style axis lock before or after numeric entry."""
-    if event.value != "PRESS" or event.type not in AXIS_EVENTS:
-        return None
-    return "ALIGNED" if event.type == "A" else event.type
+    from .keymaps import modal_action_from_event
+
+    action = modal_action_from_event(event)
+    if action is not None:
+        return {
+            "CONSTRAIN_ALIGNED": "ALIGNED",
+            "CONSTRAIN_X": "X",
+            "CONSTRAIN_Y": "Y",
+            "CONSTRAIN_Z": "Z",
+        }.get(action)
+    if event.value == "PRESS" and event.type in AXIS_EVENTS:
+        return "ALIGNED" if event.type == "A" else event.type
+    return None
 
 
 def update_distance_text(current_text, event):

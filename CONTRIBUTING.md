@@ -12,10 +12,16 @@ Beyond that, [docs/DESIGN.md](docs/DESIGN.md) lists the design invariants the co
 
 ## Building
 
-You need Blender 5.1 or newer. The build script stages the extension with its license and README, invokes Blender's official extension builder, then validates the archive and rejects missing release files or stray Python cache files.
+You need Blender 5.1 or newer. The build scripts stage the extension with its license and README, invoke Blender's official extension builder, then validate the archive and reject missing release files or stray Python cache files. Keep the PowerShell and POSIX scripts behaviorally in sync when changing either one.
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\build_extension.ps1
+```
+
+On Linux or macOS:
+
+```bash
+scripts/build_extension.sh --blender /path/to/blender
 ```
 
 Pass `-Blender` if Blender isn't at the default install path:
@@ -24,7 +30,7 @@ Pass `-Blender` if Blender isn't at the default install path:
 powershell -ExecutionPolicy Bypass -File scripts\build_extension.ps1 -Blender "D:\blender\blender.exe"
 ```
 
-The archive is written to `build/dimensions-<version>.zip`. Install it through **Edit ▸ Preferences ▸ Add-ons ▸ Install from Disk**.
+The archive is written to `build/dimensions-<version>.zip`. Install it through **Edit ▸ Preferences ▸ Add-ons ▸ Install from Disk**. The POSIX scripts use the standard `unzip` utility to inspect the release archive.
 
 ## Testing
 
@@ -34,21 +40,35 @@ The archive is written to `build/dimensions-<version>.zip`. Install it through *
 powershell -ExecutionPolicy Bypass -File scripts\validate.ps1
 ```
 
+On Linux or macOS:
+
+```bash
+scripts/validate.sh --blender /path/to/blender
+```
+
 To run one suite directly:
 
 ```bash
 blender --background --factory-startup --python tests\blender_smoke.py
 ```
 
-Tests run inside Blender because nearly everything here depends on `bpy`. CI covers Blender 5.1.2 and 5.2.0 on Windows.
+Tests run inside Blender because nearly everything here depends on `bpy`. CI covers Blender 5.1.2 and 5.2.0 on Windows, Linux, and macOS.
 
-The build and validate scripts are currently PowerShell-only. A POSIX equivalent would be a genuinely useful contribution.
+Both scripts accept an explicit Blender executable path; on POSIX systems they fall back to `blender` on `PATH`.
 
 ### What to test
 
-`tests/blender_smoke.py` is the main suite — anchor resolution, snapping, area and angle binding, unit parsing, geometry math. Add coverage there for anything you change.
+`tests/blender_smoke.py` is the main suite — anchor resolution, snapping, area and angle binding, unit parsing, geometry math, draw caching, and keymap registration. Add coverage there for anything you change.
 
-Modal operators are the weak spot: they run headless-hostile and are largely untested. If you're changing one, the most valuable thing you can do is pull the state logic into a pure function that the smoke suite can drive.
+`tests/blender_modal.py` covers modal interaction: stage transitions, axis locks, typed distances, step-back, and cancellation. It runs headlessly using `tests/support/`, which provides a fake viewport context, a scripted snap provider, and an operator harness that binds an operator's methods without instantiating a `bpy` type. If you're changing a modal tool, put the decision logic in the state machine in `dimensions/modal_state.py` and drive it from there rather than adding another untested `modal()` branch.
+
+`tests/blender_lifecycle.py` covers persistent data: measurement proxies, save/reload, and schema migration against the released-file fixtures in `tests/fixtures/`.
+
+Two differences between the test environment and a real install have hidden real bugs, and `DimensionsPackagingTests` now guards both. The suites import the add-on as a top-level `dimensions` package, but Blender installs it as `bl_ext.<repository>.dimensions` — so anything deriving an identifier from `__package__` must use the full name. And Blender restricts `bpy.data` while an add-on registers, so registration must not read scene data directly.
+
+### Benchmarks
+
+`tests/draw_benchmark.py` and `tests/snap_benchmark.py` generate deterministic scenes and report timings. They do not gate CI, but they must stay runnable by hand, and any change that moves the numbers in [docs/DESIGN.md](docs/DESIGN.md#measured-performance) should update that table in the same PR.
 
 ## Pull requests
 
@@ -67,11 +87,15 @@ In particular:
 - New limitations discovered along the way belong in the README's limitations list and `docs/DESIGN.md`'s known risks.
 - A change that sets a clear product direction should update the roadmap in `docs/DESIGN.md`.
 
+### Operator reports
+
+Use the shared messages in `dimensions/messages.py` for every `self.report()` call. `INFO` confirms a completed action, `WARNING` tells the user how to correct a condition that prevented an action, and `ERROR` is reserved for unexpected failures or conditions a user cannot resolve. Keep short messages actionable and without trailing periods.
+
 ## Versioning
 
 Read [docs/VERSIONING.md](docs/VERSIONING.md) before choosing a version number. The short version: most changes are patches, and the minor component only moves when a change breaks saved data, breaks the documented interaction contract, or adds a new product surface. Shipping a lot of work is not a reason to bump.
 
-The property schema is not yet frozen and there is no `.blend` migration path yet, so breaking changes to property groups are possible but must be called out loudly in the changelog.
+The property schema is not yet frozen. Every schema change must add an idempotent migration in `dimensions/migrations.py` and a released-file fixture under `tests/fixtures/`; breaking changes must be called out loudly in the changelog.
 
 ## Where to start
 

@@ -2,6 +2,7 @@ import bpy
 from mathutils.geometry import intersect_line_plane
 from mathutils import Vector
 
+from .. import messages
 from ..anchors import set_anchor_from_snap
 from ..collections import create_dimension_object
 from ..constants import DEFAULT_OFFSET_DISTANCE
@@ -13,11 +14,13 @@ from ..drawing import (
     set_preview_state,
 )
 from ..interaction import (
+    axis_from_event,
     axis_from_mouse_direction,
     is_confirm_event,
     is_navigation_event,
     update_distance_text,
 )
+from ..modal_state import PointPlacementState
 from ..snapping import copy_snap, find_nearest_snap_point, get_mouse_ray, has_view3d_window_region
 from ..units import parse_distance_input
 from .selection_annotations import create_dimension_from_selected_edge
@@ -29,30 +32,57 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
     bl_description = "Create from one selected Edit Mode edge, or interactively pick two points"
     bl_options = {"REGISTER", "UNDO"}
 
+    # The state machine owns the interaction contract; these expose it under the
+    # names the operator body and the preview payload already use.
+    @property
+    def state(self):
+        return self._state_machine.stage
+
+    @property
+    def dimension_type(self):
+        return self._state_machine.axis
+
+    @dimension_type.setter
+    def dimension_type(self, value):
+        self._state_machine.axis = value
+
+    @property
+    def distance_text(self):
+        return self._state_machine.numeric_text
+
+    @distance_text.setter
+    def distance_text(self, value):
+        self._state_machine.set_numeric_text(value, self._state_machine.numeric_valid)
+
+    @property
+    def distance_input_valid(self):
+        return self._state_machine.numeric_valid
+
+    @distance_input_valid.setter
+    def distance_input_valid(self, value):
+        self._state_machine.numeric_valid = bool(value)
+
     def invoke(self, context, event):
         if context.area is None or context.area.type != "VIEW_3D":
-            self.report({"ERROR"}, "Run this operator from a 3D View")
+            self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
 
         if context.mode not in {"OBJECT", "EDIT_MESH"}:
-            self.report({"ERROR"}, "Dimensions work in Object Mode or Mesh Edit Mode")
+            self.report(messages.WARNING, messages.DIMENSIONS_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
 
         if context.mode == "EDIT_MESH":
             dimension = create_dimension_from_selected_edge(context)
             if dimension is not None:
-                self.report({"INFO"}, "Created dimension from selected edge")
+                self.report(messages.INFO, messages.CREATED_SELECTED_EDGE)
                 return {"FINISHED"}
 
-        self.state = "PICK_START"
+        self._state_machine = PointPlacementState()
         self.hover_snap = None
         self.start_snap = None
         self.end_snap = None
-        self.dimension_type = "ALIGNED"
         self.offset_distance = DEFAULT_OFFSET_DISTANCE
         self.offset_plane_normal = None
-        self.distance_text = ""
-        self.distance_input_valid = True
         self.axis_gesture_active = False
 
         self._update_preview()
@@ -75,12 +105,9 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 self._update_preview()
                 return {"RUNNING_MODAL"}
 
-        if (
-            self.state == "SET_OFFSET"
-            and event.type in {"A", "X", "Y", "Z"}
-            and event.value == "PRESS"
-        ):
-            self.dimension_type = "ALIGNED" if event.type == "A" else event.type
+        axis = axis_from_event(event)
+        if self.state == "SET_OFFSET" and axis is not None:
+            self.dimension_type = axis
             self._configure_offset_plane(context)
             if self.distance_text:
                 self._apply_numeric_input(context)
@@ -88,7 +115,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
             self._update_preview()
             axis_label = "Auto" if self.dimension_type == "ALIGNED" else self.dimension_type
-            self.report({"INFO"}, f"Extension axis: {axis_label}")
+            self.report(messages.INFO, messages.extension_axis(axis_label))
             return {"RUNNING_MODAL"}
 
         if self.state in {"PICK_END", "SET_OFFSET"}:
@@ -147,7 +174,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
             if self.state == "SET_OFFSET":
                 if self.distance_text and not self.distance_input_valid:
-                    self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+                    self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
                     return {"RUNNING_MODAL"}
                 if self._create_dimension(context):
                     clear_preview_state()
@@ -163,7 +190,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 return self._accept_end(context)
             if self.state == "SET_OFFSET":
                 if self.distance_text and not self.distance_input_valid:
-                    self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+                    self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
                     return {"RUNNING_MODAL"}
                 if self._create_dimension(context):
                     clear_preview_state()
@@ -201,7 +228,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         if self.hover_snap is None:
             return {"RUNNING_MODAL"}
         self.start_snap = self._copy_snap(self.hover_snap)
-        self.state = "PICK_END"
+        self._state_machine.accept_point()
         self.distance_text = ""
         self.distance_input_valid = True
         self._update_preview()
@@ -211,18 +238,22 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         effective_end = self._effective_end_snap(context)
         if effective_end is None:
             if self.distance_text:
-                self.report({"WARNING"}, f"Invalid distance: {self.distance_text}")
+                self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
+            else:
+                # A second pick on the first point cannot define a dimension. Say so
+                # rather than refusing the stage silently.
+                self.report(messages.WARNING, messages.DIFFERENT_END_POINT_REQUIRED)
             return {"RUNNING_MODAL"}
         self.end_snap = effective_end
         if (self.end_snap["world_co"] - self.start_snap["world_co"]).length < 1e-6:
-            self.report({"WARNING"}, "Choose a different end point")
+            self.report(messages.WARNING, messages.DIFFERENT_END_POINT_REQUIRED)
             self.end_snap = None
             return {"RUNNING_MODAL"}
 
         self.distance_text = ""
         self.distance_input_valid = True
         self._begin_offset_stage(context)
-        self.state = "SET_OFFSET"
+        self._state_machine.accept_point()
         self._update_preview()
         return {"RUNNING_MODAL"}
 
@@ -270,12 +301,14 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.distance_text = ""
         self.distance_input_valid = True
         self.axis_gesture_active = False
-        if self.state == "SET_OFFSET":
-            self.state = "PICK_END"
+        previous_state = self.state
+        transition = self._state_machine.step_back()
+        if transition == "CANCELLED":
+            return
+        if previous_state == "SET_OFFSET":
             self.end_snap = None
             self.offset_plane_normal = None
-        elif self.state == "PICK_END":
-            self.state = "PICK_START"
+        elif previous_state == "PICK_END":
             self.start_snap = None
             self.end_snap = None
             self.offset_plane_normal = None
@@ -395,13 +428,13 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             return False
 
         if (self.end_snap["world_co"] - self.start_snap["world_co"]).length < 1e-6:
-            self.report({"ERROR"}, "A dimension needs two different points")
+            self.report(messages.WARNING, messages.DIFFERENT_END_POINT_REQUIRED)
             return False
 
         if self.offset_plane_normal is None:
             self._begin_offset_stage(context)
             if self.offset_plane_normal is None:
-                self.report({"ERROR"}, "Could not determine a dimension offset plane")
+                self.report(messages.WARNING, messages.DIMENSION_OFFSET_PLANE_REQUIRED)
                 return False
 
         dimension_object = create_dimension_object(context, "DIM Dimension")
@@ -429,7 +462,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             dimension_object.select_set(True)
             context.view_layer.objects.active = dimension_object
 
-        self.report({"INFO"}, "Created dimension")
+        self.report(messages.INFO, messages.CREATED_DIMENSION)
         return True
 
     def _update_preview(self):

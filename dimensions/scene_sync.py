@@ -4,14 +4,15 @@ import bpy
 from bpy.app.handlers import persistent
 from mathutils import Vector
 
-from .anchors import migrate_anchor_identity, resolve_anchor
+from .anchors import resolve_anchor
 from .area_binding import area_label_world, evaluate_area_binding
 from .angle_binding import resolve_angle_source
 from .collections import ensure_measurement_snap_proxy, remove_orphan_measurement_snap_proxies
 from .dimension_geometry import get_angle_world_geometry, get_dimension_world_geometry
-from .projected_snap import invalidate_projected_snap_cache_from_depsgraph
+from .projected_snap import clear_projected_snap_cache, invalidate_projected_snap_cache_from_depsgraph
 from .properties import is_dimension_object, is_guide_object
 from .volume import clear_volume_cache, invalidate_volume_cache_from_depsgraph
+from .viewport_state import clear_all_states
 
 
 _sync_active = False
@@ -21,6 +22,9 @@ _sync_scheduled = False
 def register_scene_sync():
     if _depsgraph_sync_handler not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_depsgraph_sync_handler)
+    for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+        if _undo_redo_handler not in handlers:
+            handlers.append(_undo_redo_handler)
     schedule_scene_sync()
 
 
@@ -28,11 +32,15 @@ def unregister_scene_sync():
     global _sync_scheduled
     if _depsgraph_sync_handler in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_sync_handler)
+    for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
+        if _undo_redo_handler in handlers:
+            handlers.remove(_undo_redo_handler)
     if bpy.app.timers.is_registered(_run_scheduled_sync):
         bpy.app.timers.unregister(_run_scheduled_sync)
     _sync_scheduled = False
     clear_volume_cache()
     invalidate_projected_snap_cache_from_depsgraph(None)
+    clear_all_states()
 
 
 def schedule_scene_sync():
@@ -56,7 +64,21 @@ def _run_scheduled_sync():
 def _depsgraph_sync_handler(scene, depsgraph):
     invalidate_volume_cache_from_depsgraph(depsgraph)
     invalidate_projected_snap_cache_from_depsgraph(depsgraph)
+    if depsgraph is None or any(True for _update in depsgraph.updates):
+        from .drawing import invalidate_dimension_geometry_cache
+
+        invalidate_dimension_geometry_cache()
     sync_scene_objects(scene)
+
+
+@persistent
+def _undo_redo_handler(_scene):
+    clear_projected_snap_cache()
+    clear_volume_cache()
+    clear_all_states()
+    from .drawing import invalidate_dimension_geometry_cache
+
+    invalidate_dimension_geometry_cache()
 
 
 def sync_scene_objects(scene):
@@ -67,6 +89,8 @@ def sync_scene_objects(scene):
     try:
         remove_orphan_measurement_snap_proxies(scene)
         for obj in list(scene.objects):
+            if not _is_editable(obj):
+                continue
             if is_guide_object(obj):
                 _sync_guide(obj, scene)
             elif is_dimension_object(obj):
@@ -75,9 +99,12 @@ def sync_scene_objects(scene):
         _sync_active = False
 
 
+def _is_editable(obj):
+    data = getattr(obj, "data", None)
+    return getattr(obj, "library", None) is None and getattr(data, "library", None) is None
+
+
 def _sync_guide(obj, scene):
-    migrate_anchor_identity(obj.guide_props.start)
-    migrate_anchor_identity(obj.guide_props.end)
     start_world = resolve_anchor(obj.guide_props.start)
     target_world = start_world
     if getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT":
@@ -91,8 +118,6 @@ def _sync_guide(obj, scene):
 
 def _sync_dimension(obj):
     props = obj.dimension_props
-    migrate_anchor_identity(props.start)
-    migrate_anchor_identity(props.end)
     start_world = resolve_anchor(props.start)
     end_world = resolve_anchor(props.end)
     if start_world is None or end_world is None:
@@ -117,16 +142,6 @@ def _sync_dimension(obj):
         _sync_annotation_placement(obj, props, end_world)
         return
     if annotation_kind == "ANGLE":
-        if props.angle_source_mode == "EDGES":
-            for anchor in (
-                props.angle_a_start,
-                props.angle_a_end,
-                props.angle_b_start,
-                props.angle_b_end,
-            ):
-                migrate_anchor_identity(anchor)
-        else:
-            migrate_anchor_identity(props.center)
         source = resolve_angle_source(props)
         center_world = None if source is None else source["center"]
         angle_geometry = None if source is None else get_angle_world_geometry(
