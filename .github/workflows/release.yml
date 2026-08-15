@@ -1,0 +1,69 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    env:
+      BLENDER_VERSION: 5.2.0
+      BLENDER_SERIES: "5.2"
+      BLENDER_DIR: ${{ runner.temp }}/blender
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the manifest version
+        shell: bash
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          manifest_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*$/\1/p' dimensions/blender_manifest.toml)"
+          if [[ "$tag_version" != "$manifest_version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match blender_manifest.toml version $manifest_version" >&2
+            exit 1
+          fi
+          echo "VERSION=$manifest_version" >> "$GITHUB_ENV"
+
+      - name: Download Blender
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/blender.tar.xz"
+          curl --fail --location "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" --output "$archive"
+          tar -xf "$archive" -C "$RUNNER_TEMP"
+          mv "$RUNNER_TEMP/blender-${BLENDER_VERSION}-linux-x64" "$BLENDER_DIR"
+
+      # The release archive is the one that passed the full suite, not a separate build.
+      - name: Validate and build
+        shell: bash
+        run: scripts/validate.sh --blender "$BLENDER_DIR/blender"
+
+      - name: Extract release notes from the changelog
+        shell: bash
+        run: |
+          notes="$RUNNER_TEMP/release-notes.md"
+          awk -v version="$VERSION" '
+            $0 ~ "^## " version " " { capture = 1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' docs/CHANGELOG.md > "$notes"
+          if [[ ! -s "$notes" ]]; then
+            echo "No changelog section found for $VERSION in docs/CHANGELOG.md" >&2
+            exit 1
+          fi
+          echo "NOTES=$notes" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "build/dimensions-${VERSION}.zip" \
+            --title "Dimensions $VERSION" \
+            --notes-file "$NOTES"

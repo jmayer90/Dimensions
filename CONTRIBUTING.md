@@ -97,6 +97,21 @@ Read [docs/VERSIONING.md](docs/VERSIONING.md) before choosing a version number. 
 
 The property schema is not yet frozen. Every schema change must add an idempotent migration in `dimensions/migrations.py` and a released-file fixture under `tests/fixtures/`; breaking changes must be called out loudly in the changelog.
 
+## Releasing
+
+Releases are published by `.github/workflows/release.yml` when a `v*` tag is pushed. Nothing is built by hand.
+
+1. Set the version in `dimensions/blender_manifest.toml` per [docs/VERSIONING.md](docs/VERSIONING.md).
+2. Change the changelog's `## <version> — Unreleased` heading to `## <version> — <date>`.
+3. Commit, then tag and push:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+The workflow refuses to publish if the tag does not match the manifest version, or if the changelog has no section for it. It runs the full validation suite and attaches the archive that suite produced, so the released ZIP is the one that was tested rather than a separate build. Release notes come from that changelog section.
+
 ## Where to start
 
 [docs/tickets/](docs/tickets/) holds structured, self-contained tickets on the path to 1.0 — problem statement, approach, acceptance criteria, code map, and tests for each. `FND-09` (POSIX build scripts) and `UX-05` (snap target toggles) are reasonable first contributions.
