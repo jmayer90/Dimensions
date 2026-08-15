@@ -8,6 +8,7 @@ All notable user-visible changes are recorded here. Versions before 0.2.0 were r
 - Added scene-level schema versioning and load-time migration for legacy persistent vertex anchors.
 - Replaced the always-running viewport selection modal with the explicit **Dimensions Selection** toolbar tool.
 - Added per-user add-on preferences for interaction target sizes and defaults for new annotation presentation.
+- Changed the default annotation color for dimensions and measurements to opaque white, which reads more clearly against Blender's default theme than the previous blue; the selected color is now an amber highlight so selection stays distinguishable. Existing annotations keep their stored colors.
 - Added removable, customizable add-on keymap entries for Dimensions creation tools.
 - Cleared transient viewport and snap caches after undo and redo, and made linked annotations read-only in the local editor.
 - Made annotation and guide drawing iterate their scene-owned collections instead of every object in the scene.
