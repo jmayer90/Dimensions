@@ -2,7 +2,7 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
-## 0.3.0 — Unreleased
+## 0.3.0 — August 15, 2026
 
 - Added POSIX build and validation scripts for Linux and macOS, alongside the existing PowerShell workflow.
 - Added scene-level schema versioning and load-time migration for legacy persistent vertex anchors.

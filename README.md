@@ -4,7 +4,7 @@ A Blender extension for precise viewport dimensions, measurements, and construct
 
 Dimensions gives you persistent, editable annotations that stay attached to your model as it changes. It's aimed at people who need to communicate sizes and angles from a Blender scene: product and furniture design, architectural massing, fabrication drawings, and anyone who has wished Blender's measure tool remembered anything.
 
-**Status:** early and actively developed (`0.2.x`). The interaction model is settled; the property schema is not yet frozen, so annotations saved with one version may need to be recreated after an upgrade. Requires **Blender 5.1 or newer**.
+**Status:** early and actively developed (`0.3.x`). The interaction model is settled; the property schema is not yet frozen, but scenes now carry a schema version and are migrated on load, so annotations saved with an older version are upgraded rather than recreated. Requires **Blender 5.1 or newer**.
 
 ## Features
 
