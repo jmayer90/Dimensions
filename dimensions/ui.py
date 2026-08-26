@@ -118,6 +118,7 @@ class CADDIM_PT_GlobalStyle(CADDIM_PT_PanelBase, bpy.types.Panel):
         layout.prop(settings, "dimension_line_width")
         layout.prop(settings, "dimension_text_size")
         layout.prop(settings, "dimension_arrow_size")
+        layout.prop(settings, "dimension_arrow_end_style")
         layout.operator("dimensions.apply_global_style_to_all", icon="FILE_REFRESH")
 
 
@@ -204,6 +205,7 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
         style_box.prop(props, "line_width")
         style_box.prop(props, "text_size")
         style_box.prop(props, "arrow_size")
+        style_box.prop(props, "arrow_end_style")
         style_actions = style_box.row(align=True)
         style_actions.operator("dimensions.reset_style_to_global", icon="LOOP_BACK")
         style_actions.operator("dimensions.copy_style_to_global", icon="DUPLICATE")

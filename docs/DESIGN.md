@@ -135,7 +135,7 @@ Early public feedback reinforces the product definition rather than expanding it
 | Keep placing dimensions without leaving the tool | Accepted and delivered | [UX-01](tickets/UX-01-continuous-placement.md), delivered in 0.3.1 |
 | Choose Auto/X/Y/Z once, place a group, then switch direction | Accepted and delivered with repeated placement | [UX-01](tickets/UX-01-continuous-placement.md), delivered in 0.3.1 |
 | Render dimensions | Accept and accelerate; requested independently twice | [OUT-01](tickets/OUT-01-grease-pencil-output.md), next major workstream before new construction types |
-| Replace arrows with architectural tick marks | Accept as a presentation variant | First delivery slice of [DIM-04](tickets/DIM-04-presentation-controls.md), backed by reusable styles from OUT-03 |
+| Replace arrows with architectural tick marks | Accepted and delivered | First slice of [DIM-04](tickets/DIM-04-presentation-controls.md), delivered in 0.3.2 with global and per-annotation controls |
 | Keep numeric labels from growing | Existing behavior verified and documented | [UX-08](tickets/UX-08-stable-overlay-sizing.md), delivered in 0.3.1; any zoom- or transform-driven growth is a bug |
 
 ### P0 — Trustworthy acquisition and repeated placement
@@ -161,7 +161,7 @@ Early public feedback reinforces the product definition rather than expanding it
 
 - Extend true/global-axis projected length with local-axis and view-plane modes.
 - Add chain, baseline, radial, diameter, arc-length, coordinate, and elevation dimensions.
-- Add extension gaps and overshoot, arrow variants including architectural ticks, label alignment, tolerance, prefix or suffix, and dual-unit display.
+- Add extension gaps and overshoot, additional arrow variants, label alignment, tolerance, prefix or suffix, and dual-unit display. Architectural ticks shipped in 0.3.2.
 - Add scaled SVG and PDF export after the renderable Grease Pencil path is established.
 
 ## Explicitly excluded scope

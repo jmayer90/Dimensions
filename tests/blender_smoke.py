@@ -1108,6 +1108,44 @@ class DimensionsDrawCacheTests(unittest.TestCase):
         batcher.add_segments([Vector((0.0, 1.0)), Vector((1.0, 1.0))], color, 3.0)
         self.assertEqual(batcher.batch_count, 2)
 
+    def test_architectural_tick_is_a_single_diagonal_screen_space_segment(self):
+        point = Vector((20.0, 30.0))
+        arrow_segments = drawing._build_arrow_segments(
+            point,
+            Vector((1.0, 0.0)),
+            12.0,
+        )
+        tick_segments = drawing._build_arrow_segments(
+            point,
+            Vector((1.0, 0.0)),
+            12.0,
+            "ARCHITECTURAL_TICK",
+        )
+
+        self.assertEqual(
+            arrow_segments,
+            drawing._build_arrow_segments(point, Vector((1.0, 0.0)), 12.0, "ARROW"),
+        )
+        self.assertEqual(len(tick_segments), 2)
+        self.assertEqual((tick_segments[0] + tick_segments[1]) * 0.5, point)
+        self.assertAlmostEqual((tick_segments[1] - tick_segments[0]).length, 12.0, places=5)
+        self.assertNotAlmostEqual((tick_segments[1] - tick_segments[0]).x, 0.0)
+        self.assertNotAlmostEqual((tick_segments[1] - tick_segments[0]).y, 0.0)
+
+    def test_arrow_end_style_defaults_to_arrows_and_applies_to_new_dimensions(self):
+        settings = bpy.context.scene.dimensions_settings
+        original_style = settings.dimension_arrow_end_style
+        try:
+            settings.dimension_arrow_end_style = "ARROW"
+            self.assertEqual(self._make_dimension().dimension_props.arrow_end_style, "ARROW")
+            settings.dimension_arrow_end_style = "ARCHITECTURAL_TICK"
+            self.assertEqual(
+                self._make_dimension().dimension_props.arrow_end_style,
+                "ARCHITECTURAL_TICK",
+            )
+        finally:
+            settings.dimension_arrow_end_style = original_style
+
     def test_text_metrics_are_measured_once_per_font_size(self):
         drawing._text_metrics_cache.clear()
         first = drawing._text_dimensions("1.000 m", 14)

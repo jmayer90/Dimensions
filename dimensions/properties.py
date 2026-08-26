@@ -385,6 +385,21 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
         update=update_dimension_display,
     )
 
+    arrow_end_style: bpy.props.EnumProperty(
+        name="Arrow End Style",
+        description="Presentation mark used at both ends of a linear dimension",
+        items=[
+            ("ARROW", "Arrow", "Open arrowheads at both dimension-line ends"),
+            (
+                "ARCHITECTURAL_TICK",
+                "Architectural Tick",
+                "Diagonal architectural ticks at both dimension-line ends",
+            ),
+        ],
+        default="ARROW",
+        update=update_dimension_display,
+    )
+
     custom_text: bpy.props.StringProperty(
         name="Custom Text",
         description="Optional note displayed with the measured value",
@@ -593,6 +608,21 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
         update=update_dimension_display,
     )
 
+    dimension_arrow_end_style: bpy.props.EnumProperty(
+        name="Arrow End Style",
+        description="Default endpoint presentation for new dimensions",
+        items=[
+            ("ARROW", "Arrow", "Open arrowheads at both dimension-line ends"),
+            (
+                "ARCHITECTURAL_TICK",
+                "Architectural Tick",
+                "Diagonal architectural ticks at both dimension-line ends",
+            ),
+        ],
+        default="ARROW",
+        update=update_dimension_display,
+    )
+
     text_placement: bpy.props.EnumProperty(
         name="Text Placement",
         items=[
@@ -701,6 +731,7 @@ def apply_scene_style_to_dimension(scene_settings, dimension_props):
     dimension_props.line_width = scene_settings.dimension_line_width
     dimension_props.text_size = scene_settings.dimension_text_size
     dimension_props.arrow_size = scene_settings.dimension_arrow_size
+    dimension_props.arrow_end_style = scene_settings.dimension_arrow_end_style
 
 
 def apply_dimension_style_to_scene(dimension_props, scene_settings):
@@ -709,6 +740,7 @@ def apply_dimension_style_to_scene(dimension_props, scene_settings):
     scene_settings.dimension_line_width = dimension_props.line_width
     scene_settings.dimension_text_size = dimension_props.text_size
     scene_settings.dimension_arrow_size = dimension_props.arrow_size
+    scene_settings.dimension_arrow_end_style = dimension_props.arrow_end_style
 
 
 def register_properties():

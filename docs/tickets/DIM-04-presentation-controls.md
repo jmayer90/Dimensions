@@ -17,7 +17,7 @@ Presentation control is thinner than documentation work requires. Prefixes, suff
 
 Listed in `DESIGN.md` P2.
 
-Architectural tick marks are the directly requested part of this ticket. Deliver arrow-end variants as the first independently reviewable slice once `OUT-03` provides reusable styles; do not hold that slice behind dual units or tight-space layout.
+Architectural tick marks were the directly requested part of this ticket and shipped as the first independently reviewable slice in 0.3.2, using the existing global and per-annotation style controls. The remaining variants can join reusable named styles from `OUT-03`; do not hold them behind dual units or tight-space layout.
 
 ## Why it matters for 1.0
 
@@ -40,7 +40,7 @@ Largely additive property work plus drawing changes. The main risk is property s
 ## Acceptance criteria
 
 - [ ] Extension line gap and overshoot are configurable and render correctly in the viewport and through `OUT-01`.
-- [ ] Arrow variants — filled triangle, open triangle, Architectural Tick, dot, and none — are available and independently settable per end.
+- [ ] Remaining arrow variants — filled triangle, open triangle, dot, and none — are available and independently settable per end. Architectural Tick is already available at both ends as a global or local style.
 - [ ] Dual unit display works with a configurable arrangement template.
 - [ ] Secondary unit precision is independently configurable.
 - [ ] Label alignment modes — aligned, horizontal, above, broken — all render correctly.

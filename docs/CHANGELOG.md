@@ -2,6 +2,10 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
+## 0.3.2 — August 26, 2026
+
+- Added an **Architectural Tick** endpoint style for linear dimensions, configurable globally for new annotations and as a local per-annotation override. Existing and new files continue to use open arrows by default.
+
 ## 0.3.1 — August 26, 2026
 
 - Added continuous placement, on by default, to linear dimension, angle, area, measurement, and construction-guide tools. Each committed annotation is its own undo step; `Esc` or right-click exits the session, and changing mode or active object ends it without leaving preview state behind.

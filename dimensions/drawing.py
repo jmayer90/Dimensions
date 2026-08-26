@@ -227,6 +227,7 @@ def build_dimension_geometry_for_object(context, dimension_object):
     screen_geometry["line_width"] = props.line_width
     screen_geometry["text_size"] = props.text_size
     screen_geometry["arrow_size"] = props.arrow_size
+    screen_geometry["arrow_end_style"] = getattr(props, "arrow_end_style", "ARROW")
     screen_geometry["custom_text"] = props.custom_text.strip()
     screen_geometry["custom_text_position"] = props.custom_text_position
     screen_geometry["value_prefix"] = props.value_prefix
@@ -900,8 +901,23 @@ def _collect_dimension_geometry(context, batcher, geometry, color, precision):
     ]
     line_segments.extend(text_layout["line_segments"])
     arrow_size = geometry.get("arrow_size", DEFAULT_ARROW_SIZE)
-    line_segments.extend(_build_arrow_segments(geometry["line_start_screen"], geometry["line_direction_screen"], arrow_size))
-    line_segments.extend(_build_arrow_segments(geometry["line_end_screen"], -geometry["line_direction_screen"], arrow_size))
+    arrow_end_style = geometry.get("arrow_end_style", "ARROW")
+    line_segments.extend(
+        _build_arrow_segments(
+            geometry["line_start_screen"],
+            geometry["line_direction_screen"],
+            arrow_size,
+            arrow_end_style,
+        )
+    )
+    line_segments.extend(
+        _build_arrow_segments(
+            geometry["line_end_screen"],
+            -geometry["line_direction_screen"],
+            arrow_size,
+            arrow_end_style,
+        )
+    )
 
     batcher.add_segments(line_segments, color, geometry.get("line_width", DEFAULT_LINE_WIDTH))
 
@@ -1212,7 +1228,15 @@ def _project_dimension_geometry(context, anchor_start_world, anchor_end_world, w
     }
 
 
-def _build_arrow_segments(point, direction, arrow_scale=DEFAULT_ARROW_SIZE):
+def _build_arrow_segments(point, direction, arrow_scale=DEFAULT_ARROW_SIZE, style="ARROW"):
+    """Build screen-space endpoint presentation without changing dimension geometry."""
+    if style == "ARCHITECTURAL_TICK":
+        tick_direction = (direction + Vector((-direction.y, direction.x))).normalized()
+        tick_half_length = arrow_scale * 0.5
+        return [
+            point - tick_direction * tick_half_length,
+            point + tick_direction * tick_half_length,
+        ]
     perpendicular = Vector((-direction.y, direction.x))
     left = point + (direction * arrow_scale) + (perpendicular * arrow_scale * 0.45)
     right = point + (direction * arrow_scale) - (perpendicular * arrow_scale * 0.45)
