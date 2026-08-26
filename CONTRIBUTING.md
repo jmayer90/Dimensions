@@ -64,6 +64,8 @@ Both scripts accept an explicit Blender executable path; on POSIX systems they f
 
 `tests/blender_lifecycle.py` covers persistent data: measurement proxies, save/reload, and schema migration against the released-file fixtures in `tests/fixtures/`.
 
+`tests/output_geometry_smoke.py` and `tests/output_smoke.py` cover the in-progress render-output path: translating live linear annotations into world-space strokes, scene isolation, deterministic regeneration, rollback, and minimal EEVEE/Cycles renders.
+
 Two differences between the test environment and a real install have hidden real bugs, and `DimensionsPackagingTests` now guards both. The suites import the add-on as a top-level `dimensions` package, but Blender installs it as `bl_ext.<repository>.dimensions` — so anything deriving an identifier from `__package__` must use the full name. And Blender restricts `bpy.data` while an add-on registers, so registration must not read scene data directly.
 
 ### Benchmarks

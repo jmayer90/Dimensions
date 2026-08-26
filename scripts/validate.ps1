@@ -25,6 +25,12 @@ try {
     & $Blender --background --factory-startup --python tests\blender_lifecycle.py
     if ($LASTEXITCODE -ne 0) { throw "Blender lifecycle tests failed" }
 
+    & $Blender --background --factory-startup --python tests\output_geometry_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "Output geometry smoke tests failed" }
+
+    & $Blender --background --factory-startup --python tests\output_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "Grease Pencil output smoke tests failed" }
+
     & $Blender --background --factory-startup --command extension validate dimensions
     if ($LASTEXITCODE -ne 0) { throw "Extension manifest validation failed" }
 
