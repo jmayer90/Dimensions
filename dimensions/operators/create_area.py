@@ -10,7 +10,16 @@ from ..area_binding import bind_area_face_indices, evaluate_area_binding, evalua
 from ..collections import create_dimension_object
 from ..constants import DEFAULT_OFFSET_DISTANCE
 from ..drawing import clear_preview_state, set_preview_state
-from ..interaction import axis_from_event, update_distance_text
+from ..interaction import (
+    axis_from_event,
+    continuous_placement_enabled,
+    push_undo_step,
+    remember_session_context,
+    session_axis,
+    session_context_changed,
+    update_distance_text,
+)
+from ..preferences import get_preferences
 from ..properties import is_dimension_object
 from ..snapping import copy_snap, find_nearest_snap_point, get_mouse_ray, has_view3d_window_region, raycast_from_mouse
 from ..units import parse_distance_input
@@ -89,7 +98,9 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         self.hover_snap = None
         self.label_snap = None
         self.area_result = None
-        self.placement_axis = "ALIGNED"
+        self.placement_axis = session_axis(context)
+        self.continuous_placement = continuous_placement_enabled(context)
+        self.offset_distance = getattr(get_preferences(context), "default_offset_distance", DEFAULT_OFFSET_DISTANCE)
         self.distance_text = ""
         self.distance_input_valid = True
         self.typed_distance = None
@@ -104,6 +115,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
                 self.area_result = evaluate_area_face_indices(self.source_object, self.face_indices)
                 if self.area_result is not None:
                     self.state = "PLACE_LABEL"
+        remember_session_context(self, context)
         self._update_preview()
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
@@ -112,13 +124,17 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         if not has_view3d_window_region(context):
             clear_preview_state()
             return {"CANCELLED"}
-        if self.state == "PLACE_LABEL":
-            axis = axis_from_event(event)
-            if axis is not None:
-                self.placement_axis = axis
+        if self.continuous_placement and session_context_changed(self, context):
+            clear_preview_state()
+            return {"CANCELLED"}
+        axis = axis_from_event(event)
+        if axis is not None and self.state in {"PICK_FACE", "PLACE_LABEL"}:
+            self.placement_axis = axis
+            if self.state == "PLACE_LABEL":
                 self._update_effective_label(context)
-                self._update_preview()
-                return {"RUNNING_MODAL"}
+            self._update_preview()
+            return {"RUNNING_MODAL"}
+        if self.state == "PLACE_LABEL":
             new_text, handled = update_distance_text(self.distance_text, event)
             if handled:
                 self.distance_text = new_text
@@ -176,6 +192,9 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
                 return self._commit(context)
             return {"RUNNING_MODAL"}
         if event.type == "ESC" and event.value == "PRESS":
+            if self.continuous_placement:
+                clear_preview_state()
+                return {"CANCELLED"}
             if self.distance_text:
                 self.distance_text = ""
                 self.typed_distance = None
@@ -196,6 +215,9 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
+
+    def cancel(self, _context):
+        clear_preview_state()
 
     def _accept_face(self, context, event):
         snap = self.hover_snap
@@ -255,6 +277,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         props.dimension_type = self.placement_axis
         label_delta = self.label_snap["world_co"] - result["center"]
         props.offset_distance = label_delta.length
+        self.offset_distance = label_delta.length
         props.area_label_direction = tuple(label_delta.normalized()) if label_delta.length > 1e-6 else (1.0, 0.0, 0.0)
         props.area_placement_locked = True
         props.presentation_offset = (0.0, 0.0, 0.0)
@@ -262,14 +285,31 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         set_object_anchor(props.start, self.source_object, result["center"])
         set_object_anchor(props.end, self.source_object, self.label_snap["world_co"])
         annotation.location = self.label_snap["world_co"]
-        clear_preview_state()
         if context.mode == "OBJECT":
             for selected in context.selected_objects:
                 selected.select_set(False)
             annotation.select_set(True)
             context.view_layer.objects.active = annotation
         self.report(messages.INFO, messages.created_area(len(self.face_indices), bool(self.target_name)))
-        return {"FINISHED"}
+        return self._after_commit(context)
+
+    def _after_commit(self, context):
+        if not self.continuous_placement or self.target_name:
+            clear_preview_state()
+            return {"FINISHED"}
+        push_undo_step("Create Area Dimension")
+        self.source_object = None
+        self.face_indices = []
+        self.hover_snap = None
+        self.label_snap = None
+        self.area_result = None
+        self.distance_text = ""
+        self.distance_input_valid = True
+        self.typed_distance = None
+        self.state = "PICK_FACE"
+        remember_session_context(self, context)
+        self._update_preview()
+        return {"RUNNING_MODAL"}
 
     def _update_preview(self):
         preview = {
@@ -278,6 +318,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
             "axis": self.placement_axis,
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
+            "continuous_placement": self.continuous_placement,
         }
         if self.hover_snap is not None:
             preview["hover_screen"] = self.hover_snap["screen_co"]
@@ -288,7 +329,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
             preview["end_world"] = (
                 self.label_snap["world_co"]
                 if self.label_snap is not None
-                else self.area_result["center"] + self.area_result["normal"] * DEFAULT_OFFSET_DISTANCE
+                else self.area_result["center"] + self.area_result["normal"] * self.offset_distance
             )
             preview["area_value"] = self.area_result["area"]
             preview["face_count"] = self.area_result["face_count"]

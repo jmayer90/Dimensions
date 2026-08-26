@@ -48,7 +48,7 @@ Milestones organize work. Versions track compatibility. They are deliberately no
 | **M5 — Documentation-grade** | `DIM-*`. Chain, baseline, radial, diameter, arc-length, coordinate dimensions. | Patches, mostly additive. |
 | **M6 — 1.0 gate** | Hardening, migration fixtures, compatibility promise. | **`1.0.0`**. |
 
-Milestones may overlap. M2 and M3 tickets can land while M4 is in progress. M1 gates everything else, because building on an unversioned schema and an unsound selection architecture just increases what has to be unwound later.
+Milestone numbers group related work and version impact; they are not a strict delivery queue. M1 gates everything else, because building on an unversioned schema and an unsound selection architecture just increases what has to be unwound later. Early user feedback moved `UX-01` and `UX-08` into 0.3.1; with that focused work delivered, `OUT-01` is next and remains ahead of M3 construction. Other M2 and M3 tickets may still land while the larger output work is in progress.
 
 ## The 1.0 gate
 

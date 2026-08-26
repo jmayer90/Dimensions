@@ -31,6 +31,8 @@ DEFAULT_PREFERENCES = SimpleNamespace(
     default_precision=DEFAULT_PRECISION,
     default_offset_distance=DEFAULT_OFFSET_DISTANCE,
     empty_display_size=DEFAULT_EMPTY_DISPLAY_SIZE,
+    continuous_placement=True,
+    default_axis_mode="ALIGNED",
 )
 
 
@@ -73,16 +75,48 @@ class DIMENSIONS_AddonPreferences(bpy.types.AddonPreferences):
     selection_pixel_threshold: bpy.props.FloatProperty(name="Selection Radius", default=DEFAULT_SELECTION_PIXEL_THRESHOLD, min=4.0, max=128.0, subtype="PIXEL", update=_tag_redraw)
     hover_marker_size: bpy.props.FloatProperty(name="Hover Marker Size", default=DEFAULT_HOVER_MARKER_SIZE, min=2.0, max=64.0, update=_tag_redraw)
     line_width: bpy.props.FloatProperty(name="Default Line Width", default=DEFAULT_LINE_WIDTH, min=1.0, max=10.0, update=_tag_redraw)
-    text_size: bpy.props.IntProperty(name="Default Text Size", default=DEFAULT_TEXT_SIZE, min=8, max=64, update=_tag_redraw)
-    arrow_size: bpy.props.FloatProperty(name="Default Arrow Size", default=DEFAULT_ARROW_SIZE, min=2.0, max=40.0, update=_tag_redraw)
+    text_size: bpy.props.IntProperty(
+        name="Default Text Size",
+        description="Fixed viewport text size in pixels for new annotations",
+        default=DEFAULT_TEXT_SIZE,
+        min=8,
+        max=64,
+        update=_tag_redraw,
+    )
+    arrow_size: bpy.props.FloatProperty(
+        name="Default Arrow Size",
+        description="Fixed viewport arrowhead size in pixels for new annotations",
+        default=DEFAULT_ARROW_SIZE,
+        min=2.0,
+        max=40.0,
+        update=_tag_redraw,
+    )
     default_precision: bpy.props.IntProperty(name="Default Precision", default=DEFAULT_PRECISION, min=0, max=8, update=_tag_redraw)
     default_offset_distance: bpy.props.FloatProperty(name="Default Offset", default=DEFAULT_OFFSET_DISTANCE, min=0.0, subtype="DISTANCE", update=_tag_redraw)
     empty_display_size: bpy.props.FloatProperty(name="Empty Display Size", default=DEFAULT_EMPTY_DISPLAY_SIZE, min=0.001, max=10.0, update=_tag_redraw)
+    continuous_placement: bpy.props.BoolProperty(
+        name="Continuous Placement",
+        description="Keep creation tools active after each committed annotation",
+        default=True,
+    )
+    default_axis_mode: bpy.props.EnumProperty(
+        name="Default Session Axis",
+        description="Starting Auto/X/Y/Z mode for a new placement session",
+        items=(
+            ("ALIGNED", "Auto", "Choose the extension direction from the annotation"),
+            ("X", "X", "Use the global X axis"),
+            ("Y", "Y", "Use the global Y axis"),
+            ("Z", "Z", "Use the global Z axis"),
+        ),
+        default="ALIGNED",
+    )
 
     def draw(self, _context):
         layout = self.layout
         interaction = layout.box()
         interaction.label(text="Interaction")
+        interaction.prop(self, "continuous_placement")
+        interaction.prop(self, "default_axis_mode")
         interaction.prop(self, "selection_pixel_threshold")
         interaction.prop(self, "hover_marker_size")
         snapping = layout.box()

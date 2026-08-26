@@ -4,12 +4,15 @@
 **Effort:** L
 **Depends on:** FND-03
 **Version impact:** **Minor trigger 3 (new product surface)** — lands in `0.4.0`.
+**Delivery order:** After the focused UX-01 and UX-08 work; does not wait for M3 construction tickets.
 
 ## Problem
 
 Dimensions do not appear in renders. They are `SpaceView3D` draw handlers — GPU overlays that exist only in the interactive viewport. Render, OpenGL viewport render, Freestyle, and every export format see nothing.
 
 This is listed as `DESIGN.md` known risk 4 and as a README limitation, and it is the single largest gap between what the tool is and what it is for. Someone dimensioning a part in order to produce a drawing cannot produce the drawing. They can screenshot the viewport.
+
+Renderable dimensions were independently requested by two of the first five public reviewers. That is unusually strong signal for a new project and moves this ticket ahead of construction expansion. The scope does not grow: the first pass remains an explicit, non-destructive output generation step.
 
 Everything needed is already computed: `dimension_geometry.py` calculates world-space geometry independent of viewport state, and `drawing.py` builds arrows, extension lines, arcs, and text layout. The geometry exists; it just never becomes anything renderable.
 

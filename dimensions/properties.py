@@ -369,6 +369,7 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
 
     text_size: bpy.props.IntProperty(
         name="Text Size",
+        description="Fixed viewport text size in pixels; view zoom and source transforms do not change it",
         default=DEFAULT_TEXT_SIZE,
         min=8,
         max=64,
@@ -377,6 +378,7 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
 
     arrow_size: bpy.props.FloatProperty(
         name="Arrow Size",
+        description="Fixed viewport arrowhead size in pixels; view zoom and source transforms do not change it",
         default=DEFAULT_ARROW_SIZE,
         min=2.0,
         max=40.0,
@@ -575,6 +577,7 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
 
     dimension_text_size: bpy.props.IntProperty(
         name="Text Size",
+        description="Fixed viewport text size in pixels; view zoom and source transforms do not change it",
         default=DEFAULT_TEXT_SIZE,
         min=8,
         max=64,
@@ -583,6 +586,7 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
 
     dimension_arrow_size: bpy.props.FloatProperty(
         name="Arrow Size",
+        description="Fixed viewport arrowhead size in pixels; view zoom and source transforms do not change it",
         default=DEFAULT_ARROW_SIZE,
         min=2.0,
         max=40.0,

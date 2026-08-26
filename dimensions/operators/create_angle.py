@@ -7,6 +7,12 @@ from .. import messages
 from ..angle_binding import derive_angle_from_world_edges, set_angle_edge
 from ..collections import create_dimension_object
 from ..drawing import clear_preview_state, set_preview_state
+from ..interaction import (
+    continuous_placement_enabled,
+    push_undo_step,
+    remember_session_context,
+    session_context_changed,
+)
 from ..properties import is_dimension_object
 from ..snapping import copy_snap, find_nearest_snap_point, has_view3d_window_region
 
@@ -67,6 +73,7 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
             self.report(messages.WARNING, messages.ANGLE_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
         self.target_name = ""
+        self.continuous_placement = continuous_placement_enabled(context)
         self.angle_mode = "MINOR"
         if self.replace_active:
             active = context.view_layer.objects.active
@@ -95,12 +102,16 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
                         (source["end"] - source["center"]).length,
                     ) * 0.35)
                     self.state = "PICK_RADIUS"
+        remember_session_context(self, context)
         self._update_preview()
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
     def modal(self, context, event):
         if not has_view3d_window_region(context):
+            clear_preview_state()
+            return {"CANCELLED"}
+        if self.continuous_placement and session_context_changed(self, context):
             clear_preview_state()
             return {"CANCELLED"}
         if event.type == "MOUSEMOVE":
@@ -154,6 +165,9 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
         if event.type in {"RET", "NUMPAD_ENTER"} and event.value == "PRESS" and self.state == "PICK_RADIUS":
             return self._commit(context)
         if event.type == "ESC" and event.value == "PRESS":
+            if self.continuous_placement:
+                clear_preview_state()
+                return {"CANCELLED"}
             if self.state == "PICK_RADIUS":
                 self.edge_b_snap = None
                 self.state = "PICK_EDGE_B"
@@ -171,6 +185,9 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
+
+    def cancel(self, _context):
+        clear_preview_state()
 
     def _derived_source(self):
         a = _edge_world_points(self.edge_a_snap)
@@ -196,14 +213,27 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
         set_angle_edge(props, "A", self.edge_a_snap["object"], self.edge_a_snap["edge_vertices"])
         set_angle_edge(props, "B", self.edge_b_snap["object"], self.edge_b_snap["edge_vertices"])
         annotation.location = source["center"]
-        clear_preview_state()
         if context.mode == "OBJECT":
             for selected in context.selected_objects:
                 selected.select_set(False)
             annotation.select_set(True)
             context.view_layer.objects.active = annotation
         self.report(messages.INFO, messages.created_angle(bool(self.target_name)))
-        return {"FINISHED"}
+        return self._after_commit(context)
+
+    def _after_commit(self, context):
+        if not self.continuous_placement or self.target_name:
+            clear_preview_state()
+            return {"FINISHED"}
+        push_undo_step("Create Angle Dimension")
+        self.state = "PICK_EDGE_A"
+        self.edge_a_snap = None
+        self.edge_b_snap = None
+        self.hover_snap = None
+        self.radius = 0.25
+        remember_session_context(self, context)
+        self._update_preview()
+        return {"RUNNING_MODAL"}
 
     def _update_preview(self):
         source = self._derived_source()
@@ -212,6 +242,7 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
             "annotation_kind": "ANGLE",
             "angle_radius": self.radius,
             "angle_mode": "REFLEX" if self.angle_mode == "REFLEX" else "MINOR",
+            "continuous_placement": self.continuous_placement,
         }
         if self.hover_snap is not None:
             preview["hover_screen"] = self.hover_snap["screen_co"]

@@ -533,10 +533,14 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
                 region_data=None,
             )
             operator = SimpleNamespace(report=lambda *_args: None)
-            self.assertEqual(
-                CADDIM_OT_CreateDimension.invoke(operator, invoke_context, None),
-                {"FINISHED"},
-            )
+            with patch(
+                "dimensions.operators.create_dimension.continuous_placement_enabled",
+                return_value=False,
+            ):
+                self.assertEqual(
+                    CADDIM_OT_CreateDimension.invoke(operator, invoke_context, None),
+                    {"FINISHED"},
+                )
             created.append(next(obj for obj in bpy.data.objects if obj.name.startswith("DIM Selected Edge")))
             self.assertEqual(created[-1].dimension_props.annotation_kind, "LINEAR")
 
@@ -1112,6 +1116,116 @@ class DimensionsDrawCacheTests(unittest.TestCase):
             drawing._text_dimensions("1.000 m", 14)
         self.assertEqual(len(drawing._text_metrics_cache), 1)
         self.assertEqual(drawing._text_dimensions("1.000 m", 14), first)
+
+    def test_viewport_presentation_sizes_ignore_view_and_source_transforms(self):
+        """UX-08: world projection changes positions, never configured pixel sizes."""
+        source = bpy.data.meshes.new("DimensionsStableSizingSourceMesh")
+        source.from_pydata(
+            [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0)],
+            [(0, 1)],
+            [],
+        )
+        source_object = bpy.data.objects.new("DimensionsStableSizingSource", source)
+        bpy.context.scene.collection.objects.link(source_object)
+        self.addCleanup(bpy.data.meshes.remove, source)
+        parent = bpy.data.objects.new("DimensionsStableSizingParent", None)
+        bpy.context.scene.collection.objects.link(parent)
+        self.addCleanup(bpy.data.objects.remove, parent, do_unlink=True)
+        self.addCleanup(bpy.data.objects.remove, source_object, do_unlink=True)
+
+        dimension = create_dimension_object(self.context, "DIM Stable Sizing")
+        self.created.append(dimension)
+        props = dimension.dimension_props
+        set_anchor(props.start, source_object, 0)
+        set_anchor(props.end, source_object, 1)
+        props.text_size = 21
+        props.arrow_size = 13.0
+
+        def projected_with_zoom(zoom):
+            def project(_context, world):
+                # Include depth so this exercises a perspective-like projection,
+                # while keeping the test independent of a foreground window.
+                depth = max(0.25, 1.0 + (0.15 * world.z))
+                return Vector((zoom * world.x / depth, zoom * world.y / depth))
+
+            with patch("dimensions.drawing._project_world_to_screen", side_effect=project):
+                geometry = drawing.build_dimension_geometry_for_object(self.context, dimension)
+            label = "12.345 m"
+            layout = drawing._build_text_layout(
+                label,
+                geometry,
+                "INLINE",
+                text_size=props.text_size,
+                arrow_size=props.arrow_size,
+            )
+            arrow_segments = drawing._build_arrow_segments(
+                geometry["line_start_screen"],
+                geometry["line_direction_screen"],
+                props.arrow_size,
+            )
+            arrow_extent = max(
+                (arrow_segments[index + 1] - arrow_segments[index]).length
+                for index in (0, 2)
+            )
+            text_extent = drawing._text_dimensions(label, props.text_size)
+            return geometry, layout, arrow_extent, text_extent
+
+        identity_geometry, identity_layout, identity_arrow, identity_text = projected_with_zoom(1.0)
+
+        # A source transform changes anchor positions and the annotation Empty's
+        # transform is deliberately unrelated to presentation sizing.
+        source_object.location = (4.0, -3.0, 2.0)
+        source_object.rotation_euler[2] = 0.65
+        source_object.scale = (3.0, 1.5, 2.0)
+        parent.location = (-2.0, 5.0, 1.0)
+        parent.rotation_euler[2] = -0.3
+        parent.scale = (0.75, 2.0, 1.25)
+        source_object.parent = parent
+        dimension.location = (8.0, 9.0, 10.0)
+        dimension.rotation_euler[2] = -0.4
+        dimension.scale = (4.0, 0.5, 2.0)
+        bpy.context.view_layer.update()
+        transformed_geometry, transformed_layout, transformed_arrow, transformed_text = projected_with_zoom(0.35)
+
+        self.assertGreater(
+            (transformed_geometry["line_start_screen"] - identity_geometry["line_start_screen"]).length,
+            0.1,
+        )
+        self.assertNotEqual(
+            identity_layout["text_position"],
+            transformed_layout["text_position"],
+        )
+        self.assertAlmostEqual(identity_arrow, props.arrow_size * (1.0 + 0.45**2) ** 0.5, places=5)
+        self.assertAlmostEqual(transformed_arrow, identity_arrow, places=5)
+        self.assertEqual(transformed_text, identity_text)
+
+        # Selection only changes color; both draw collection paths retain the
+        # same configured screen-space text size and arrowhead geometry.
+        for color in ((0.2, 0.7, 1.0, 1.0), (1.0, 0.72, 0.25, 1.0)):
+            batcher = drawing.SegmentBatcher(shader=None)
+            drawing._collect_dimension_geometry(
+                self.context,
+                batcher,
+                transformed_geometry,
+                color,
+                3,
+            )
+            self.assertEqual(batcher._text_items[0][3], props.text_size)
+            line_segments = next(iter(batcher._segments.values()))
+            self.assertAlmostEqual(
+                (line_segments[-7] - line_segments[-8]).length,
+                transformed_arrow,
+                places=5,
+            )
+
+    def test_viewport_size_property_descriptions_state_pixel_contract(self):
+        dimension = self._make_dimension()
+        properties = dimension.dimension_props.bl_rna.properties
+        self.assertIn("pixel", properties["text_size"].description.lower())
+        self.assertIn("pixel", properties["arrow_size"].description.lower())
+        scene_properties = bpy.context.scene.dimensions_settings.bl_rna.properties
+        self.assertIn("pixel", scene_properties["dimension_text_size"].description.lower())
+        self.assertIn("pixel", scene_properties["dimension_arrow_size"].description.lower())
 
     def test_the_draw_loop_reads_only_the_dimensions_collection(self):
         collection = get_or_create_dimension_collection(self.context)

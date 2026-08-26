@@ -16,12 +16,14 @@ class PointPlacementState:
 
     DEFAULT_AXIS = "ALIGNED"
 
-    def __init__(self, placement_stage=PLACE):
+    VALID_AXES = ("ALIGNED", "X", "Y", "Z")
+
+    def __init__(self, placement_stage=PLACE, axis=DEFAULT_AXIS):
         self.placement_stage = placement_stage
         self.stage = self.PICK_START
         self.numeric_text = ""
         self.numeric_valid = True
-        self.axis = self.DEFAULT_AXIS
+        self.axis = axis if axis in self.VALID_AXES else self.DEFAULT_AXIS
 
     # -- queries ---------------------------------------------------------
 
@@ -32,8 +34,8 @@ class PointPlacementState:
 
     @property
     def accepts_axis_lock(self):
-        """An axis constrains the placement stage, so it is only taken there."""
-        return self.stage == self.placement_stage
+        """The session axis can be chosen before a point and refined at placement."""
+        return self.stage in (self.PICK_START, self.placement_stage)
 
     @property
     def has_pending_numeric_input(self):
@@ -62,12 +64,18 @@ class PointPlacementState:
         self.numeric_valid = True
 
     def set_axis(self, axis):
-        if axis is None:
+        if axis not in self.VALID_AXES:
             return "NO_ACTION"
         if not self.accepts_axis_lock:
             return "AXIS_IGNORED"
         self.axis = axis
         return "AXIS_SET"
+
+    def restart(self):
+        """Begin another placement while retaining the deliberate session choices."""
+        self.stage = self.PICK_START
+        self.clear_numeric()
+        return "RESTARTED"
 
     def confirm(self):
         """Advance a picking stage, or commit from the placement stage."""

@@ -2,6 +2,13 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
+## 0.3.1 — August 26, 2026
+
+- Added continuous placement, on by default, to linear dimension, angle, area, measurement, and construction-guide tools. Each committed annotation is its own undo step; `Esc` or right-click exits the session, and changing mode or active object ends it without leaving preview state behind.
+- Added a configurable default Auto/X/Y/Z session axis. The axis can be chosen before the first point, persists across repeated placements, and can be changed between annotations without leaving the tool.
+- Clarified that Text Size and Arrow Size are fixed viewport-pixel sizes and added regression coverage across view projection, source and parent transforms, annotation transforms, and selected/unselected drawing.
+- Expanded the Blender background suites to 61 smoke and 28 modal-interaction tests.
+
 ## 0.3.0 — August 15, 2026
 
 - Added POSIX build and validation scripts for Linux and macOS, alongside the existing PowerShell workflow.

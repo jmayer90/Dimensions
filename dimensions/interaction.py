@@ -8,6 +8,56 @@ CONFIRM_EVENTS = {"RET", "NUMPAD_ENTER"}
 NAVIGATION_EVENTS = {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}
 AXIS_EVENTS = {"A", "X", "Y", "Z"}
 
+
+def session_axis(context):
+    """Return the validated starting axis for a new placement session."""
+    from .preferences import get_preferences
+
+    axis = getattr(get_preferences(context), "default_axis_mode", "ALIGNED")
+    return axis if axis in {"ALIGNED", "X", "Y", "Z"} else "ALIGNED"
+
+
+def continuous_placement_enabled(context):
+    from .preferences import get_preferences
+
+    return bool(getattr(get_preferences(context), "continuous_placement", True))
+
+
+def _active_object(context):
+    view_layer = getattr(context, "view_layer", None)
+    layer_objects = getattr(view_layer, "objects", None)
+    return getattr(layer_objects, "active", getattr(context, "active_object", None))
+
+
+def remember_session_context(operator, context):
+    """Remember the user-controlled context that a modal session started in."""
+    operator._session_mode = getattr(context, "mode", None)
+    operator._session_active_object = _active_object(context)
+
+
+def session_context_changed(operator, context):
+    """Return whether mode or active object changed outside the modal workflow."""
+    return (
+        getattr(context, "mode", None) != getattr(operator, "_session_mode", None)
+        or _active_object(context) is not getattr(operator, "_session_active_object", None)
+    )
+
+
+def axis_label(axis):
+    return "Auto" if axis == "ALIGNED" else axis
+
+
+def push_undo_step(message):
+    """Place an undo boundary after one item in a continuous modal session."""
+    import bpy
+
+    try:
+        bpy.ops.ed.undo_push(message=message)
+    except RuntimeError:
+        # Background state-model tests have no interactive undo stack.
+        pass
+
+
 _DISTANCE_START_CHARACTERS = "0123456789.-"
 _DISTANCE_CHARACTERS = "0123456789.-/'\" abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 

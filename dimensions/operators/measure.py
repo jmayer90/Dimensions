@@ -7,9 +7,14 @@ from ..drawing import clear_measure_state, set_measure_state
 from ..interaction import (
     axis_from_event,
     axis_from_mouse_direction,
+    continuous_placement_enabled,
     constrained_delta,
     is_confirm_event,
     is_navigation_event,
+    push_undo_step,
+    remember_session_context,
+    session_axis,
+    session_context_changed,
     update_distance_text,
 )
 from ..snapping import copy_snap, find_nearest_snap_point
@@ -29,7 +34,8 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             return {"CANCELLED"}
 
         self.state = "PICK_START"
-        self.axis = "ALIGNED"
+        self.axis = session_axis(context)
+        self.continuous_placement = continuous_placement_enabled(context)
         self.start_world = None
         self.start_snap = None
         self.end_world = None
@@ -37,12 +43,16 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         self.distance_text = ""
         self.distance_input_valid = True
         self.axis_gesture_active = False
+        remember_session_context(self, context)
         self._update_overlay(context)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
     def modal(self, context, event):
         if context.area is None or context.area.type != "VIEW_3D":
+            clear_measure_state()
+            return {"CANCELLED"}
+        if self.continuous_placement and session_context_changed(self, context):
             clear_measure_state()
             return {"CANCELLED"}
 
@@ -105,6 +115,9 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             return {"RUNNING_MODAL"}
 
         if event.type == "ESC" and event.value == "PRESS":
+            if self.continuous_placement:
+                clear_measure_state()
+                return {"CANCELLED"}
             if self.distance_text:
                 self.distance_text = ""
                 self._update_effective_end(context)
@@ -123,6 +136,9 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
+
+    def cancel(self, _context):
+        clear_measure_state()
 
     def _update_effective_end(self, context):
         if self.start_world is None or self.hover_snap is None:
@@ -165,9 +181,8 @@ class CADDIM_OT_Measure(bpy.types.Operator):
                 selected.select_set(False)
             obj.select_set(True)
             context.view_layer.objects.active = obj
-        clear_measure_state()
         self.report(messages.INFO, messages.CREATED_MEASUREMENT)
-        return {"FINISHED"}
+        return self._after_commit(context)
 
     def _update_axis_gesture(self, context, event):
         axis = axis_from_mouse_direction(
@@ -189,6 +204,17 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         self.axis_gesture_active = False
         self._update_overlay(context)
 
+    def _after_commit(self, context):
+        if not self.continuous_placement:
+            clear_measure_state()
+            return {"FINISHED"}
+        push_undo_step("Create Measurement")
+        self._clear(context)
+        self.hover_snap = None
+        remember_session_context(self, context)
+        self._update_overlay(context)
+        return {"RUNNING_MODAL"}
+
     def _update_overlay(self, context):
         state = {
             "state": self.state,
@@ -196,6 +222,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
             "axis_gesture_active": self.axis_gesture_active,
+            "continuous_placement": self.continuous_placement,
         }
         if self.hover_snap is not None:
             state["hover_screen"] = self.hover_snap["screen_co"]

@@ -45,13 +45,14 @@ The difference between a tool that works and one people keep using.
 
 | ID | Title | Effort | Depends on |
 | --- | --- | --- | --- |
-| [UX-01](UX-01-continuous-placement.md) | Continuous placement — keep dimensioning without re-invoking | M | — |
+| [UX-01](UX-01-continuous-placement.md) | Continuous placement with a persistent Auto/X/Y/Z session mode | M | — |
 | [UX-02](UX-02-annotation-manager.md) | Annotation manager: list, search, isolate, repair, restyle | L | — |
 | [UX-03](UX-03-inference-engine.md) | Inference: parallel, perpendicular, extension, intersection, local axis | L | FND-08 |
 | [UX-04](UX-04-direct-handles.md) | Direct viewport handles for placement, radius, and offset | M | FND-01 |
 | [UX-05](UX-05-snap-control.md) | User control over which snap targets are active | S | FND-04 |
 | [UX-06](UX-06-hover-measurement.md) | Transient hover measurement with delta X/Y/Z | M | — |
 | [UX-07](UX-07-guided-repair.md) | Guided repair for broken anchors and area bindings | M | UX-02 |
+| [UX-08](UX-08-stable-overlay-sizing.md) | Verify and enforce stable screen-space label sizing | S | — |
 
 ### M3 — Construction
 
@@ -66,6 +67,8 @@ Snapping lines and points as a first-class way to build dimensionally, not just 
 
 ### M4 — Output
 
+Milestone numbers group related work; they are not a strict delivery queue. With the focused `UX-01` and `UX-08` work delivered in 0.3.1, repeated early requests for rendered dimensions make `OUT-01` the next major workstream, before the M3 construction tickets. `OUT-02` and `OUT-03` retain their existing scopes and dependencies.
+
 | ID | Title | Effort | Depends on |
 | --- | --- | --- | --- |
 | [OUT-01](OUT-01-grease-pencil-output.md) | Render path via generated Grease Pencil | L | FND-03 |
@@ -79,11 +82,11 @@ Snapping lines and points as a first-class way to build dimensionally, not just 
 | [DIM-01](DIM-01-chain-baseline.md) | Chain and baseline dimensions | M | UX-01 |
 | [DIM-02](DIM-02-radial-diameter-arc.md) | Radial, diameter, and arc-length dimensions | M | — |
 | [DIM-03](DIM-03-coordinate-elevation.md) | Coordinate and elevation dimensions | M | — |
-| [DIM-04](DIM-04-presentation-controls.md) | Extension gaps, arrow variants, dual units, alignment | M | OUT-03 |
+| [DIM-04](DIM-04-presentation-controls.md) | Drafting presentation controls: ticks, arrows, units, and alignment | M | OUT-03 |
 
 ## Suggested order
 
-`FND-02` and `FND-01` first — schema versioning becomes more expensive with every release that ships without it, and `FND-01` is the architectural decision the most other work sits on. `FND-03` pairs naturally with `OUT-01` later. `UX-01` is small, highly visible, and a good early win once `FND-06` gives it test coverage.
+M1 is complete. The next highest-value sequence is `UX-01` (continuous placement plus its persistent axis mode), `UX-08` (close the reported label-scaling ambiguity), then `OUT-01` (renderable output). `OUT-01` can proceed before M3 because its `FND-03` dependency is already complete. `OUT-03` should precede the broader `DIM-04` presentation work; the architectural tick-mark slice is the first `DIM-04` deliverable after styles exist.
 
 ## Effort key
 

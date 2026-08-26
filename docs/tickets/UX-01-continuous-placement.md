@@ -1,4 +1,4 @@
-# UX-01 — Continuous placement: keep dimensioning without re-invoking
+# UX-01 — Continuous placement with a persistent axis mode
 
 **Milestone:** M2 Fluency
 **Effort:** M
@@ -13,18 +13,24 @@ Dimensioning is inherently repetitive. Annotating a part means placing five, ten
 
 Every CAD tool and every comparable Blender add-on keeps the tool active until the user dismisses it. This is the single most-reported friction point in tools of this type, and it is the difference between something people evaluate and something people adopt.
 
+The current Auto/X/Y/Z extension-axis choice is also made late, during the offset stage, and a one-shot operator forgets it immediately. That makes a common run such as "place all X dimensions, then all Y dimensions" unnecessarily repetitive. Early users requested the two behaviors together: choose a direction once, draw a group, switch direction, and continue.
+
 ## Why it matters for 1.0
 
 Listed in the 1.0 gate under capability. It is also the highest ratio of perceived improvement to implementation cost in the entire backlog.
 
 ## Approach
 
-**Restart instead of finishing.** After a successful commit, reset the operator to its initial stage and return `{"RUNNING_MODAL"}` rather than `{"FINISHED"}`. Preserve constraint choices that the user would expect to persist — axis lock and offset distance — and clear the per-annotation state: both snaps, numeric input, and preview.
+**Restart instead of finishing.** After a successful commit, reset the operator to its initial stage and return `{"RUNNING_MODAL"}` rather than `{"FINISHED"}`. Preserve choices that the user would expect to persist — session axis mode and offset distance — and clear the per-annotation state: both snaps, numeric input, and preview.
 
 Which state persists across a repeat is the main design decision, so decide it deliberately and document it:
 
-- **Persist:** axis constraint, offset distance, dimension type, and any style choices made during the session.
+- **Persist:** Auto/X/Y/Z session mode, offset distance, dimension type, and any style choices made during the session.
 - **Clear:** start and end snaps, typed numeric input, hover state, and the offset plane (it is derived per dimension).
+
+**Make the session mode visible and early.** Auto/X/Y/Z is an operator-session choice, not a property the user should have to set separately on every finished annotation. Show it in the tool header or status UI, accept the axis keys while the tool is at a fresh start stage, and let the user change it between commits. New sessions begin from a documented add-on preference, defaulting to Auto. Do not silently remember the last session across invocations unless a preference explicitly says to do so.
+
+"Auto" here means the existing `ALIGNED` extension-axis behavior; this ticket does not introduce local axes or inference. Those remain in `UX-03`.
 
 **Exit clearly.** `Esc` and right-click already cancel. In continuous mode they must exit the tool entirely rather than only stepping back a stage — the user needs one reliable way out. Since `Esc` currently clears numeric input first, then steps back, the full sequence from a fresh stage should reach exit rather than looping.
 
@@ -37,7 +43,10 @@ Which state persists across a repeat is the main design decision, so decide it d
 ## Acceptance criteria
 
 - [ ] After committing, the tool returns to its first stage and accepts another placement with no further invocation.
-- [ ] Axis constraint, offset distance, and dimension type persist across repeats; snaps, numeric input, and preview are cleared.
+- [ ] The user can choose Auto, X, Y, or Z before acquiring the first point and can change that mode at a fresh stage between committed dimensions.
+- [ ] Auto/X/Y/Z session mode, offset distance, dimension type, and style choices persist across repeats; snaps, numeric input, hover state, offset plane, and preview are cleared.
+- [ ] The active session mode is visible in the header or viewport status throughout placement.
+- [ ] A new session starts from a documented add-on preference whose default is Auto; finished annotations retain their own stored extension-axis value.
 - [ ] `Esc` from a fresh stage exits the tool; right-click exits from any stage.
 - [ ] Viewport status text shows that the tool is active and how to exit.
 - [ ] Each committed annotation is a separate undo step — undoing once removes one dimension, not the whole session.
@@ -51,13 +60,14 @@ Which state persists across a repeat is the main design decision, so decide it d
 
 - `dimensions/operators/create_dimension.py` — the two `{"FINISHED"}` returns after `_create_dimension()` succeeds, plus `_step_back()` and cancel handling.
 - `dimensions/operators/create_angle.py`, `create_area.py`, `create_guide.py`, `measure.py` — same pattern.
-- `dimensions/interaction.py` — shared reset logic belongs here rather than duplicated per operator.
+- `dimensions/modal_state.py`, `dimensions/interaction.py` — accept a session mode at the fresh stage and centralize repeat-reset logic rather than duplicating it per operator.
 - `dimensions/drawing.py` — `_draw_interaction_status()`.
 - `dimensions/preferences.py` — the preference (`FND-04`).
 
 ## Verification
 
 - State-machine tests (from `FND-06`) asserting that a commit in continuous mode returns to the start stage with the correct fields cleared and preserved.
+- State-machine tests that Auto/X/Y/Z can be selected before the first point and switched between repeats without losing the continuous session.
 - A test asserting each repeat is an independent undo step.
 - A test asserting the session ends cleanly on mode change, leaving no preview state.
 - A test that continuous mode off preserves exactly today's behavior.
@@ -65,6 +75,7 @@ Which state persists across a repeat is the main design decision, so decide it d
 ## Out of scope
 
 - Chain and baseline dimensions — `DIM-01`. Those are a *related* annotation series with shared geometry, not just repeated invocation. Continuous placement is a prerequisite, not a substitute.
+- Local-object axes and inferred directions — `UX-03`. This ticket persists the existing Auto/global-X/global-Y/global-Z modes.
 - Repeating the last annotation's full style onto new ones beyond what persists above — `OUT-03`.
 - A radial/pie menu or other invocation UI.
 

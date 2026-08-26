@@ -1,4 +1,4 @@
-# DIM-04 — Extension gaps, arrow variants, dual units, alignment
+# DIM-04 — Drafting presentation controls: ticks, arrows, units, and alignment
 
 **Milestone:** M5 Documentation-grade
 **Effort:** M
@@ -17,6 +17,8 @@ Presentation control is thinner than documentation work requires. Prefixes, suff
 
 Listed in `DESIGN.md` P2.
 
+Architectural tick marks are the directly requested part of this ticket. Deliver arrow-end variants as the first independently reviewable slice once `OUT-03` provides reusable styles; do not hold that slice behind dual units or tight-space layout.
+
 ## Why it matters for 1.0
 
 Not a 1.0 gate item and the least architecturally significant ticket in the set. But it is the difference between output that reads as professional and output that reads as a Blender screenshot, and it is where `OUT-01` and `OUT-02`'s value is realized or lost.
@@ -27,7 +29,7 @@ Largely additive property work plus drawing changes. The main risk is property s
 
 **Extension gap and overshoot.** Two scalar properties. Pixel or world units — follow whatever `OUT-01` decided for sizing so viewport and generated output agree.
 
-**Arrow variants.** An enum plus geometry generation per variant. `_build_arrow_segments()` currently builds one shape; generalize it. Support at minimum: filled triangle, open triangle, slash, dot, and none. Per-end control matters — leaders often have an arrow at one end only.
+**Arrow variants.** An enum plus geometry generation per variant. `_build_arrow_segments()` currently builds one shape; generalize it. Support at minimum: filled triangle, open triangle, architectural tick/slash, dot, and none. Name the tick option in user-facing UI as **Architectural Tick**, even if its geometry helper uses "slash." Per-end control matters — leaders often have an arrow at one end only.
 
 **Dual units.** A secondary unit system and format, plus a template controlling arrangement — `primary [secondary]`, `primary (secondary)`, or stacked. `units.py` handles formatting; the work is a second format pass and label layout. Precision for the secondary unit needs its own setting; converting 3 decimal places of millimeters to inches gives absurd precision.
 
@@ -38,7 +40,7 @@ Largely additive property work plus drawing changes. The main risk is property s
 ## Acceptance criteria
 
 - [ ] Extension line gap and overshoot are configurable and render correctly in the viewport and through `OUT-01`.
-- [ ] Arrow variants — filled triangle, open triangle, slash, dot, none — are available and independently settable per end.
+- [ ] Arrow variants — filled triangle, open triangle, Architectural Tick, dot, and none — are available and independently settable per end.
 - [ ] Dual unit display works with a configurable arrangement template.
 - [ ] Secondary unit precision is independently configurable.
 - [ ] Label alignment modes — aligned, horizontal, above, broken — all render correctly.

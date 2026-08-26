@@ -788,13 +788,15 @@ def _snap_highlight_geometry(context, snap, include_object_context=True):
 
 def _draw_interaction_status(state):
     parts = []
+    if state.get("continuous_placement"):
+        parts.append("Continuous placement active (Esc or Right-click exits)")
     label = state.get("hover_label")
     if label:
         parts.append(label)
-    axis = state.get("axis", "ALIGNED")
-    if axis != "ALIGNED":
+    axis = state.get("axis")
+    if axis is not None:
         prefix = "MMB " if state.get("axis_gesture_active") else ""
-        parts.append(f"{prefix}{axis} Axis")
+        parts.append(f"{prefix}{'Auto' if axis == 'ALIGNED' else axis} Axis")
     distance_text = state.get("distance_text", "").strip()
     if distance_text:
         parts.append(f"Input: {distance_text}")

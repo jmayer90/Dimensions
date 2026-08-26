@@ -7,9 +7,14 @@ from ..drawing import clear_guide_preview_state, set_guide_preview_state
 from ..interaction import (
     axis_from_event,
     axis_from_mouse_direction,
+    continuous_placement_enabled,
     constrained_delta,
     is_confirm_event,
     is_navigation_event,
+    push_undo_step,
+    remember_session_context,
+    session_axis,
+    session_context_changed,
     update_distance_text,
 )
 from ..snapping import copy_snap, find_nearest_snap_point
@@ -25,19 +30,24 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         if context.area is None or context.area.type != "VIEW_3D" or context.mode != "OBJECT":
             self.report(messages.WARNING, messages.GUIDE_REQUIRE_OBJECT_MODE)
             return {"CANCELLED"}
-        self.axis = "ALIGNED"
+        self.axis = session_axis(context)
+        self.continuous_placement = continuous_placement_enabled(context)
         self.start_snap = None
         self.hover_snap = None
         self.distance_text = ""
         self.distance_input_valid = True
         self.axis_gesture_active = False
         self.state = "PICK_START"
+        remember_session_context(self, context)
         self._update_preview(context)
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
     def modal(self, context, event):
         if context.area is None or context.area.type != "VIEW_3D":
+            clear_guide_preview_state()
+            return {"CANCELLED"}
+        if self.continuous_placement and session_context_changed(self, context):
             clear_guide_preview_state()
             return {"CANCELLED"}
 
@@ -113,6 +123,9 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             return {"RUNNING_MODAL"}
 
         if event.type == "ESC" and event.value == "PRESS":
+            if self.continuous_placement:
+                clear_guide_preview_state()
+                return {"CANCELLED"}
             if self.distance_text:
                 self.distance_text = ""
                 self.distance_input_valid = True
@@ -131,6 +144,9 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
+    def cancel(self, _context):
+        clear_guide_preview_state()
+
     def _commit(self, context):
         end_snap = self._effective_end_snap(context)
         if end_snap is None:
@@ -141,8 +157,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             self.report(messages.WARNING, messages.GUIDE_DIRECTION_DISTANCE_REQUIRED)
             return {"RUNNING_MODAL"}
         self._create(context, end_snap)
-        clear_guide_preview_state()
-        return {"FINISHED"}
+        return self._after_commit(context)
 
     def _effective_end_snap(self, context=None):
         if self.start_snap is None or self.hover_snap is None:
@@ -178,6 +193,17 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         self.distance_input_valid = True
         self.axis_gesture_active = False
 
+    def _after_commit(self, context):
+        if not self.continuous_placement:
+            clear_guide_preview_state()
+            return {"FINISHED"}
+        push_undo_step("Create Construction Guide")
+        self._reset_to_start()
+        self.hover_snap = None
+        remember_session_context(self, context)
+        self._update_preview(context)
+        return {"RUNNING_MODAL"}
+
     def _update_axis_gesture(self, context, event):
         axis = axis_from_mouse_direction(
             context,
@@ -207,6 +233,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
             "axis_gesture_active": self.axis_gesture_active,
+            "continuous_placement": self.continuous_placement,
         }
         if self.hover_snap is not None:
             state["hover_screen"] = self.hover_snap["screen_co"]

@@ -14,6 +14,7 @@ Dimensions gives you persistent, editable annotations that stay attached to your
 - **Measurements and construction guides** — saved finite measurements and infinite guides that other tools can snap to.
 - **Snapping** to vertices, edges, midpoints, face centers, face points, guides, and measurement endpoints, midpoints, and segments.
 - **Typed input** in scene units — `125mm`, `2ft`, `5"` — with `A`, `X`, `Y`, and `Z` axis constraints.
+- **Continuous placement** for dimensions, angles, areas, measurements, and guides, with a session axis that persists while the tool remains active.
 - **Presentation control** — metric and imperial formatting, projected distances, value prefixes and suffixes, linear tolerances, and per-annotation style overrides.
 - **A viewport HUD** showing selected-mesh dimensions and evaluated volume.
 
@@ -31,7 +32,7 @@ To build the archive yourself instead, see [CONTRIBUTING.md](CONTRIBUTING.md). W
 
 Open the 3D Viewport sidebar with `N` and choose the **Dimensions** tab.
 
-Use **Edit ▸ Preferences ▸ Add-ons ▸ Dimensions** to tune snap and selection radii plus defaults for new annotations. Scene and per-annotation settings remain part of the `.blend` file.
+Use **Edit ▸ Preferences ▸ Add-ons ▸ Dimensions** to tune snap and selection radii, choose the default Auto/X/Y/Z session axis, enable or disable continuous placement, and set defaults for new annotations. Continuous placement is on by default. Scene and per-annotation settings remain part of the `.blend` file.
 
 To select an existing annotation directly in the viewport, activate **Dimensions Selection** from the 3D View toolbar in Object Mode. Clicks that do not hit a Dimensions object continue to Blender's normal selection tool.
 
@@ -41,6 +42,8 @@ To select an existing annotation directly in the viewport, activate **Dimensions
 2. Click a highlighted start point, then move toward the next point.
 3. Optionally press `A`, `X`, `Y`, or `Z` — or drag middle mouse after the first point — to lock to a global axis.
 4. Optionally type a distance and press `Enter`. Clicking also commits a valid stage.
+
+After a commit, the tool starts another placement while retaining its session axis and placement offset. Press `A`, `X`, `Y`, or `Z` at the fresh stage to change direction for the next annotation. Press `Esc` or right-click to exit the session. Changing mode or the active object also ends it cleanly.
 
 In Mesh Edit Mode, **Create Dimension** is selection-first: with exactly one edge selected it commits a length immediately, and any other selection falls through to interactive picking.
 
@@ -55,14 +58,16 @@ In Mesh Edit Mode, **Create Dimension** is selection-first: with exactly one edg
 | `A` `X` `Y` `Z` | Constrain to aligned or global axis |
 | Middle drag | Choose a projected global axis (after the first point) |
 | Type + `Enter` | Commit a scene-unit distance |
-| `Esc` | Clear typed input, then step back or exit |
-| Right-click | Cancel a one-shot tool |
+| `Esc` | Exit continuous placement; otherwise clear typed input, step back, or exit |
+| Right-click | Exit the active placement session |
 
 Every key in this table is rebindable, and the modal keys take effect as soon as you change them — no restart. Creation shortcuts ship unbound, as disabled entries in the Dimensions add-on Keymap preferences, so nothing Dimensions installs can shadow a binding you already use.
 
 ### Placement
 
 Linear and area annotations are placement objects. Move one with Blender's normal transform tools and you move its presentation — the source anchors stay attached, and the offset you set survives later changes to the source geometry or object transform.
+
+Text Size and Arrow Size are fixed viewport-pixel sizes. View zoom, projection, source transforms, and the annotation Empty's scale do not enlarge the live overlay. Generated render output will use separate sizing rules when that output path is added.
 
 ## Known limitations
 

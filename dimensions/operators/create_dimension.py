@@ -14,13 +14,20 @@ from ..drawing import (
     set_preview_state,
 )
 from ..interaction import (
+    axis_label,
     axis_from_event,
     axis_from_mouse_direction,
+    continuous_placement_enabled,
     is_confirm_event,
     is_navigation_event,
+    push_undo_step,
+    remember_session_context,
+    session_axis,
+    session_context_changed,
     update_distance_text,
 )
 from ..modal_state import PointPlacementState
+from ..preferences import get_preferences
 from ..snapping import copy_snap, find_nearest_snap_point, get_mouse_ray, has_view3d_window_region
 from ..units import parse_distance_input
 from .selection_annotations import create_dimension_from_selected_edge
@@ -71,19 +78,24 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             self.report(messages.WARNING, messages.DIMENSIONS_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
 
+        continuous_placement = continuous_placement_enabled(context)
         if context.mode == "EDIT_MESH":
             dimension = create_dimension_from_selected_edge(context)
             if dimension is not None:
                 self.report(messages.INFO, messages.CREATED_SELECTED_EDGE)
-                return {"FINISHED"}
+                if not continuous_placement:
+                    return {"FINISHED"}
+                push_undo_step("Create Dimension")
 
-        self._state_machine = PointPlacementState()
+        self.continuous_placement = continuous_placement
+        self._state_machine = PointPlacementState(axis=session_axis(context))
         self.hover_snap = None
         self.start_snap = None
         self.end_snap = None
-        self.offset_distance = DEFAULT_OFFSET_DISTANCE
+        self.offset_distance = getattr(get_preferences(context), "default_offset_distance", DEFAULT_OFFSET_DISTANCE)
         self.offset_plane_normal = None
         self.axis_gesture_active = False
+        remember_session_context(self, context)
 
         self._update_preview()
         context.window_manager.modal_handler_add(self)
@@ -91,6 +103,9 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
     def modal(self, context, event):
         if context.area is None or context.area.type != "VIEW_3D":
+            clear_preview_state()
+            return {"CANCELLED"}
+        if self.continuous_placement and session_context_changed(self, context):
             clear_preview_state()
             return {"CANCELLED"}
 
@@ -106,16 +121,16 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
 
         axis = axis_from_event(event)
-        if self.state == "SET_OFFSET" and axis is not None:
+        if axis is not None and self.state in {"PICK_START", "SET_OFFSET"}:
             self.dimension_type = axis
-            self._configure_offset_plane(context)
-            if self.distance_text:
-                self._apply_numeric_input(context)
-            else:
-                self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
+            if self.state == "SET_OFFSET":
+                self._configure_offset_plane(context)
+                if self.distance_text:
+                    self._apply_numeric_input(context)
+                else:
+                    self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
             self._update_preview()
-            axis_label = "Auto" if self.dimension_type == "ALIGNED" else self.dimension_type
-            self.report(messages.INFO, messages.extension_axis(axis_label))
+            self.report(messages.INFO, messages.extension_axis(axis_label(self.dimension_type)))
             return {"RUNNING_MODAL"}
 
         if self.state in {"PICK_END", "SET_OFFSET"}:
@@ -177,8 +192,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                     self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
                     return {"RUNNING_MODAL"}
                 if self._create_dimension(context):
-                    clear_preview_state()
-                    return {"FINISHED"}
+                    return self._after_commit(context)
                 return {"RUNNING_MODAL"}
 
         if is_confirm_event(event):
@@ -193,8 +207,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                     self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
                     return {"RUNNING_MODAL"}
                 if self._create_dimension(context):
-                    clear_preview_state()
-                    return {"FINISHED"}
+                    return self._after_commit(context)
                 return {"RUNNING_MODAL"}
 
         if event.type in {"BACK_SPACE", "DEL"} and event.value == "PRESS":
@@ -203,6 +216,9 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             return {"RUNNING_MODAL"}
 
         if event.type == "ESC" and event.value == "PRESS":
+            if self.continuous_placement:
+                clear_preview_state()
+                return {"CANCELLED"}
             if self.distance_text:
                 self.distance_text = ""
                 self.distance_input_valid = True
@@ -223,6 +239,9 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             return {"PASS_THROUGH"}
 
         return {"RUNNING_MODAL"}
+
+    def cancel(self, _context):
+        clear_preview_state()
 
     def _accept_start(self):
         if self.hover_snap is None:
@@ -465,6 +484,21 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.report(messages.INFO, messages.CREATED_DIMENSION)
         return True
 
+    def _after_commit(self, context):
+        if not self.continuous_placement:
+            clear_preview_state()
+            return {"FINISHED"}
+        push_undo_step("Create Dimension")
+        self._state_machine.restart()
+        self.hover_snap = None
+        self.start_snap = None
+        self.end_snap = None
+        self.offset_plane_normal = None
+        self.axis_gesture_active = False
+        remember_session_context(self, context)
+        self._update_preview()
+        return {"RUNNING_MODAL"}
+
     def _update_preview(self):
         preview = {
             "state": self.state,
@@ -474,6 +508,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
             "axis_gesture_active": self.axis_gesture_active,
+            "continuous_placement": self.continuous_placement,
         }
 
         if self.hover_snap is not None:

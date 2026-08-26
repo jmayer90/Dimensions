@@ -16,7 +16,7 @@ The extension may inspect Edit Mode topology to acquire anchors or calculate val
 - **No global preference mutation.** Registration does not alter Auto Merge, snapping, keymaps, or unrelated Blender settings.
 - **One interaction contract.** Point, constrain, type, confirm, step back, and cancel behave predictably across tools.
 - **Preview before commit.** The active target, constraint, value, and invalid state are visible before an annotation is saved.
-- **Stable presentation.** Annotations remain readable during unrelated mode or topology changes. Missing vertex identity uses the stored fallback position.
+- **Stable presentation.** Annotations remain readable during unrelated mode or topology changes. Missing vertex identity uses the stored fallback position. Viewport text and arrowheads are screen-space presentation: zooming or transforming source objects must not change their pixel size.
 - **Truthful state.** Live, captured, and invalid measurements are visibly distinct; a stale cached value is never presented as a current live result.
 - **Source/presentation separation.** Measurement bindings determine values while label, leader, arc, and extension properties determine placement.
 - **Editable placement objects.** An annotation Empty's transform is a user-facing placement offset from source-derived canonical geometry; synchronization preserves that offset when sources move.
@@ -60,7 +60,7 @@ Add-on preferences are per-user defaults and interaction tuning. Scene and annot
 - `A` selects aligned behavior; `X`, `Y`, and `Z` select global axes.
 - Middle-mouse drag chooses a projected global axis after a start point exists; before that, middle mouse remains viewport navigation.
 - Typed scene-unit distance can precede or follow an axis choice. `Enter` confirms the current valid stage.
-- `Esc` clears numeric input first, then steps back or exits. Right-click cancels a one-shot tool.
+- Creation tools use continuous placement by default. After each commit they retain the session axis and placement offset, clear per-annotation snaps and typed input, and return to their first stage. `Esc` or right-click exits a continuous session; changing mode or the active object ends it without leaking preview state. Users can disable continuous placement in add-on preferences to restore the step-back behavior.
 - Dimension and measurement point acquisition works in Object and Mesh Edit Mode without modifying the mesh.
 - The main Dimension command is selection-first in Edit Mode: exactly one selected edge commits a length immediately; other selections enter interactive point acquisition.
 - Edit selection can create a length from one edge, an angle from any two non-parallel edges, or an area leader from one or more faces.
@@ -108,7 +108,7 @@ Set `DIMENSIONS_SNAP_PROFILE=1` for the add-on's own per-stage build, reproject,
 1. **Snap cache build cost on very dense scenes.** Query and draw costs are measured and within budget (see [Measured performance](#measured-performance)). Building the projected snap source cache is not: a 1M-vertex scene takes about 4.9 s because `_build_sources()` allocates one dictionary per vertex and projects each one individually. Caching around the outside cannot fix a per-vertex constant, so [FND-11](tickets/FND-11-snap-cache-build-cost.md) tracks replacing the per-vertex objects with bulk array reads. Scenes at or below 100k vertices build in under 0.4 s and are usable now.
 2. **Duplicated anchor IDs.** Blender topology duplication may copy a point ID. Resolution chooses the candidate closest to the stored fallback coordinate.
 3. **Face identity after topology duplication.** Live Areas use persistent face IDs. Missing, structurally changed, or duplicated identities intentionally enter Needs Repair instead of guessing; modifier-evaluated face correspondence is not yet defined.
-4. **Viewport-only output.** Dimensions do not yet participate in render, drawing, or export workflows.
+4. **Viewport-only output.** Dimensions do not yet participate in render, drawing, or export workflows. Renderable dimensions were independently requested by two of the first five public reviewers, so [OUT-01](tickets/OUT-01-grease-pencil-output.md) is scheduled immediately after the highest-value fluency work instead of waiting for construction milestones.
 5. **Proxy lifecycle.** Native measurement snap proxies clear transient caches on undo/redo and linked annotations are read-only. Background lifecycle tests cover save/reload, proxy repair, duplicate proxy cleanup, and visibility. Append/link, library override, and two-window foreground QA remain release requirements because Blender background mode cannot exercise them.
 
 ## Lifecycle behavior matrix
@@ -128,7 +128,17 @@ The expected result is shared across linear, angle, and area annotations, measur
 
 The items below are the standing direction. They are broken into executable work in [`tickets/`](tickets/), which maps each priority band to a milestone and a set of tickets with acceptance criteria.
 
-### P0 — Trustworthy acquisition
+Early public feedback reinforces the product definition rather than expanding it: every request concerns faster annotation, clearer presentation, or usable output. None requires mesh authoring. The disposition is:
+
+| User request | Decision | Roadmap placement |
+| --- | --- | --- |
+| Keep placing dimensions without leaving the tool | Accepted and delivered | [UX-01](tickets/UX-01-continuous-placement.md), delivered in 0.3.1 |
+| Choose Auto/X/Y/Z once, place a group, then switch direction | Accepted and delivered with repeated placement | [UX-01](tickets/UX-01-continuous-placement.md), delivered in 0.3.1 |
+| Render dimensions | Accept and accelerate; requested independently twice | [OUT-01](tickets/OUT-01-grease-pencil-output.md), next major workstream before new construction types |
+| Replace arrows with architectural tick marks | Accept as a presentation variant | First delivery slice of [DIM-04](tickets/DIM-04-presentation-controls.md), backed by reusable styles from OUT-03 |
+| Keep numeric labels from growing | Existing behavior verified and documented | [UX-08](tickets/UX-08-stable-overlay-sizing.md), delivered in 0.3.1; any zoom- or transform-driven growth is a bug |
+
+### P0 — Trustworthy acquisition and repeated placement
 
 - Add an explicit rebind or convert-to-world action for users who need to override fallback anchor resolution.
 - Extend the Live/Captured/Needs Repair model with a guided repair picker and source highlighting.
@@ -139,8 +149,9 @@ The items below are the standing direction. They are broken into executable work
 - Add repeatable dense-scene performance budgets and foreground modal-event tests.
 - Complete foreground lifecycle QA for measurement proxies and annotations.
 
-### P1 — Precision inference and management
+### P1 — Renderable output, precision inference, and management
 
+- Generate selected or visible annotations as camera- or world-scaled Grease Pencil output that renders in EEVEE and Cycles, without replacing the live overlay annotations.
 - Add local-axis, parallel, perpendicular, extension, intersection, and active-plane inference with an explicit lock.
 - Add a scene annotation manager for search, rename, select, hide, isolate, repair, and bulk style operations.
 - Add temporary hover measurement with delta X/Y/Z and an explicit action to save it.
@@ -150,8 +161,8 @@ The items below are the standing direction. They are broken into executable work
 
 - Extend true/global-axis projected length with local-axis and view-plane modes.
 - Add chain, baseline, radial, diameter, arc-length, coordinate, and elevation dimensions.
-- Add extension gaps and overshoot, arrow variants, label alignment, tolerance, prefix or suffix, and dual-unit display.
-- Provide a render or export path through generated curves and text, Grease Pencil, SVG, or PDF.
+- Add extension gaps and overshoot, arrow variants including architectural ticks, label alignment, tolerance, prefix or suffix, and dual-unit display.
+- Add scaled SVG and PDF export after the renderable Grease Pencil path is established.
 
 ## Explicitly excluded scope
 

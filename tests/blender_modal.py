@@ -11,6 +11,7 @@ suite instead of by a user.
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import bpy
@@ -24,6 +25,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 
 import dimensions
 from dimensions.collections import get_or_create_dimension_collection
+from dimensions.interaction import remember_session_context, session_context_changed
 from dimensions.modal_state import PointPlacementState
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
 
@@ -62,14 +64,14 @@ class PointPlacementStateTests(unittest.TestCase):
         self.assertEqual(self.state.accept_point(), "NO_ACTION")
         self.assertEqual(self.state.stage, PLACE)
 
-    def test_axis_lock_is_ignored_before_the_placement_stage(self):
-        self.assertFalse(self.state.accepts_axis_lock)
-        self.assertEqual(self.state.set_axis("X"), "AXIS_IGNORED")
-        self.assertEqual(self.state.axis, PointPlacementState.DEFAULT_AXIS)
+    def test_axis_mode_can_be_chosen_before_the_first_point(self):
+        self.assertTrue(self.state.accepts_axis_lock)
+        self.assertEqual(self.state.set_axis("X"), "AXIS_SET")
+        self.assertEqual(self.state.axis, "X")
 
         self.state.accept_point()
-        self.assertEqual(self.state.set_axis("X"), "AXIS_IGNORED")
-        self.assertEqual(self.state.axis, PointPlacementState.DEFAULT_AXIS)
+        self.assertEqual(self.state.set_axis("Y"), "AXIS_IGNORED")
+        self.assertEqual(self.state.axis, "X")
 
     def test_axis_lock_applies_after_both_points(self):
         self.state.accept_point()
@@ -160,6 +162,36 @@ class PointPlacementStateTests(unittest.TestCase):
             self.assertTrue(state.numeric_valid)
             self.assertEqual(state.axis, PointPlacementState.DEFAULT_AXIS)
 
+    def test_restart_clears_transient_input_but_keeps_session_axis(self):
+        self.state.set_axis("Z")
+        self.state.accept_point()
+        self.state.accept_point()
+        self.state.set_numeric_text("3.5")
+        self.assertEqual(self.state.restart(), "RESTARTED")
+        self.assertEqual(self.state.stage, PICK_START)
+        self.assertEqual(self.state.axis, "Z")
+        self.assertEqual(self.state.numeric_text, "")
+        self.assertTrue(self.state.numeric_valid)
+
+
+class InteractionContextTests(unittest.TestCase):
+    def test_session_context_tracks_mode_and_active_object(self):
+        first = object()
+        second = object()
+        operator = SimpleNamespace()
+        context = SimpleNamespace(
+            mode="OBJECT",
+            view_layer=SimpleNamespace(objects=SimpleNamespace(active=first)),
+        )
+        remember_session_context(operator, context)
+        self.assertFalse(session_context_changed(operator, context))
+
+        context.view_layer.objects.active = second
+        self.assertTrue(session_context_changed(operator, context))
+        context.view_layer.objects.active = first
+        context.mode = "EDIT_MESH"
+        self.assertTrue(session_context_changed(operator, context))
+
 
 class CreateDimensionModalTests(unittest.TestCase):
     """The operator as a thin adapter over the contract, with a scripted viewport."""
@@ -174,6 +206,7 @@ class CreateDimensionModalTests(unittest.TestCase):
             offset_distance=0.25,
             offset_plane_normal=None,
             axis_gesture_active=False,
+            continuous_placement=False,
         )
         self.reports = self.operator.reports
         self.context = make_context(scene=bpy.context.scene)
@@ -287,6 +320,22 @@ class CreateDimensionModalTests(unittest.TestCase):
         self.assertTrue(self.operator._create_dimension(self.context))
         self.assertEqual(self._dimension_object_count(), before + 1)
 
+    def test_continuous_commit_restarts_with_session_axis_and_offset(self):
+        self.operator.continuous_placement = True
+        self.operator.dimension_type = "Z"
+        remember_session_context(self.operator, self.context)
+        self._pick_two_points((0.0, 0.0, 0.0), (0.0, 0.0, 4.0))
+        self.assertTrue(self.operator._create_dimension(self.context))
+        with patch("dimensions.operators.create_dimension.push_undo_step") as undo_step:
+            result = self.operator._after_commit(self.context)
+        self.assertEqual(result, {"RUNNING_MODAL"})
+        self.assertEqual(self.operator.state, PICK_START)
+        self.assertEqual(self.operator.dimension_type, "Z")
+        self.assertEqual(self.operator.offset_distance, 0.25)
+        self.assertIsNone(self.operator.start_snap)
+        self.assertIsNone(self.operator.end_snap)
+        undo_step.assert_called_once_with("Create Dimension")
+
 
 def main():
     dimensions.register()
@@ -294,7 +343,7 @@ def main():
         loader = unittest.defaultTestLoader
         suite = unittest.TestSuite(
             loader.loadTestsFromTestCase(case)
-            for case in (PointPlacementStateTests, CreateDimensionModalTests)
+            for case in (PointPlacementStateTests, InteractionContextTests, CreateDimensionModalTests)
         )
         result = unittest.TextTestRunner(verbosity=2).run(suite)
     finally:
