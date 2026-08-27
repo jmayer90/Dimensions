@@ -482,6 +482,8 @@ def linear_dimension_label_layout(
         center = line_mid + screen_perpendicular * (half_across + margin)
     elif placement == "OUTSIDE":
         center = line_end + screen_direction * (arrow_size + margin + half_along)
+    elif placement == "OUTSIDE_START":
+        center = line_start - screen_direction * (arrow_size + margin + half_along)
     else:
         gap_half_length = (half_along + margin) / projection_scale
         line_length = (line_end - line_start).length

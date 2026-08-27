@@ -1,7 +1,7 @@
 # DIM-04 — Drafting presentation controls: ticks, arrows, units, and alignment
 
 **Milestone:** M5 Documentation-grade
-**Status:** 🟨 Partial — architectural ticks shipped in 0.3.2; remaining controls follow `OUT-03`.
+**Status:** 🟨 Partial — architectural ticks shipped in 0.3.2 and Outside Start placement in 0.4.1; remaining controls follow `OUT-03`.
 **Effort:** M
 **Depends on:** OUT-03
 **Version impact:** Patch. Additive.
@@ -19,6 +19,8 @@ Presentation control is thinner than documentation work requires. Prefixes, suff
 Listed in `DESIGN.md` P2.
 
 Architectural tick marks were the directly requested part of this ticket and shipped as the first independently reviewable slice in 0.3.2, using the existing global and per-annotation style controls. The remaining variants can join reusable named styles from `OUT-03`; do not hold them behind dual units or tight-space layout.
+
+Manual **Outside Start** placement shipped in 0.4.1 as the mirror of the existing Outside End option. It preserves existing persisted values and matches between the viewport and generated Grease Pencil output. Automatic tight-space detection and leader routing remain part of this ticket's unfinished scope.
 
 ## Why it matters for 1.0
 

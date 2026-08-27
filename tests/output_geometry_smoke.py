@@ -180,6 +180,16 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
             4.0,
         )
 
+        settings.text_placement = "OUTSIDE_START"
+        outside_start = linear_dimension_label_layout(
+            bpy.context, dimension, 0.2, 0.01, 0.2
+        )
+        self.assertEqual(outside_start.dimension_line_strokes, ())
+        self.assertLess(
+            max(point[0] for stroke in outside_start.strokes for point in stroke.points),
+            0.0,
+        )
+
     def test_custom_text_position_preserves_live_line_order(self):
         dimension = self._linear_dimension()
         props = dimension.dimension_props

@@ -37,7 +37,7 @@ Acceptance checkboxes inside a ticket define its intended scope; they are not ma
 | M2 — Fluency | 🟨 Partial | `UX-01`, `UX-08` in 0.3.1 | `FND-11` is next; `UX-02` through `UX-07` remain. |
 | M3 — Construction | ⬜ Planned | — | `CON-01` through `CON-04`. |
 | M4 — Output | 🟨 Partial | `OUT-01` in 0.4.0; angle/area `OUT-04` in 0.4.1 | `OUT-03` is next; `OUT-02` follows. |
-| M5 — Documentation-grade | 🟨 Partial | Architectural-tick slice of `DIM-04` in 0.3.2 | Remaining `DIM-04` plus `DIM-01` through `DIM-03`. |
+| M5 — Documentation-grade | 🟨 Partial | Architectural ticks in 0.3.2; Outside Start placement in 0.4.1 | Remaining `DIM-04` plus `DIM-01` through `DIM-03`. |
 
 ## Index
 
@@ -105,7 +105,7 @@ Milestone numbers group related work; they are not a strict delivery queue. The 
 | [DIM-01](DIM-01-chain-baseline.md) | Chain and baseline dimensions | ⬜ Planned | — | M | UX-01 |
 | [DIM-02](DIM-02-radial-diameter-arc.md) | Radial, diameter, and arc-length dimensions | ⬜ Planned | — | M | — |
 | [DIM-03](DIM-03-coordinate-elevation.md) | Coordinate and elevation dimensions | ⬜ Planned | — | M | — |
-| [DIM-04](DIM-04-presentation-controls.md) | Drafting presentation controls: ticks, arrows, units, and alignment | 🟨 Partial | Ticks in 0.3.2 | M | OUT-03 for remaining work |
+| [DIM-04](DIM-04-presentation-controls.md) | Drafting presentation controls: ticks, arrows, units, and alignment | 🟨 Partial | Ticks in 0.3.2; Outside Start in 0.4.1 | M | OUT-03 for remaining work |
 
 ## Suggested order
 

@@ -15,7 +15,7 @@ Dimensions gives you persistent, editable annotations that stay attached to your
 - **Snapping** to vertices, edges, midpoints, face centers, face points, guides, and measurement endpoints, midpoints, and segments.
 - **Typed input** in scene units — `125mm`, `2ft`, `5"` — with `A`, `X`, `Y`, and `Z` axis constraints.
 - **Continuous placement** for dimensions, angles, areas, measurements, and guides, with a session axis that persists while the tool remains active.
-- **Presentation control** — metric and imperial formatting, projected distances, architectural tick or arrow endpoints, value prefixes and suffixes, linear tolerances, and per-annotation style overrides.
+- **Presentation control** — metric and imperial formatting, projected distances, architectural tick or arrow endpoints, Inline/Above/Outside Start/Outside End text placement, value prefixes and suffixes, linear tolerances, and per-annotation style overrides.
 - **Renderable linear, angle, and area dimensions** generated as Grease Pencil strokes for EEVEE or Cycles, using camera-relative pixels or explicit world-space sizing.
 - **A viewport HUD** showing selected-mesh dimensions and evaluated volume.
 
@@ -71,6 +71,8 @@ Every key in this table is rebindable, and the modal keys take effect as soon as
 Linear and area annotations are placement objects. Move one with Blender's normal transform tools and you move its presentation — the source anchors stay attached, and the offset you set survives later changes to the source geometry or object transform.
 
 Text Size and Arrow Size are fixed viewport-pixel sizes. View zoom, projection, source transforms, and the annotation Empty's scale do not enlarge the live overlay. Generated output has separate camera-pixel and world-space sizing controls.
+
+Text Placement under **Global Dimension Settings** supports Inline, Above Line, Outside Start, and Outside End. Outside Start and Outside End place the full value/custom-text block beyond the corresponding arrow in both the live overlay and generated output.
 
 Linear dimensions can use the default open arrows or **Architectural Tick** endpoints. Set the default under **Global Dimension Style**, or override it for the selected dimension under **Local Style**.
 

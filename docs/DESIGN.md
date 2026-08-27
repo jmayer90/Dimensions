@@ -39,7 +39,7 @@ The extension may inspect Edit Mode topology to acquire anchors or calculate val
 | `properties.py`, `ui.py` | Persist settings and expose scene and local editing. |
 | `preferences.py` | Stores per-user interaction thresholds and defaults without changing Blender settings outside the add-on. |
 | `units.py`, `volume.py` | Parse and format units and calculate evaluated closed-mesh volume. |
-| `stroke_font.py`, `output_geometry.py`, `grease_pencil_output.py`, `operators/generate_output.py` | Build vector labels and world-space linear stroke specs, then generate isolated, replaceable Grease Pencil output artifacts. |
+| `stroke_font.py`, `output_geometry.py`, `grease_pencil_output.py`, `operators/generate_output.py` | Build vector labels and world-space annotation stroke specs, then generate isolated, replaceable Grease Pencil output artifacts. |
 
 Annotations are Empty objects with presentation properties and an annotation kind. Linear annotations use two measurement anchors. Live Areas store persistent face IDs in `dimensions_area_face_id`, source metadata, a cached value, and explicit Live/Captured/Needs Repair state. Two-edge Angles store four persistent endpoint anchors and derive a shared or virtual center. Vertex anchors store integer IDs in the mesh's `dimensions_anchor_id` point attribute. Angle arcs are generated in world space before viewport projection. A canonical source frame plus user presentation offset keeps annotation transforms editable. Guides and measurements are Empty objects in a separate collection.
 
@@ -47,7 +47,7 @@ Annotations are Empty objects with presentation properties and an annotation kin
 
 The live overlay remains the editable source of truth. An explicit operator resolves visible or selected linear, angle, and valid Live or Captured area annotations into world-space stroke specifications, then creates separate Grease Pencil v3 objects in an exclusive scene-owned `Dimensions Output` collection. Areas in Needs Repair are skipped until their sources are repaired. Grease Pencil was chosen over curves or meshes because it is Blender's native stroke surface, remains editable, and is verified to render in EEVEE and Cycles. A scene-owned object-pointer registry assigns persistent source keys without modifying annotation objects; regeneration replaces only the matching artifact, and the UI warns that hand edits are disposable. Existing user collections with the same display name are never adopted.
 
-Camera Relative sizing converts configured render pixels to world units at each annotation's midpoint depth and is the default. World Scale sizing uses explicit scene-unit values. Labels use a bundled single-line vector font so text, tolerances, custom notes, degree signs, and squared-unit suffixes remain Grease Pencil strokes instead of introducing a second render-object type. Linear Inline, Above, Outside, and custom-text ordering rules mirror the live overlay; angle rays/arcs and area leaders preserve their live world positions and presentation offsets. For a linear annotation whose endpoints share camera depth, camera-relative layout targets agreement within one output pixel. A perspective annotation spanning materially different depths uses the documented midpoint approximation. [OUT-04](tickets/OUT-04-angle-area-output.md) extends the same backend across all persistent annotation kinds.
+Camera Relative sizing converts configured render pixels to world units at each annotation's midpoint depth and is the default. World Scale sizing uses explicit scene-unit values. Labels use a bundled single-line vector font so text, tolerances, custom notes, degree signs, and squared-unit suffixes remain Grease Pencil strokes instead of introducing a second render-object type. Linear Inline, Above, Outside Start, Outside End, and custom-text ordering rules mirror the live overlay; angle rays/arcs and area leaders preserve their live world positions and presentation offsets. For a linear annotation whose endpoints share camera depth, camera-relative layout targets agreement within one output pixel. A perspective annotation spanning materially different depths uses the documented midpoint approximation. [OUT-04](tickets/OUT-04-angle-area-output.md) extends the same backend across all persistent annotation kinds.
 
 ### Saved-data schema
 
@@ -144,7 +144,7 @@ The canonical ticket status, milestone rollup, and status legend live in the [wo
 | 2 | [OUT-04](tickets/OUT-04-angle-area-output.md) | ✅ Complete | Angle and area Grease Pencil generation delivered in 0.4.1. |
 | 3 | [OUT-03](tickets/OUT-03-styles.md) | ⏭ Next | Add reusable named styles and unblock remaining presentation controls. |
 | Parallel | [FND-11](tickets/FND-11-snap-cache-build-cost.md) | ⏭ Next | Bring the 1M-vertex projected snap-cache build within budget. |
-| After OUT-03 | [DIM-04](tickets/DIM-04-presentation-controls.md) | 🟨 Partial | Complete the presentation controls beyond shipped architectural ticks. |
+| After OUT-03 | [DIM-04](tickets/DIM-04-presentation-controls.md) | 🟨 Partial | Complete the presentation controls beyond shipped ticks and manual Outside Start/End placement. |
 | Later | [OUT-02](tickets/OUT-02-vector-export.md) | ⬜ Planned | Add scaled SVG/PDF output after generated output and styles stabilize. |
 
 Early public feedback reinforces the product definition rather than expanding it: every request concerns faster annotation, clearer presentation, or usable output. None requires mesh authoring. The disposition is:
@@ -180,7 +180,7 @@ Early public feedback reinforces the product definition rather than expanding it
 
 - ⬜ **Planned** — extend true/global-axis projected length with local-axis and view-plane modes through [UX-03](tickets/UX-03-inference-engine.md).
 - ⬜ **Planned** — add chain, baseline, radial, diameter, arc-length, coordinate, and elevation dimensions in [DIM-01](tickets/DIM-01-chain-baseline.md), [DIM-02](tickets/DIM-02-radial-diameter-arc.md), and [DIM-03](tickets/DIM-03-coordinate-elevation.md).
-- 🟨 **Partial** — architectural ticks shipped in 0.3.2; extension gaps, overshoot, arrow variants, alignment, and dual units remain in [DIM-04](tickets/DIM-04-presentation-controls.md).
+- 🟨 **Partial** — architectural ticks shipped in 0.3.2 and manual Outside Start placement in 0.4.1; extension gaps, overshoot, arrow variants, automatic tight-space layout, alignment, and dual units remain in [DIM-04](tickets/DIM-04-presentation-controls.md).
 - ⬜ **Planned** — add scaled SVG and PDF export in [OUT-02](tickets/OUT-02-vector-export.md) after generated output and styles stabilize.
 
 ## Explicitly excluded scope

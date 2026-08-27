@@ -700,10 +700,10 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
 
     output_scope: bpy.props.EnumProperty(
         name="Output Scope",
-        description="Choose which visible linear annotations receive generated output",
+        description="Choose which visible annotations receive generated output",
         items=[
-            ("SELECTED", "Selected", "Generate output for selected visible linear annotations"),
-            ("VISIBLE", "Visible", "Generate output for every visible linear annotation"),
+            ("SELECTED", "Selected", "Generate output for selected visible annotations"),
+            ("VISIBLE", "Visible", "Generate output for every visible annotation"),
         ],
         default="VISIBLE",
         update=update_dimension_display,
@@ -720,6 +720,7 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
             ("INLINE", "Inline (Gap)", "Center values in a break in each dimension line"),
             ("ABOVE", "Above Line", "Place values above their dimension lines"),
             ("OUTSIDE", "Outside End", "Place values beyond their end arrows"),
+            ("OUTSIDE_START", "Outside Start", "Place values beyond their start arrows"),
         ],
         default="INLINE",
         update=update_dimension_display,

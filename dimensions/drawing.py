@@ -1316,6 +1316,11 @@ def _build_text_layout(
             arrow_size + 6.0 + text_half_extent_along_line
         )
         line_segments = full_line
+    elif placement == "OUTSIDE_START":
+        block_center = line_start - line_direction * (
+            arrow_size + 6.0 + text_half_extent_along_line
+        )
+        line_segments = full_line
     else:
         gap_half_width = text_half_extent_along_line + 5.0
         line_length = (line_end - line_start).length

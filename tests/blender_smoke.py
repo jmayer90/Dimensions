@@ -1174,6 +1174,32 @@ class DimensionsDrawCacheTests(unittest.TestCase):
         self.assertNotAlmostEqual((tick_segments[1] - tick_segments[0]).x, 0.0)
         self.assertNotAlmostEqual((tick_segments[1] - tick_segments[0]).y, 0.0)
 
+    def test_outside_start_text_layout_is_opposite_outside_end(self):
+        geometry = {
+            "line_start_screen": Vector((10.0, 30.0)),
+            "line_end_screen": Vector((110.0, 30.0)),
+            "line_mid_screen": Vector((60.0, 30.0)),
+            "line_direction_screen": Vector((1.0, 0.0)),
+        }
+        outside_end = drawing._build_text_layout(
+            "100 mm", geometry, "OUTSIDE", text_size=14.0, arrow_size=10.0
+        )
+        outside_start = drawing._build_text_layout(
+            "100 mm", geometry, "OUTSIDE_START", text_size=14.0, arrow_size=10.0
+        )
+
+        self.assertGreater(outside_end["text_position"].x, geometry["line_end_screen"].x)
+        self.assertLess(outside_start["text_position"].x, geometry["line_start_screen"].x)
+
+        reversed_geometry = dict(geometry)
+        reversed_geometry["line_start_screen"] = Vector((110.0, 30.0))
+        reversed_geometry["line_end_screen"] = Vector((10.0, 30.0))
+        reversed_geometry["line_direction_screen"] = Vector((-1.0, 0.0))
+        reversed_start = drawing._build_text_layout(
+            "100 mm", reversed_geometry, "OUTSIDE_START", text_size=14.0, arrow_size=10.0
+        )
+        self.assertGreater(reversed_start["text_position"].x, reversed_geometry["line_start_screen"].x)
+
     def test_arrow_end_style_defaults_to_arrows_and_applies_to_new_dimensions(self):
         settings = bpy.context.scene.dimensions_settings
         original_style = settings.dimension_arrow_end_style

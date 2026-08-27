@@ -47,7 +47,7 @@ Delivery status is summarized here and maintained in detail in the [work-ticket 
 | **M2 — Fluency** | 🟨 Partial | `UX-01` and `UX-08` complete; `FND-11` is next; remaining `UX-*` planned. | Patches on the `0.3.x`/`0.4.x` lines unless a ticket trips trigger 2. |
 | **M3 — Construction** | ⬜ Planned | `CON-*`. Guide points, offset and angular guides, guide planes, spacing. | Patches. New surfaces that reuse the existing contract. |
 | **M4 — Output** | 🟨 Partial | `OUT-01` complete in 0.4.0; angle/area `OUT-04` complete in 0.4.1; `OUT-03` and vector export remain. | **`0.4.0`** tripped trigger 3; follow-ups are patches unless scope changes. |
-| **M5 — Documentation-grade** | 🟨 Partial | Architectural ticks complete; remaining `DIM-04` and `DIM-01` through `DIM-03` planned. | Patches, mostly additive. |
+| **M5 — Documentation-grade** | 🟨 Partial | Architectural ticks and manual Outside Start/End placement complete; remaining `DIM-04` and `DIM-01` through `DIM-03` planned. | Patches, mostly additive. |
 | **M6 — 1.0 gate** | ⬜ Planned | Hardening, migration fixtures, compatibility promise. | **`1.0.0`**. |
 
 Milestone numbers group related work and version impact; they are not a strict delivery queue. M1 gates everything else, because building on an unversioned schema and an unsound selection architecture just increases what has to be unwound later. Early user feedback moved `UX-01` and `UX-08` into 0.3.1, architectural ticks into 0.3.2, the first renderable linear output surface into 0.4.0, and angle/area output coverage into 0.4.1. The 0.4.0 release also advances the saved-data schema additively from v1 to v2; existing values are preserved. Other M2 and M3 work can proceed in parallel on the 0.4.x line.
