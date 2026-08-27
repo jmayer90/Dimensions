@@ -30,7 +30,9 @@ Pass `-Blender` if Blender isn't at the default install path:
 powershell -ExecutionPolicy Bypass -File scripts\build_extension.ps1 -Blender "D:\blender\blender.exe"
 ```
 
-The archive is written to `build/dimensions-<version>.zip`. Install it through **Edit ▸ Preferences ▸ Add-ons ▸ Install from Disk**. The POSIX scripts use the standard `unzip` utility to inspect the release archive.
+The archive is written to `builds/dimensions-<version>.zip`. Install it through **Edit ▸ Preferences ▸ Add-ons ▸ Install from Disk**. The POSIX scripts use the standard `unzip` utility to inspect the release archive.
+
+All local and CI build workflows write extension archives to `builds/`. Each commit that delivers a significant feature or changes the extension version must include its validated `dimensions-<version>.zip` archive from that folder; stage it with the rest of the commit. The `extension-stage/` subdirectory is temporary and remains ignored.
 
 ## Testing
 
@@ -114,6 +116,8 @@ git push origin v0.4.0
 ```
 
 The workflow refuses to publish if the tag does not match the manifest version, or if the changelog has no section for it. It runs the full validation suite and attaches the archive that suite produced, so the released ZIP is the one that was tested rather than a separate build. Release notes come from that changelog section.
+
+The version-changing commit must also contain the validated archive under `builds/`, as described in [Building](#building). The checked-in archive is a durable snapshot for the commit; the tagged release asset remains the archive produced and tested by the release workflow.
 
 ## Where to start
 

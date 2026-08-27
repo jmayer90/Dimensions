@@ -95,4 +95,5 @@ Standard semantic versioning. `MAJOR` for breaking changes to saved data or the 
 2. Update `version` in `dimensions/blender_manifest.toml`.
 3. Add a `docs/CHANGELOG.md` entry. If the version is a minor, state which trigger fired and why.
 4. Run `scripts/validate.ps1` and confirm the release gate in [DESIGN.md](DESIGN.md).
-5. Tag the commit and attach the built archive to a GitHub release.
+5. Put the validated `dimensions-<version>.zip` archive in `builds/` and include it in the version-changing commit. Significant feature commits must include the same kind of retained build even when the version does not change.
+6. Tag the commit and attach the workflow-built archive to a GitHub release.

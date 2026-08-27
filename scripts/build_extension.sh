@@ -39,9 +39,9 @@ fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -z "$output_directory" ]]; then
-    output_directory="$root/build"
+    output_directory="$root/builds"
 fi
-stage="$root/build/extension-stage"
+stage="$root/builds/extension-stage"
 
 rm -rf "$stage"
 mkdir -p "$stage" "$output_directory"

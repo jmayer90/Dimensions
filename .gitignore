@@ -8,9 +8,10 @@ __pycache__/
 .venv/
 venv/
 
-build/
 dist/
+builds/extension-stage/
 *.zip
+!builds/*.zip
 
 .idea/
 .vscode/

@@ -6,9 +6,9 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $OutputDirectory) {
-    $OutputDirectory = Join-Path $root "build"
+    $OutputDirectory = Join-Path $root "builds"
 }
-$stage = Join-Path $root "build\extension-stage"
+$stage = Join-Path $root "builds\extension-stage"
 if (Test-Path -LiteralPath $stage) {
     Remove-Item -LiteralPath $stage -Recurse -Force
 }

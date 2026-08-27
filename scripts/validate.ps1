@@ -41,7 +41,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Extension manifest validation failed" }
 
     & (Join-Path $PSScriptRoot "build_extension.ps1") -Blender $Blender
-    $archive = Get-ChildItem (Join-Path $root "build\dimensions-*.zip") |
+    $archive = Get-ChildItem (Join-Path $root "builds\dimensions-*.zip") |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
     if ($null -eq $archive) { throw "Extension archive was not created" }
