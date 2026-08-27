@@ -36,7 +36,7 @@ Acceptance checkboxes inside a ticket define its intended scope; they are not ma
 | M1 — Foundation | 🟨 Partial | `FND-01` through `FND-06` and `FND-08` through `FND-10` in 0.3.0 | `FND-07` foreground QA remains; `FND-11` is an M2 performance follow-up. |
 | M2 — Fluency | 🟨 Partial | `UX-01`, `UX-08` in 0.3.1 | `FND-11` is next; `UX-02` through `UX-07` remain. |
 | M3 — Construction | ⬜ Planned | — | `CON-01` through `CON-04`. |
-| M4 — Output | 🟨 Partial | Linear `OUT-01` in 0.4.0 | `OUT-04` and `OUT-03` are next; `OUT-02` follows. |
+| M4 — Output | 🟨 Partial | `OUT-01` in 0.4.0; angle/area `OUT-04` in 0.4.1 | `OUT-03` is next; `OUT-02` follows. |
 | M5 — Documentation-grade | 🟨 Partial | Architectural-tick slice of `DIM-04` in 0.3.2 | Remaining `DIM-04` plus `DIM-01` through `DIM-03`. |
 
 ## Index
@@ -89,14 +89,14 @@ Snapping lines and points as a first-class way to build dimensionally, not just 
 
 ### M4 — Output
 
-Milestone numbers group related work; they are not a strict delivery queue. The focused `UX-01` and `UX-08` work shipped in 0.3.1, architectural ticks in 0.3.2, and linear Grease Pencil generation in 0.4.0. `OUT-04` completes angle and area output; `OUT-02` and `OUT-03` retain their existing scopes and dependencies.
+Milestone numbers group related work; they are not a strict delivery queue. The focused `UX-01` and `UX-08` work shipped in 0.3.1, architectural ticks in 0.3.2, linear Grease Pencil generation in 0.4.0, and angle/area generation in 0.4.1. `OUT-02` and `OUT-03` retain their existing scopes and dependencies.
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | [OUT-01](OUT-01-grease-pencil-output.md) | Render path via generated Grease Pencil | ✅ Complete | 0.4.0 | L | FND-03 |
 | [OUT-02](OUT-02-vector-export.md) | SVG and PDF vector export | ⬜ Planned | — | L | OUT-01 |
 | [OUT-03](OUT-03-styles.md) | Named, reusable annotation styles | ⏭ Next | — | M | FND-02 |
-| [OUT-04](OUT-04-angle-area-output.md) | Extend generated output to angle and area annotations | ⏭ Next | — | M | OUT-01 |
+| [OUT-04](OUT-04-angle-area-output.md) | Extend generated output to angle and area annotations | ✅ Complete | 0.4.1 | M | OUT-01 |
 
 ### M5 — Documentation-grade dimensions
 
@@ -109,7 +109,7 @@ Milestone numbers group related work; they are not a strict delivery queue. The 
 
 ## Suggested order
 
-The M1 implementation, `UX-01`, `UX-08`, the architectural-tick slice, and linear `OUT-01` are delivered; `FND-07` still carries foreground QA. Next, complete angle/area generation in `OUT-04`, reusable styles in `OUT-03`, and the `FND-11` performance follow-up. `OUT-03` then unlocks the broader remaining `DIM-04` presentation work. Other M2 and M3 tickets can proceed alongside those workstreams.
+The M1 implementation, `UX-01`, `UX-08`, the architectural-tick slice, `OUT-01`, and angle/area `OUT-04` are delivered; `FND-07` still carries foreground QA. Next, complete reusable styles in `OUT-03` and the `FND-11` performance follow-up. `OUT-03` then unlocks the broader remaining `DIM-04` presentation work. Other M2 and M3 tickets can proceed alongside those workstreams.
 
 ## Effort key
 

@@ -25,9 +25,11 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 
 import dimensions
 from dimensions.collections import get_or_create_dimension_collection
-from dimensions.interaction import remember_session_context, session_context_changed
+from dimensions.drawing import _draw_interaction_status
+from dimensions.interaction import remember_session_context, session_axis, session_context_changed
 from dimensions.modal_state import PointPlacementState
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
+from dimensions.ui import CADDIM_PT_MainPanel
 
 from support import (
     EmptySnapProvider,
@@ -42,6 +44,35 @@ from support import (
 PICK_START = PointPlacementState.PICK_START
 PICK_END = PointPlacementState.PICK_END
 PLACE = PointPlacementState.PLACE
+
+
+class LayoutRecorder:
+    """Small stand-in for the sidebar layout used by the UI contract test."""
+
+    def __init__(self):
+        self.labels = []
+        self.properties = []
+        self.operators = []
+        self.enabled = True
+
+    def box(self):
+        return self
+
+    def column(self):
+        return self
+
+    def row(self):
+        return self
+
+    def label(self, *, text, **_kwargs):
+        self.labels.append(text)
+
+    def prop(self, target, name, **kwargs):
+        self.properties.append((target, name, kwargs))
+
+    def operator(self, identifier, **_kwargs):
+        self.operators.append(identifier)
+        return SimpleNamespace()
 
 
 class PointPlacementStateTests(unittest.TestCase):
@@ -192,6 +223,25 @@ class InteractionContextTests(unittest.TestCase):
         context.mode = "EDIT_MESH"
         self.assertTrue(session_context_changed(operator, context))
 
+    def test_sidebar_exposes_direction_before_a_placement_session_starts(self):
+        preferences = SimpleNamespace(default_axis_mode="Z")
+        layout = LayoutRecorder()
+        panel = SimpleNamespace(layout=layout)
+        context = make_context(scene=bpy.context.scene)
+
+        with (
+            patch("dimensions.ui.get_preferences", return_value=preferences),
+            patch("dimensions.preferences.get_preferences", return_value=preferences),
+        ):
+            CADDIM_PT_MainPanel.draw(panel, context)
+            self.assertEqual(session_axis(context), "Z")
+
+        self.assertIn("Next Placement Direction", layout.labels)
+        self.assertIn(
+            (preferences, "default_axis_mode", {"text": "Direction", "expand": True}),
+            layout.properties,
+        )
+
 
 class CreateDimensionModalTests(unittest.TestCase):
     """The operator as a thin adapter over the contract, with a scripted viewport."""
@@ -248,6 +298,22 @@ class CreateDimensionModalTests(unittest.TestCase):
     def test_axis_is_owned_by_the_machine(self):
         self.operator.dimension_type = "Z"
         self.assertEqual(self.operator._state_machine.axis, "Z")
+
+    def test_axis_can_be_selected_before_the_first_point_and_preview_explains_how(self):
+        with patch("dimensions.operators.create_dimension.set_preview_state") as set_preview:
+            result = self.operator.modal(self.context, make_event("Y", "PRESS"))
+
+        self.assertEqual(result, {"RUNNING_MODAL"})
+        self.assertEqual(self.operator.dimension_type, "Y")
+        preview = set_preview.call_args.args[0]
+        self.assertEqual(preview["axis"], "Y")
+        self.assertTrue(preview["axis_selectable"])
+
+    def test_selectable_axis_status_identifies_the_pre_pick_keys(self):
+        with patch("dimensions.drawing._draw_text_left") as draw_text:
+            _draw_interaction_status({"axis": "X", "axis_selectable": True})
+
+        self.assertIn("Direction: X (press A/X/Y/Z)", draw_text.call_args.args[0])
 
     def test_two_clicks_advance_to_the_placement_stage(self):
         self._pick_two_points()

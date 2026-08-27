@@ -14,10 +14,15 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 import dimensions
 from dimensions.anchors import set_world_anchor
+from dimensions.area_binding import bind_area_face_indices
 from dimensions.collections import create_dimension_object
 from dimensions.output_geometry import (
     TEXT_OUTPUT_SUPPORTED,
     WorldSizingPolicy,
+    angle_dimension_label_strokes,
+    angle_dimension_output_spec,
+    area_dimension_label_strokes,
+    area_dimension_output_spec,
     _linear_dimension_label_text,
     linear_dimension_label_layout,
     linear_dimension_label_strokes,
@@ -47,6 +52,31 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
         props.offset_distance = 1.0
         props.color = (0.2, 0.4, 0.8, 0.75)
         props.arrow_end_style = arrow_style
+        return dimension
+
+    def _angle_dimension(self):
+        dimension = create_dimension_object(self.context, "DIM Output Angle")
+        self.created.append(dimension)
+        props = dimension.dimension_props
+        props.annotation_kind = "ANGLE"
+        set_world_anchor(props.start, Vector((1.0, 0.0, 0.0)))
+        set_world_anchor(props.center, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(props.end, Vector((0.0, 1.0, 0.0)))
+        props.angle_radius = 0.5
+        props.color = (0.8, 0.3, 0.2, 1.0)
+        return dimension
+
+    def _captured_area_dimension(self):
+        dimension = create_dimension_object(self.context, "DIM Output Area")
+        self.created.append(dimension)
+        props = dimension.dimension_props
+        props.annotation_kind = "AREA"
+        props.measurement_state = "CAPTURED"
+        props.area_value = 4.0
+        props.area_face_count = 1
+        set_world_anchor(props.start, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(props.end, Vector((0.0, 2.0, 0.0)))
+        props.color = (0.2, 0.8, 0.3, 1.0)
         return dimension
 
     def test_linear_dimension_emits_dimension_extensions_and_open_arrows(self):
@@ -172,6 +202,104 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
 
         self.assertEqual(tuple(spec.strokes[0].points[0]), (0.0, 3.0, 3.0))
         self.assertEqual(tuple(spec.strokes[0].points[1]), (4.0, 3.0, 3.0))
+
+    def test_angle_output_emits_rays_arc_and_label_at_offset_position(self):
+        dimension = self._angle_dimension()
+        dimension.dimension_props.presentation_offset = (0.0, 0.0, 2.0)
+        spec = angle_dimension_output_spec(
+            dimension, "angle", WorldSizingPolicy(line_width=0.02, arrow_size=0.2)
+        )
+        self.assertIsNotNone(spec)
+        self.assertEqual(len(spec.strokes), 3)
+        self.assertEqual(tuple(spec.strokes[0].points[0]), (0.0, 0.0, 2.0))
+        self.assertEqual(tuple(spec.strokes[0].points[1]), (1.0, 0.0, 2.0))
+        self.assertGreater(len(spec.strokes[2].points), 2)
+        labels = angle_dimension_label_strokes(
+            bpy.context, dimension, 0.15, 0.02
+        )
+        self.assertGreater(len(labels), 0)
+
+    def test_angle_output_supports_minor_supplement_and_reflex_modes(self):
+        dimension = self._angle_dimension()
+        sizing = WorldSizingPolicy(line_width=0.02, arrow_size=0.2)
+        arc_midpoints = {}
+        for mode in ("MINOR", "SUPPLEMENT", "REFLEX"):
+            dimension.dimension_props.angle_mode = mode
+            spec = angle_dimension_output_spec(dimension, mode.lower(), sizing)
+            self.assertIsNotNone(spec)
+            arc = spec.strokes[2].points
+            arc_midpoints[mode] = arc[len(arc) // 2]
+        self.assertGreater(arc_midpoints["MINOR"].x, 0.0)
+        self.assertGreater(arc_midpoints["MINOR"].y, 0.0)
+        self.assertLess(arc_midpoints["SUPPLEMENT"].y, 0.0)
+        self.assertLess(arc_midpoints["REFLEX"].x, 0.0)
+
+    def test_captured_area_output_emits_leader_marker_and_label(self):
+        dimension = self._captured_area_dimension()
+        spec = area_dimension_output_spec(
+            dimension, "area", WorldSizingPolicy(line_width=0.02, arrow_size=0.2)
+        )
+        self.assertIsNotNone(spec)
+        self.assertEqual(len(spec.strokes), 3)
+        self.assertEqual(tuple(spec.strokes[0].points[0]), (0.0, 0.0, 0.0))
+        self.assertEqual(tuple(spec.strokes[0].points[1]), (0.0, 2.0, 0.0))
+        labels = area_dimension_label_strokes(
+            bpy.context, dimension, 0.15, 0.02
+        )
+        self.assertGreater(len(labels), 0)
+
+    def test_live_area_output_evaluates_bound_faces_in_world_space(self):
+        mesh = bpy.data.meshes.new("DimensionsLiveAreaOutputMesh")
+        mesh.from_pydata(
+            [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
+            [],
+            [(0, 1, 2, 3)],
+        )
+        source = bpy.data.objects.new("DimensionsLiveAreaOutputSource", mesh)
+        bpy.context.scene.collection.objects.link(source)
+        source.location = (1.0, 2.0, 0.0)
+        bpy.context.view_layer.update()
+        dimension = create_dimension_object(self.context, "DIM Output Live Area")
+        self.created.append(dimension)
+        try:
+            props = dimension.dimension_props
+            props.annotation_kind = "AREA"
+            result = bind_area_face_indices(props, source, [0])
+            self.assertIsNotNone(result)
+            props.area_placement_locked = True
+            props.area_label_direction = (1.0, 0.0, 0.0)
+            props.offset_distance = 2.0
+            spec = area_dimension_output_spec(
+                dimension, "live-area", WorldSizingPolicy(0.02, 0.2)
+            )
+            self.assertIsNotNone(spec)
+            self.assertEqual(tuple(spec.strokes[0].points[0]), (2.0, 2.5, 0.0))
+            self.assertEqual(tuple(spec.strokes[0].points[1]), (4.0, 2.5, 0.0))
+            self.assertGreater(len(area_dimension_label_strokes(self.context, dimension, 0.15, 0.02)), 0)
+        finally:
+            if source.name in bpy.data.objects:
+                bpy.data.objects.remove(source, do_unlink=True)
+            if mesh.name in bpy.data.meshes:
+                bpy.data.meshes.remove(mesh)
+
+    def test_area_output_applies_presentation_offset_only_to_the_label_end(self):
+        dimension = self._captured_area_dimension()
+        dimension.dimension_props.presentation_offset = (1.0, 0.0, 3.0)
+        spec = area_dimension_output_spec(
+            dimension, "area-offset", WorldSizingPolicy(line_width=0.02, arrow_size=0.2)
+        )
+
+        self.assertEqual(tuple(spec.strokes[0].points[0]), (0.0, 0.0, 0.0))
+        self.assertEqual(tuple(spec.strokes[0].points[1]), (1.0, 2.0, 3.0))
+
+    def test_area_needs_repair_is_not_renderable(self):
+        dimension = self._captured_area_dimension()
+        dimension.dimension_props.measurement_state = "NEEDS_REPAIR"
+        self.assertIsNone(
+            area_dimension_output_spec(
+                dimension, "invalid-area", WorldSizingPolicy(0.02, 0.2)
+            )
+        )
 
 
 def main():

@@ -503,6 +503,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         preview = {
             "state": self.state,
             "axis": self.dimension_type,
+            "axis_selectable": self._state_machine.accepts_axis_lock,
             "dimension_type": self.dimension_type,
             "offset_distance": self.offset_distance,
             "distance_text": self.distance_text,

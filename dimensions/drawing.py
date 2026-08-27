@@ -797,7 +797,10 @@ def _draw_interaction_status(state):
     axis = state.get("axis")
     if axis is not None:
         prefix = "MMB " if state.get("axis_gesture_active") else ""
-        parts.append(f"{prefix}{'Auto' if axis == 'ALIGNED' else axis} Axis")
+        direction = f"{prefix}Direction: {'Auto' if axis == 'ALIGNED' else axis}"
+        if state.get("axis_selectable"):
+            direction += " (press A/X/Y/Z)"
+        parts.append(direction)
     distance_text = state.get("distance_text", "").strip()
     if distance_text:
         parts.append(f"Input: {distance_text}")

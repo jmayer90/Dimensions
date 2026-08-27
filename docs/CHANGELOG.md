@@ -2,6 +2,13 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
+## 0.4.1 — Unreleased
+
+- Added Grease Pencil generation for angle and area annotations. Minor, supplement, and reflex angles preserve their rays, arcs, labels, colors, and presentation offsets; valid Live and Captured areas preserve their leaders, labels, colors, and placement.
+- Extended Selected and Visible output scope, Camera Relative and World Scale sizing, per-annotation regeneration, and mixed EEVEE/Cycles render coverage across linear, angle, and area annotations. Areas in Needs Repair are skipped with an actionable warning.
+- Restored a discoverable pre-placement direction workflow: the main sidebar now exposes **Next Placement Direction** with Auto/X/Y/Z choices, and the placement HUD identifies the active direction and its `A`/`X`/`Y`/`Z` keys before the first point.
+- This remains a patch release under the version policy: it extends the established output and interaction surfaces without breaking saved data or the documented interaction contract.
+
 ## 0.4.0 — August 27, 2026
 
 - Added explicit Grease Pencil generation for selected or all visible linear dimensions. Generated output contains dimension and extension lines, open arrows or architectural ticks, vector-stroke labels, prefixes, suffixes, tolerances, custom text, and per-annotation color. Labels preserve Inline, Above, and Outside placement plus custom-text ordering.

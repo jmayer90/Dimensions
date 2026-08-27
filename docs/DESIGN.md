@@ -45,9 +45,9 @@ Annotations are Empty objects with presentation properties and an annotation kin
 
 ### Generated output
 
-The live overlay remains the editable source of truth. An explicit operator resolves visible or selected linear annotations into world-space stroke specifications, then creates separate Grease Pencil v3 objects in an exclusive scene-owned `Dimensions Output` collection. Grease Pencil was chosen over curves or meshes because it is Blender's native stroke surface, remains editable, and is verified to render in EEVEE and Cycles. A scene-owned object-pointer registry assigns persistent source keys without modifying annotation objects; regeneration replaces only the matching artifact, and the UI warns that hand edits are disposable. Existing user collections with the same display name are never adopted.
+The live overlay remains the editable source of truth. An explicit operator resolves visible or selected linear, angle, and valid Live or Captured area annotations into world-space stroke specifications, then creates separate Grease Pencil v3 objects in an exclusive scene-owned `Dimensions Output` collection. Areas in Needs Repair are skipped until their sources are repaired. Grease Pencil was chosen over curves or meshes because it is Blender's native stroke surface, remains editable, and is verified to render in EEVEE and Cycles. A scene-owned object-pointer registry assigns persistent source keys without modifying annotation objects; regeneration replaces only the matching artifact, and the UI warns that hand edits are disposable. Existing user collections with the same display name are never adopted.
 
-Camera Relative sizing converts configured render pixels to world units at each annotation's midpoint depth and is the default. World Scale sizing uses explicit scene-unit values. Labels use a bundled single-line vector font so text, tolerances, and custom notes remain Grease Pencil strokes instead of introducing a second render-object type; their Inline, Above, Outside, and custom-text ordering rules mirror the live overlay. For a linear annotation whose endpoints share camera depth, camera-relative layout targets agreement within one output pixel. A perspective line spanning materially different depths uses the documented midpoint approximation. The initial surface is deliberately linear-only; angle and area output build on the same backend in [OUT-04](tickets/OUT-04-angle-area-output.md).
+Camera Relative sizing converts configured render pixels to world units at each annotation's midpoint depth and is the default. World Scale sizing uses explicit scene-unit values. Labels use a bundled single-line vector font so text, tolerances, custom notes, degree signs, and squared-unit suffixes remain Grease Pencil strokes instead of introducing a second render-object type. Linear Inline, Above, Outside, and custom-text ordering rules mirror the live overlay; angle rays/arcs and area leaders preserve their live world positions and presentation offsets. For a linear annotation whose endpoints share camera depth, camera-relative layout targets agreement within one output pixel. A perspective annotation spanning materially different depths uses the documented midpoint approximation. [OUT-04](tickets/OUT-04-angle-area-output.md) extends the same backend across all persistent annotation kinds.
 
 ### Saved-data schema
 
@@ -116,7 +116,7 @@ Set `DIMENSIONS_SNAP_PROFILE=1` for the add-on's own per-stage build, reproject,
 1. **Snap cache build cost on very dense scenes.** Query and draw costs are measured and within budget (see [Measured performance](#measured-performance)). Building the projected snap source cache is not: a 1M-vertex scene takes about 4.9 s because `_build_sources()` allocates one dictionary per vertex and projects each one individually. Caching around the outside cannot fix a per-vertex constant, so [FND-11](tickets/FND-11-snap-cache-build-cost.md) tracks replacing the per-vertex objects with bulk array reads. Scenes at or below 100k vertices build in under 0.4 s and are usable now.
 2. **Duplicated anchor IDs.** Blender topology duplication may copy a point ID. Resolution chooses the candidate closest to the stored fallback coordinate.
 3. **Face identity after topology duplication.** Live Areas use persistent face IDs. Missing, structurally changed, or duplicated identities intentionally enter Needs Repair instead of guessing; modifier-evaluated face correspondence is not yet defined.
-4. **Partial annotation-kind output.** Renderable linear dimensions shipped in 0.4.0 with camera/world sizing and vector labels. Angle and area annotations do not generate yet; [OUT-04](tickets/OUT-04-angle-area-output.md) extends the established backend. Generated objects are snapshots and intentionally lose hand edits when regenerated.
+4. **Snapshot output.** Renderable linear dimensions shipped in 0.4.0 and angle/area coverage in 0.4.1. Generated objects are snapshots and intentionally lose hand edits when regenerated; measurements and construction guides remain viewport/construction data.
 5. **Proxy lifecycle.** Native measurement snap proxies clear transient caches on undo/redo and linked annotations are read-only. Background lifecycle tests cover save/reload, proxy repair, duplicate proxy cleanup, and visibility. Append/link, library override, and two-window foreground QA remain release requirements because Blender background mode cannot exercise them.
 
 ## Lifecycle behavior matrix
@@ -140,8 +140,8 @@ The canonical ticket status, milestone rollup, and status legend live in the [wo
 
 | Order | Work | Status | Outcome |
 | --- | --- | --- | --- |
-| 1 | 0.4.0 foreground and Blender 5.1 release QA | 🔍 Release QA | Validate the completed linear-output package in a clean interactive install. |
-| 2 | [OUT-04](tickets/OUT-04-angle-area-output.md) | ⏭ Next | Add angle and area Grease Pencil generation. |
+| 1 | 0.4.1 foreground and Blender 5.1 release QA | 🔍 Release QA | Validate direction preselection and all-kind output in a clean interactive install. |
+| 2 | [OUT-04](tickets/OUT-04-angle-area-output.md) | ✅ Complete | Angle and area Grease Pencil generation delivered in 0.4.1. |
 | 3 | [OUT-03](tickets/OUT-03-styles.md) | ⏭ Next | Add reusable named styles and unblock remaining presentation controls. |
 | Parallel | [FND-11](tickets/FND-11-snap-cache-build-cost.md) | ⏭ Next | Bring the 1M-vertex projected snap-cache build within budget. |
 | After OUT-03 | [DIM-04](tickets/DIM-04-presentation-controls.md) | 🟨 Partial | Complete the presentation controls beyond shipped architectural ticks. |
@@ -153,7 +153,7 @@ Early public feedback reinforces the product definition rather than expanding it
 | --- | --- | --- |
 | Keep placing dimensions without leaving the tool | Accepted and delivered | [UX-01](tickets/UX-01-continuous-placement.md), delivered in 0.3.1 |
 | Choose Auto/X/Y/Z once, place a group, then switch direction | Accepted and delivered with repeated placement | [UX-01](tickets/UX-01-continuous-placement.md), delivered in 0.3.1 |
-| Render dimensions | Accepted; linear path delivered | [OUT-01](tickets/OUT-01-grease-pencil-output.md), delivered in 0.4.0; angle and area follow in [OUT-04](tickets/OUT-04-angle-area-output.md) |
+| Render dimensions | Accepted and delivered for all annotation kinds | Linear [OUT-01](tickets/OUT-01-grease-pencil-output.md) in 0.4.0; angle and area [OUT-04](tickets/OUT-04-angle-area-output.md) in 0.4.1 |
 | Replace arrows with architectural tick marks | Accepted and delivered | First slice of [DIM-04](tickets/DIM-04-presentation-controls.md), delivered in 0.3.2 with global and per-annotation controls |
 | Keep numeric labels from growing | Existing behavior verified and documented | [UX-08](tickets/UX-08-stable-overlay-sizing.md), delivered in 0.3.1; any zoom- or transform-driven growth is a bug |
 
@@ -170,7 +170,7 @@ Early public feedback reinforces the product definition rather than expanding it
 
 ### P1 — Renderable output, precision inference, and management
 
-- ⏭ **Next** — extend the shipped linear Grease Pencil path to angle and area annotations in [OUT-04](tickets/OUT-04-angle-area-output.md).
+- ✅ **Complete** — extend the shipped linear Grease Pencil path to angle and area annotations in [OUT-04](tickets/OUT-04-angle-area-output.md), delivered in 0.4.1.
 - ⬜ **Planned** — add local-axis, parallel, perpendicular, extension, intersection, and active-plane inference in [UX-03](tickets/UX-03-inference-engine.md).
 - ⬜ **Planned** — add search, rename, select, hide, isolate, repair, and bulk style operations in [UX-02](tickets/UX-02-annotation-manager.md).
 - ⬜ **Planned** — add temporary hover measurement with delta X/Y/Z in [UX-06](tickets/UX-06-hover-measurement.md).

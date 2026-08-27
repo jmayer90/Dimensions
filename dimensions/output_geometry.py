@@ -6,14 +6,17 @@ labels as world-space strokes for the Grease Pencil backend.
 """
 
 from dataclasses import dataclass
+from math import degrees
 
 from mathutils import Vector
 
 from .anchors import resolve_anchor
-from .dimension_geometry import get_dimension_world_geometry
+from .angle_binding import resolve_angle_source
+from .area_binding import area_label_world, evaluate_area_binding
+from .dimension_geometry import get_angle_world_geometry, get_dimension_world_geometry
 from .grease_pencil_output import GreasePencilOutputSpec, OutputStroke
 from .stroke_font import text_block_dimensions, text_strokes
-from .units import format_length
+from .units import format_area, format_length
 
 
 TEXT_OUTPUT_SUPPORTED = True
@@ -43,6 +46,40 @@ class LinearLabelLayout:
 
     strokes: tuple
     dimension_line_strokes: tuple = ()
+
+
+def _camera_axes(camera, fallback_x, fallback_y):
+    """Return stable world-space axes for vector labels facing the camera."""
+    if camera is not None and getattr(camera, "type", None) == "CAMERA":
+        rotation = camera.matrix_world.to_quaternion()
+        return (
+            (rotation @ Vector((1.0, 0.0, 0.0))).normalized(),
+            (rotation @ Vector((0.0, 1.0, 0.0))).normalized(),
+        )
+    x_axis = Vector(fallback_x)
+    if x_axis.length <= 1e-6:
+        x_axis = Vector((1.0, 0.0, 0.0))
+    x_axis.normalize()
+    y_axis = Vector(fallback_y)
+    y_axis = y_axis - x_axis * y_axis.dot(x_axis)
+    if y_axis.length <= 1e-6:
+        y_axis = Vector((0.0, 0.0, 1.0))
+        y_axis = y_axis - x_axis * y_axis.dot(x_axis)
+    if y_axis.length <= 1e-6:
+        y_axis = x_axis.orthogonal()
+    y_axis.normalize()
+    return x_axis, y_axis
+
+
+def _text_strokes_at(text, position, text_height, line_width, color, camera=None,
+                     fallback_x=(1.0, 0.0, 0.0), fallback_y=(0.0, 0.0, 1.0)):
+    x_axis, y_axis = _camera_axes(camera, fallback_x, fallback_y)
+    block_width, block_height = text_block_dimensions(text, text_height)
+    origin = Vector(position) + y_axis * (block_height * 0.5 - text_height)
+    return tuple(
+        OutputStroke(points=polyline, color=color, line_width=line_width)
+        for polyline in text_strokes(text, origin, x_axis, y_axis, text_height, "CENTER")
+    )
 
 
 def _open_arrow_strokes(point, direction, perpendicular, color, sizing):
@@ -143,6 +180,197 @@ def linear_dimension_output_spec(dimension_object, source_key, sizing):
         source_key=source_key,
         strokes=tuple(strokes),
         name=getattr(dimension_object, "name", "Dimensions Output"),
+    )
+
+
+def angle_dimension_output_spec(dimension_object, source_key, sizing):
+    """Convert a live two-edge or three-point angle into world-space strokes."""
+    if not isinstance(sizing, WorldSizingPolicy):
+        raise TypeError("sizing must be a WorldSizingPolicy")
+    if not isinstance(source_key, str) or not source_key.strip():
+        raise ValueError("source_key must be a non-empty string")
+
+    props = getattr(dimension_object, "dimension_props", None)
+    if (
+        props is None
+        or not getattr(props, "enabled", False)
+        or getattr(props, "annotation_kind", "LINEAR") != "ANGLE"
+    ):
+        return None
+    source = resolve_angle_source(props)
+    if source is None:
+        return None
+    presentation_offset = Vector(getattr(props, "presentation_offset", (0.0, 0.0, 0.0)))
+    start = Vector(source["start"]) + presentation_offset
+    center = Vector(source["center"]) + presentation_offset
+    end = Vector(source["end"]) + presentation_offset
+    geometry = get_angle_world_geometry(
+        start,
+        center,
+        end,
+        float(props.angle_radius),
+        source.get("arc_mode", "MINOR"),
+    )
+    if geometry is None:
+        return None
+    color = tuple(float(channel) for channel in props.color)
+    strokes = [
+        OutputStroke((center, start), color, sizing.line_width),
+        OutputStroke((center, end), color, sizing.line_width),
+        OutputStroke(tuple(geometry["arc_points_world"]), color, sizing.line_width),
+    ]
+    return GreasePencilOutputSpec(
+        source_key=source_key,
+        strokes=tuple(strokes),
+        name=getattr(dimension_object, "name", "Dimensions Output"),
+    )
+
+
+def area_dimension_output_spec(dimension_object, source_key, sizing):
+    """Convert a valid live or captured Area into a leader and center marker."""
+    if not isinstance(sizing, WorldSizingPolicy):
+        raise TypeError("sizing must be a WorldSizingPolicy")
+    if not isinstance(source_key, str) or not source_key.strip():
+        raise ValueError("source_key must be a non-empty string")
+
+    props = getattr(dimension_object, "dimension_props", None)
+    if (
+        props is None
+        or not getattr(props, "enabled", False)
+        or getattr(props, "annotation_kind", "LINEAR") != "AREA"
+        or props.measurement_state == "NEEDS_REPAIR"
+    ):
+        return None
+    result = evaluate_area_binding(props) if props.measurement_state != "CAPTURED" else None
+    if result is None:
+        if props.measurement_state != "CAPTURED":
+            return None
+        center = resolve_anchor(props.start)
+        value = float(props.area_value)
+        if center is None or value <= 0.0:
+            return None
+    else:
+        center = Vector(result["center"])
+        value = float(result["area"])
+    fallback_end = resolve_anchor(props.end)
+    label = area_label_world(props, center, fallback_end)
+    presentation_offset = Vector(getattr(props, "presentation_offset", (0.0, 0.0, 0.0)))
+    label += presentation_offset
+    color = tuple(float(channel) for channel in props.color)
+    direction = label - center
+    if direction.length <= 1e-6:
+        direction = Vector((1.0, 0.0, 0.0))
+    direction.normalize()
+    normal = Vector(result["normal"]) if result is not None else direction.orthogonal()
+    normal = normal - direction * normal.dot(direction)
+    if normal.length <= 1e-6:
+        normal = direction.orthogonal()
+    normal.normalize()
+    half_marker = sizing.arrow_size * 0.5
+    marker_direction = normal.cross(direction)
+    if marker_direction.length <= 1e-6:
+        marker_direction = direction.orthogonal()
+    marker_direction.normalize()
+    marker_cross = marker_direction * half_marker
+    marker_up = normal * half_marker
+    strokes = [
+        OutputStroke((center, label), color, sizing.line_width),
+        OutputStroke((center - marker_cross, center + marker_cross), color, sizing.line_width),
+        OutputStroke((center - marker_up, center + marker_up), color, sizing.line_width),
+    ]
+    return GreasePencilOutputSpec(
+        source_key=source_key,
+        strokes=tuple(strokes),
+        name=getattr(dimension_object, "name", "Dimensions Output"),
+    )
+
+
+def _angle_dimension_label_text(context, props, value):
+    precision = min(max(int(getattr(context.scene.dimensions_settings, "precision", 3)), 0), 3)
+    label = f"{props.value_prefix}{degrees(value):.{precision}f}\N{DEGREE SIGN}{props.value_suffix}"
+    custom_text = props.custom_text.strip()
+    if custom_text:
+        label = f"{custom_text}\n{label}" if props.custom_text_position != "BELOW" else f"{label}\n{custom_text}"
+    return label
+
+
+def angle_dimension_label_strokes(context, dimension_object, text_height, line_width, camera=None):
+    props = getattr(dimension_object, "dimension_props", None)
+    if props is None or getattr(props, "annotation_kind", "LINEAR") != "ANGLE":
+        return ()
+    source = resolve_angle_source(props)
+    if source is None:
+        return ()
+    offset = Vector(getattr(props, "presentation_offset", (0.0, 0.0, 0.0)))
+    geometry = get_angle_world_geometry(
+        Vector(source["start"]) + offset,
+        Vector(source["center"]) + offset,
+        Vector(source["end"]) + offset,
+        float(props.angle_radius),
+        source.get("arc_mode", "MINOR"),
+    )
+    if geometry is None:
+        return ()
+    color = tuple(float(channel) for channel in props.color)
+    return _text_strokes_at(
+        _angle_dimension_label_text(context, props, geometry["value"]),
+        geometry["label_world"],
+        text_height,
+        line_width,
+        color,
+        camera,
+        geometry["arc_points_world"][0] - geometry["center_world"],
+        geometry["plane_normal_world"],
+    )
+
+
+def _area_dimension_label_text(context, props, value, face_count, state):
+    precision = getattr(context.scene.dimensions_settings, "precision", 3)
+    label = f"Area {props.value_prefix}{format_area(context, value, precision)}{props.value_suffix}"
+    if face_count > 1:
+        label += f" ({face_count} faces)"
+    if state == "CAPTURED":
+        label += " [Captured]"
+    custom_text = props.custom_text.strip()
+    if custom_text:
+        label = f"{custom_text}\n{label}" if props.custom_text_position != "BELOW" else f"{label}\n{custom_text}"
+    return label
+
+
+def area_dimension_label_strokes(context, dimension_object, text_height, line_width, camera=None):
+    props = getattr(dimension_object, "dimension_props", None)
+    if (
+        props is None
+        or getattr(props, "annotation_kind", "LINEAR") != "AREA"
+        or props.measurement_state == "NEEDS_REPAIR"
+    ):
+        return ()
+    result = evaluate_area_binding(props) if props.measurement_state != "CAPTURED" else None
+    if result is None:
+        if props.measurement_state != "CAPTURED":
+            return ()
+        center = resolve_anchor(props.start)
+        value = float(props.area_value)
+        face_count = int(props.area_face_count)
+        if center is None or value <= 0.0:
+            return ()
+    else:
+        center = Vector(result["center"])
+        value = float(result["area"])
+        face_count = int(result["face_count"])
+    label_position = area_label_world(props, center, resolve_anchor(props.end))
+    label_position += Vector(getattr(props, "presentation_offset", (0.0, 0.0, 0.0)))
+    color = tuple(float(channel) for channel in props.color)
+    direction = label_position - center
+    return _text_strokes_at(
+        _area_dimension_label_text(context, props, value, face_count, props.measurement_state),
+        label_position,
+        text_height,
+        line_width,
+        color,
+        camera,
+        direction,
+        Vector((0.0, 0.0, 1.0)),
     )
 
 

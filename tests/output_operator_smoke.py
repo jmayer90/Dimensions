@@ -1,6 +1,7 @@
 """Focused Blender smoke tests for the OUT-01 generation workflow."""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from time import perf_counter
@@ -58,6 +59,29 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
         dimension.location = _annotation_world_depth_point(dimension)
         self.created.append(dimension)
         return dimension
+
+    def _angle(self, name):
+        annotation = self._dimension(name)
+        props = annotation.dimension_props
+        props.annotation_kind = "ANGLE"
+        set_world_anchor(props.start, Vector((1.0, 0.0, 0.0)))
+        set_world_anchor(props.center, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(props.end, Vector((0.0, 1.0, 0.0)))
+        props.angle_radius = 0.5
+        annotation.location = (0.0, 0.0, 0.0)
+        return annotation
+
+    def _captured_area(self, name):
+        annotation = self._dimension(name)
+        props = annotation.dimension_props
+        props.annotation_kind = "AREA"
+        props.measurement_state = "CAPTURED"
+        props.area_value = 4.0
+        props.area_face_count = 1
+        set_world_anchor(props.start, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(props.end, Vector((0.0, 2.0, 0.0)))
+        annotation.location = (0.0, 1.0, 0.0)
+        return annotation
 
     def _remove_existing_output(self):
         for output in generated_output_objects(self.scene):
@@ -191,6 +215,12 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
             places=6,
         )
 
+    def test_area_camera_depth_uses_the_offset_label_not_the_source_center(self):
+        area = self._captured_area("DIM Output Area Depth")
+        area.dimension_props.presentation_offset = (0.0, 0.0, 4.0)
+
+        self.assertEqual(tuple(_annotation_world_depth_point(area)), (0.0, 1.0, 2.0))
+
     def test_operator_generates_only_visible_annotations_in_scope(self):
         self._remove_existing_output()
         settings = self.scene.dimensions_settings
@@ -227,6 +257,149 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
         self.assertEqual(len(outputs), 1)
         self.assertEqual(outputs[0].get("dimensions_output_source_key"), annotation_output_key(self.scene, selected))
         self.created.extend(outputs)
+
+    def test_operator_generates_mixed_linear_angle_and_captured_area_output(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_sizing_mode = "WORLD"
+        settings.output_scope = "VISIBLE"
+        linear = self._dimension("DIM Output Mixed Linear")
+        angle = self._angle("DIM Output Mixed Angle")
+        area = self._captured_area("DIM Output Mixed Area")
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        outputs = generated_output_objects(self.scene)
+        self.created.extend(outputs)
+        self.assertEqual(len(outputs), 3)
+        keys = {output.get("dimensions_output_source_key") for output in outputs}
+        self.assertEqual(
+            keys,
+            {
+                annotation_output_key(self.scene, linear),
+                annotation_output_key(self.scene, angle),
+                annotation_output_key(self.scene, area),
+            },
+        )
+        self.assertTrue(all(len(output.data.layers[0].frames[0].drawing.strokes) > 2 for output in outputs))
+
+    def test_regenerating_angle_and_area_replaces_only_matching_artifact(self):
+        self._remove_existing_output()
+        self.addCleanup(self._remove_existing_output)
+        settings = self.scene.dimensions_settings
+        settings.output_sizing_mode = "WORLD"
+        settings.output_scope = "SELECTED"
+        angle = self._angle("DIM Output Regenerate Angle")
+        area = self._captured_area("DIM Output Regenerate Area")
+        angle.select_set(True)
+        area.select_set(True)
+        bpy.context.view_layer.objects.active = angle
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        angle_key = annotation_output_key(self.scene, angle)
+        area_key = annotation_output_key(self.scene, area)
+        original_angle = generated_output_objects(self.scene, angle_key)[0]
+        original_area = generated_output_objects(self.scene, area_key)[0]
+
+        angle.select_set(True)
+        area.select_set(False)
+        bpy.context.view_layer.objects.active = angle
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        replaced_angle = generated_output_objects(self.scene, angle_key)[0]
+        self.assertIsNot(replaced_angle, original_angle)
+        self.assertIs(generated_output_objects(self.scene, area_key)[0], original_area)
+
+        angle.select_set(False)
+        area.select_set(True)
+        bpy.context.view_layer.objects.active = area
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        replaced_area = generated_output_objects(self.scene, area_key)[0]
+        self.assertIsNot(replaced_area, original_area)
+        self.assertIs(generated_output_objects(self.scene, angle_key)[0], replaced_angle)
+
+    def test_mixed_annotations_render_in_eevee_and_cycles(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_sizing_mode = "WORLD"
+        settings.output_scope = "VISIBLE"
+        self._dimension("DIM Output Render Linear", start=(-2.0, -1.0, 0.0), end=(2.0, -1.0, 0.0))
+        self._angle("DIM Output Render Angle")
+        self._captured_area("DIM Output Render Area")
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        outputs = generated_output_objects(self.scene)
+        self.created.extend(outputs)
+
+        camera_data = bpy.data.cameras.new("Dimensions Mixed Output Camera")
+        camera = bpy.data.objects.new("Dimensions Mixed Output Camera", camera_data)
+        self.scene.collection.objects.link(camera)
+        world = bpy.data.worlds.new("Dimensions Mixed Output World")
+        world.use_nodes = True
+        world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.0, 0.0, 0.0, 1.0)
+        world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.0
+        render = self.scene.render
+        original = (
+            render.engine,
+            self.scene.camera,
+            self.scene.world,
+            render.resolution_x,
+            render.resolution_y,
+            render.resolution_percentage,
+            render.filepath,
+            render.film_transparent,
+        )
+        unsupported = []
+        try:
+            self.scene.camera = camera
+            self.scene.world = world
+            camera.location = (0.0, 0.0, 8.0)
+            camera_data.type = "ORTHO"
+            camera_data.ortho_scale = 6.0
+            camera_data.clip_start = 0.1
+            camera_data.clip_end = 100.0
+            render.resolution_x = 128
+            render.resolution_y = 128
+            render.resolution_percentage = 100
+            render.film_transparent = False
+            with tempfile.TemporaryDirectory(prefix="dimensions-mixed-output-render-") as directory:
+                for engine in ("BLENDER_EEVEE", "CYCLES"):
+                    try:
+                        render.engine = engine
+                    except (TypeError, ValueError) as error:
+                        unsupported.append(f"{engine}: {error}")
+                        continue
+                    render.filepath = str(Path(directory) / f"{engine}.png")
+                    if engine == "CYCLES":
+                        self.scene.cycles.samples = 1
+                    try:
+                        bpy.ops.render.render(write_still=True)
+                    except (RuntimeError, OSError) as error:
+                        if engine == "CYCLES":
+                            unsupported.append(f"{engine}: {error}")
+                            continue
+                        raise
+                    image = bpy.data.images.load(render.filepath, check_existing=False)
+                    try:
+                        pixels = [0.0] * (image.size[0] * image.size[1] * 4)
+                        image.pixels.foreach_get(pixels)
+                        self.assertTrue(
+                            any(max(pixels[index:index + 3]) > 0.05 for index in range(0, len(pixels), 4)),
+                            f"{engine} rendered an empty mixed annotation image",
+                        )
+                    finally:
+                        bpy.data.images.remove(image)
+            self.assertNotIn("BLENDER_EEVEE", {item.split(":", 1)[0] for item in unsupported})
+        finally:
+            if camera.name in bpy.data.objects:
+                bpy.data.objects.remove(camera, do_unlink=True)
+            if camera_data.name in bpy.data.cameras:
+                bpy.data.cameras.remove(camera_data)
+            if world.name in bpy.data.worlds:
+                bpy.data.worlds.remove(world)
+            render.engine = original[0]
+            self.scene.camera = original[1]
+            self.scene.world = original[2]
+            render.resolution_x = original[3]
+            render.resolution_y = original[4]
+            render.resolution_percentage = original[5]
+            render.filepath = original[6]
+            render.film_transparent = original[7]
 
     def test_generating_one_hundred_linear_annotations_stays_interactive(self):
         self._remove_existing_output()

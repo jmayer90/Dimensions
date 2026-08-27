@@ -43,8 +43,11 @@ CREATED_DIMENSION = "Created dimension"
 CREATED_GUIDE = "Created construction guide"
 CREATED_MEASUREMENT = "Created persistent measurement"
 OUTPUT_NO_LINEAR_ANNOTATIONS = "No visible linear annotations match the output scope"
+OUTPUT_NO_ANNOTATIONS = "No visible annotations match the output scope"
 OUTPUT_CAMERA_REQUIRED = "Set an active camera for Camera Relative output sizing"
 OUTPUT_NO_VALID_LINEAR_ANNOTATIONS = "No valid linear annotations could be generated"
+OUTPUT_NO_VALID_ANNOTATIONS = "No valid annotations could be generated"
+OUTPUT_AREA_REPAIR_REQUIRED = "Repair skipped Area sources before generating output"
 
 
 def invalid_distance(value):
@@ -93,8 +96,10 @@ def cleared_measurements(count):
     return f"Removed {count} measurement(s)"
 
 
-def generated_output(generated, skipped=0):
-    message = f"Generated Grease Pencil output for {generated} linear annotation(s)"
+def generated_output(generated, skipped=0, skipped_repair=0):
+    message = f"Generated Grease Pencil output for {generated} annotation(s)"
     if skipped:
         message += f"; skipped {skipped} unavailable annotation(s)"
+    if skipped_repair:
+        message += "; repair skipped Area source(s)"
     return message

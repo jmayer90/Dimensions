@@ -1,6 +1,7 @@
 import bpy
 
 from .constants import SIDEBAR_CATEGORY
+from .preferences import get_preferences
 from .properties import is_dimension_object
 from .units import format_area, format_length, get_configured_unit_style
 
@@ -16,6 +17,14 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_idname = "CADDIM_PT_main_panel"
 
     def draw(self, context):
+        direction = self.layout.box()
+        direction.label(text="Next Placement Direction")
+        direction.prop(
+            get_preferences(context),
+            "default_axis_mode",
+            text="Direction",
+            expand=True,
+        )
         annotation_tools = self.layout.column()
         annotation_tools.enabled = context.mode in {"OBJECT", "EDIT_MESH"}
         annotation_tools.operator("dimensions.create_dimension", icon="DRIVER_DISTANCE")

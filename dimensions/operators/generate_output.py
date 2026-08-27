@@ -9,10 +9,16 @@ from mathutils import Vector
 
 from .. import messages
 from ..anchors import resolve_anchor
+from ..angle_binding import resolve_angle_source
+from ..area_binding import area_label_world, evaluate_area_binding
 from ..dimension_geometry import get_dimension_world_geometry
 from ..grease_pencil_output import generate_grease_pencil_output
 from ..output_geometry import (
     WorldSizingPolicy,
+    angle_dimension_label_strokes,
+    angle_dimension_output_spec,
+    area_dimension_label_strokes,
+    area_dimension_output_spec,
     linear_dimension_label_layout,
     linear_dimension_output_spec,
 )
@@ -32,14 +38,14 @@ def _is_visible(context, obj):
             return not obj.hide_get()
 
 
-def linear_annotations_for_output(context, scope):
-    """Return eligible visible linear annotations in deterministic scene order."""
+def annotations_for_output(context, scope):
+    """Return eligible visible annotations in deterministic scene order."""
     annotations = []
     for obj in context.scene.objects:
         if not is_dimension_object(obj):
             continue
         props = obj.dimension_props
-        if getattr(props, "annotation_kind", "LINEAR") != "LINEAR":
+        if getattr(props, "annotation_kind", "LINEAR") not in {"LINEAR", "ANGLE", "AREA"}:
             continue
         if not props.visible or not _is_visible(context, obj):
             continue
@@ -47,6 +53,14 @@ def linear_annotations_for_output(context, scope):
             continue
         annotations.append(obj)
     return tuple(sorted(annotations, key=lambda obj: obj.name))
+
+
+def linear_annotations_for_output(context, scope):
+    """Backward-compatible filtered view of output annotations."""
+    return tuple(
+        obj for obj in annotations_for_output(context, scope)
+        if getattr(obj.dimension_props, "annotation_kind", "LINEAR") == "LINEAR"
+    )
 
 
 def _is_scene_annotation(scene, annotation):
@@ -132,6 +146,29 @@ def _camera_world_units_per_pixel(scene, camera, world_co):
 
 def _annotation_world_depth_point(annotation):
     props = annotation.dimension_props
+    annotation_kind = getattr(props, "annotation_kind", "LINEAR")
+    if annotation_kind == "ANGLE":
+        source = resolve_angle_source(props)
+        if source is None:
+            return None
+        return Vector(source["center"]) + Vector(
+            getattr(props, "presentation_offset", (0.0, 0.0, 0.0))
+        )
+    if annotation_kind == "AREA":
+        if props.measurement_state == "NEEDS_REPAIR":
+            return None
+        result = evaluate_area_binding(props) if props.measurement_state != "CAPTURED" else None
+        if result is None:
+            if props.measurement_state != "CAPTURED":
+                return None
+            center = resolve_anchor(props.start)
+            if center is None:
+                return None
+        else:
+            center = result["center"]
+        end = area_label_world(props, center, resolve_anchor(props.end))
+        label_offset = Vector(getattr(props, "presentation_offset", (0.0, 0.0, 0.0)))
+        return (Vector(center) + Vector(end) + label_offset) * 0.5
     start_world = resolve_anchor(props.start)
     end_world = resolve_anchor(props.end)
     if start_world is None or end_world is None:
@@ -187,7 +224,7 @@ def output_text_height_for_annotation(scene, annotation, settings):
 class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
     bl_idname = "dimensions.generate_output"
     bl_label = "Generate Grease Pencil Output"
-    bl_description = "Generate disposable renderable output for visible linear dimensions"
+    bl_description = "Generate disposable renderable output for visible dimensions"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -197,9 +234,9 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
     def execute(self, context):
         settings = context.scene.dimensions_settings
         scope = settings.output_scope
-        annotations = linear_annotations_for_output(context, scope)
+        annotations = annotations_for_output(context, scope)
         if not annotations:
-            self.report(messages.WARNING, messages.OUTPUT_NO_LINEAR_ANNOTATIONS)
+            self.report(messages.WARNING, messages.OUTPUT_NO_ANNOTATIONS)
             return {"CANCELLED"}
         if settings.output_sizing_mode == "CAMERA" and context.scene.camera is None:
             self.report(messages.WARNING, messages.OUTPUT_CAMERA_REQUIRED)
@@ -207,42 +244,65 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
 
         generated = 0
         skipped = 0
+        skipped_repair = 0
         output_keys = annotation_output_keys(context.scene, annotations)
         for annotation in annotations:
             sizing = output_sizing_for_annotation(context.scene, annotation, settings)
             if sizing is None:
                 skipped += 1
+                if (
+                    getattr(annotation.dimension_props, "annotation_kind", "LINEAR") == "AREA"
+                    and annotation.dimension_props.measurement_state == "NEEDS_REPAIR"
+                ):
+                    skipped_repair += 1
                 continue
-            spec = linear_dimension_output_spec(
-                annotation,
-                output_keys[annotation.name],
-                sizing,
-            )
+            annotation_kind = getattr(annotation.dimension_props, "annotation_kind", "LINEAR")
+            spec_builder = {
+                "LINEAR": linear_dimension_output_spec,
+                "ANGLE": angle_dimension_output_spec,
+                "AREA": area_dimension_output_spec,
+            }.get(annotation_kind)
+            spec = spec_builder(annotation, output_keys[annotation.name], sizing)
             if spec is None:
                 skipped += 1
+                if annotation_kind == "AREA" and annotation.dimension_props.measurement_state == "NEEDS_REPAIR":
+                    skipped_repair += 1
                 continue
             text_height = output_text_height_for_annotation(context.scene, annotation, settings)
-            label_layout = linear_dimension_label_layout(
-                context,
-                annotation,
-                text_height,
-                sizing.line_width,
-                sizing.arrow_size,
-                context.scene.camera,
-            )
-            line_strokes = label_layout.dimension_line_strokes
-            base_strokes = spec.strokes[1:] if line_strokes else spec.strokes
-            spec = replace(
-                spec,
-                strokes=line_strokes + base_strokes + label_layout.strokes,
-            )
+            if annotation_kind == "LINEAR":
+                label_layout = linear_dimension_label_layout(
+                    context,
+                    annotation,
+                    text_height,
+                    sizing.line_width,
+                    sizing.arrow_size,
+                    context.scene.camera,
+                )
+                line_strokes = label_layout.dimension_line_strokes
+                base_strokes = spec.strokes[1:] if line_strokes else spec.strokes
+                label_strokes = label_layout.strokes
+                output_strokes = line_strokes + base_strokes + label_strokes
+            elif annotation_kind == "ANGLE":
+                output_strokes = spec.strokes + angle_dimension_label_strokes(
+                    context, annotation, text_height, sizing.line_width, context.scene.camera
+                )
+            else:
+                output_strokes = spec.strokes + area_dimension_label_strokes(
+                    context, annotation, text_height, sizing.line_width, context.scene.camera
+                )
+            spec = replace(spec, strokes=output_strokes)
             generate_grease_pencil_output(context.scene, spec)
             generated += 1
 
         if generated == 0:
-            self.report(messages.WARNING, messages.OUTPUT_NO_VALID_LINEAR_ANNOTATIONS)
+            report_message = (
+                messages.OUTPUT_AREA_REPAIR_REQUIRED
+                if skipped_repair
+                else messages.OUTPUT_NO_VALID_ANNOTATIONS
+            )
+            self.report(messages.WARNING, report_message)
             return {"CANCELLED"}
-        self.report(messages.INFO, messages.generated_output(generated, skipped))
+        self.report(messages.INFO, messages.generated_output(generated, skipped, skipped_repair))
         return {"FINISHED"}
 
 
