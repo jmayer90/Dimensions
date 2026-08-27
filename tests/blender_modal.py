@@ -53,6 +53,7 @@ class LayoutRecorder:
         self.labels = []
         self.properties = []
         self.operators = []
+        self.events = []
         self.enabled = True
 
     def box(self):
@@ -61,17 +62,20 @@ class LayoutRecorder:
     def column(self):
         return self
 
-    def row(self):
+    def row(self, **_kwargs):
         return self
 
     def label(self, *, text, **_kwargs):
         self.labels.append(text)
+        self.events.append(("LABEL", text))
 
     def prop(self, target, name, **kwargs):
         self.properties.append((target, name, kwargs))
+        self.events.append(("PROPERTY", name))
 
     def operator(self, identifier, **_kwargs):
         self.operators.append(identifier)
+        self.events.append(("OPERATOR", identifier))
         return SimpleNamespace()
 
 
@@ -223,7 +227,7 @@ class InteractionContextTests(unittest.TestCase):
         context.mode = "EDIT_MESH"
         self.assertTrue(session_context_changed(operator, context))
 
-    def test_sidebar_exposes_direction_before_a_placement_session_starts(self):
+    def test_sidebar_exposes_compact_direction_after_creation_tools(self):
         preferences = SimpleNamespace(default_axis_mode="Z")
         layout = LayoutRecorder()
         panel = SimpleNamespace(layout=layout)
@@ -236,10 +240,14 @@ class InteractionContextTests(unittest.TestCase):
             CADDIM_PT_MainPanel.draw(panel, context)
             self.assertEqual(session_axis(context), "Z")
 
-        self.assertIn("Next Placement Direction", layout.labels)
+        self.assertIn("Direction", layout.labels)
         self.assertIn(
-            (preferences, "default_axis_mode", {"text": "Direction", "expand": True}),
+            (preferences, "default_axis_mode", {"text": "", "expand": True}),
             layout.properties,
+        )
+        self.assertLess(
+            layout.events.index(("OPERATOR", "dimensions.create_dimension")),
+            layout.events.index(("PROPERTY", "default_axis_mode")),
         )
 
 

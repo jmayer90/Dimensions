@@ -248,6 +248,8 @@ def generate_grease_pencil_output(scene, spec):
         output_object[OUTPUT_SOURCE_KEY] = spec.source_key
         output_object[OUTPUT_VERSION_KEY] = OUTPUT_VERSION
         output_object.hide_render = False
+        output_object.use_grease_pencil_lights = False
+        data.stroke_depth_order = "3D"
         collection.objects.link(output_object)
     except Exception:
         if output_object is not None and output_object.name in bpy.data.objects:

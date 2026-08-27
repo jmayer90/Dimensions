@@ -33,7 +33,7 @@ To build the archive yourself instead, see [CONTRIBUTING.md](CONTRIBUTING.md). W
 
 Open the 3D Viewport sidebar with `N` and choose the **Dimensions** tab.
 
-Use **Next Placement Direction** at the top of the Dimensions sidebar to choose Auto, X, Y, or Z before starting a placement session. The same default is available under **Edit ▸ Preferences ▸ Add-ons ▸ Dimensions**, alongside snap and selection radii, continuous placement, and defaults for new annotations. Continuous placement is on by default. Scene and per-annotation settings remain part of the `.blend` file.
+Choose a creation tool first, then use the compact **Direction** row beneath the tool buttons to select Auto, X, Y, or Z before placing points. The same default is available under **Edit ▸ Preferences ▸ Add-ons ▸ Dimensions**, alongside snap and selection radii, continuous placement, and defaults for new annotations. Continuous placement is on by default. Scene and per-annotation settings remain part of the `.blend` file.
 
 To select an existing annotation directly in the viewport, activate **Dimensions Selection** from the 3D View toolbar in Object Mode. Clicks that do not hit a Dimensions object continue to Blender's normal selection tool.
 
@@ -52,7 +52,7 @@ In Mesh Edit Mode, **Create Dimension** is selection-first: with exactly one edg
 
 **An angle dimension** acquires Edge A, then Edge B, then the arc radius. Connected edges use their shared vertex; disconnected or skew edges derive a virtual center from their supporting lines. A selected angle can switch solution or replace either edge independently.
 
-**Renderable output:** open **Grease Pencil Output** in the Dimensions sidebar, choose Selected or Visible annotations, and choose Camera Relative or World Scale sizing. Camera Relative uses the active camera and resolves pixel sizes at each annotation's depth; World Scale uses explicit scene-unit sizes. Click **Generate Grease Pencil Output** to create renderable linear, angle, and valid Live or Captured area strokes in the scene-owned `Dimensions Output` collection. Areas in Needs Repair are skipped until their sources are repaired. Labels and presentation offsets follow the live annotations. Live annotations remain the source of truth. Generated objects are disposable: regenerating the same annotation replaces its prior output and any hand edits to that generated object.
+**Renderable output:** open **Grease Pencil Output** in the Dimensions sidebar, choose Selected or Visible annotations, and choose Camera Relative or World Scale sizing. Camera Relative uses the active camera and resolves pixel sizes at each annotation's depth; World Scale uses explicit scene-unit sizes. Click **Generate Grease Pencil Output** to create renderable linear, angle, and valid Live or Captured area strokes in the scene-owned `Dimensions Output` collection. Generated objects use 3D Location depth ordering with Grease Pencil lighting disabled, and generation enables the active view layer's Depth and Grease Pencil data passes. Areas in Needs Repair are skipped until their sources are repaired. Labels and presentation offsets follow the live annotations. Live annotations remain the source of truth. Generated objects are disposable: regenerating the same annotation replaces its prior output and any hand edits to that generated object.
 
 ### Keys
 

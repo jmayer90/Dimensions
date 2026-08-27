@@ -302,6 +302,8 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
             )
             self.report(messages.WARNING, report_message)
             return {"CANCELLED"}
+        context.view_layer.use_pass_z = True
+        context.view_layer.use_pass_grease_pencil = True
         self.report(messages.INFO, messages.generated_output(generated, skipped, skipped_repair))
         return {"FINISHED"}
 

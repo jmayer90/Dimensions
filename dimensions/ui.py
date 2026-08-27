@@ -17,14 +17,6 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_idname = "CADDIM_PT_main_panel"
 
     def draw(self, context):
-        direction = self.layout.box()
-        direction.label(text="Next Placement Direction")
-        direction.prop(
-            get_preferences(context),
-            "default_axis_mode",
-            text="Direction",
-            expand=True,
-        )
         annotation_tools = self.layout.column()
         annotation_tools.enabled = context.mode in {"OBJECT", "EDIT_MESH"}
         annotation_tools.operator("dimensions.create_dimension", icon="DRIVER_DISTANCE")
@@ -51,6 +43,15 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
                 text="Apply Faces to Selected Area",
                 icon="FILE_REFRESH",
             )
+
+        direction = self.layout.row(align=True)
+        direction.label(text="Direction")
+        direction.prop(
+            get_preferences(context),
+            "default_axis_mode",
+            text="",
+            expand=True,
+        )
 
 
 class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):

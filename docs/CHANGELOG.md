@@ -6,7 +6,9 @@ All notable user-visible changes are recorded here. Versions before 0.2.0 were r
 
 - Added Grease Pencil generation for angle and area annotations. Minor, supplement, and reflex angles preserve their rays, arcs, labels, colors, and presentation offsets; valid Live and Captured areas preserve their leaders, labels, colors, and placement.
 - Extended Selected and Visible output scope, Camera Relative and World Scale sizing, per-annotation regeneration, and mixed EEVEE/Cycles render coverage across linear, angle, and area annotations. Areas in Needs Repair are skipped with an actionable warning.
-- Restored a discoverable pre-placement direction workflow: the main sidebar now exposes **Next Placement Direction** with Auto/X/Y/Z choices, and the placement HUD identifies the active direction and its `A`/`X`/`Y`/`Z` keys before the first point.
+- Restored a discoverable pre-placement direction workflow: the main sidebar exposes Auto/X/Y/Z choices, and the placement HUD identifies the active direction and its `A`/`X`/`Y`/`Z` keys before the first point.
+- Compressed the direction choice into a single row below the creation tools, so the sidebar follows tool-first, settings-second order.
+- Generated Grease Pencil objects now disable Use Lights and use 3D Location stroke depth; generation also enables the active view layer's Depth and Grease Pencil data passes for render-ready output.
 - Added **Outside Start** text placement as the mirror of the existing **Outside End** option, with matching live-overlay and generated-output behavior. Existing Outside End settings keep their appearance.
 - This remains a patch release under the version policy: it extends the established output and interaction surfaces without breaking saved data or the documented interaction contract.
 

@@ -35,6 +35,8 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
         self.original_camera = self.scene.camera
         self.original_scope = self.scene.dimensions_settings.output_scope
         self.original_sizing = self.scene.dimensions_settings.output_sizing_mode
+        self.original_depth_pass = bpy.context.view_layer.use_pass_z
+        self.original_grease_pencil_pass = bpy.context.view_layer.use_pass_grease_pencil
 
     def tearDown(self):
         for obj in self.created:
@@ -51,6 +53,8 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
         settings.output_scope = self.original_scope
         settings.output_sizing_mode = self.original_sizing
         self.scene.camera = self.original_camera
+        bpy.context.view_layer.use_pass_z = self.original_depth_pass
+        bpy.context.view_layer.use_pass_grease_pencil = self.original_grease_pencil_pass
 
     def _dimension(self, name, start=(0.0, 0.0, 0.0), end=(2.0, 0.0, 0.0)):
         dimension = create_dimension_object(bpy.context, name)
@@ -280,6 +284,10 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
             },
         )
         self.assertTrue(all(len(output.data.layers[0].frames[0].drawing.strokes) > 2 for output in outputs))
+        self.assertTrue(bpy.context.view_layer.use_pass_z)
+        self.assertTrue(bpy.context.view_layer.use_pass_grease_pencil)
+        self.assertTrue(all(not output.use_grease_pencil_lights for output in outputs))
+        self.assertTrue(all(output.data.stroke_depth_order == "3D" for output in outputs))
 
     def test_regenerating_angle_and_area_replaces_only_matching_artifact(self):
         self._remove_existing_output()

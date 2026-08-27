@@ -62,6 +62,8 @@ class DimensionsOutputSmokeTests(unittest.TestCase):
         self.assertEqual(output.type, "GREASEPENCIL")
         self.assertTrue(output[GENERATED_OUTPUT_TAG])
         self.assertEqual(output[OUTPUT_SOURCE_KEY], "smoke")
+        self.assertFalse(output.use_grease_pencil_lights)
+        self.assertEqual(output.data.stroke_depth_order, "3D")
         self.assertEqual(len(output.data.layers), 1)
         frame = output.data.layers[0].frames[0]
         self.assertEqual(frame.frame_number, self.scene.frame_current)
