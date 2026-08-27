@@ -64,7 +64,7 @@ Both scripts accept an explicit Blender executable path; on POSIX systems they f
 
 `tests/blender_lifecycle.py` covers persistent data: measurement proxies, save/reload, and schema migration against the released-file fixtures in `tests/fixtures/`.
 
-`tests/output_geometry_smoke.py` and `tests/output_smoke.py` cover the in-progress render-output path: translating live linear annotations into world-space strokes, scene isolation, deterministic regeneration, rollback, and minimal EEVEE/Cycles renders.
+`tests/stroke_font_smoke.py`, `tests/output_geometry_smoke.py`, `tests/output_smoke.py`, and `tests/output_operator_smoke.py` cover render output: vector labels, live linear-annotation translation, camera/world sizing, scene isolation, deterministic regeneration, rollback, and minimal EEVEE/Cycles renders.
 
 Two differences between the test environment and a real install have hidden real bugs, and `DimensionsPackagingTests` now guards both. The suites import the add-on as a top-level `dimensions` package, but Blender installs it as `bl_ext.<repository>.dimensions` — so anything deriving an identifier from `__package__` must use the full name. And Blender restricts `bpy.data` while an add-on registers, so registration must not read scene data directly.
 
@@ -108,8 +108,8 @@ Releases are published by `.github/workflows/release.yml` when a `v*` tag is pus
 3. Commit, then tag and push:
 
 ```bash
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 The workflow refuses to publish if the tag does not match the manifest version, or if the changelog has no section for it. It runs the full validation suite and attaches the archive that suite produced, so the released ZIP is the one that was tested rather than a separate build. Release notes come from that changelog section.

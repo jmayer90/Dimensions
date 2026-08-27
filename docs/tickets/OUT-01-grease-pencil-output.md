@@ -6,6 +6,8 @@
 **Version impact:** **Minor trigger 3 (new product surface)** — lands in `0.4.0`.
 **Delivery order:** After the focused UX-01 and UX-08 work; does not wait for M3 construction tickets.
 
+**Implementation note:** The linear first pass shipped in 0.4.0 with vector-stroke labels, camera/world sizing, deterministic regeneration, and EEVEE/Cycles coverage. [OUT-04](OUT-04-angle-area-output.md) carries the angle and area follow-up so the released linear path is not held behind two additional geometry types.
+
 ## Problem
 
 Dimensions do not appear in renders. They are `SpaceView3D` draw handlers — GPU overlays that exist only in the interactive viewport. Render, OpenGL viewport render, Freestyle, and every export format see nothing.

@@ -19,10 +19,12 @@ from dimensions.constants import CURRENT_SCHEMA_VERSION
 from dimensions.migrations import migrate_scene, scene_has_dimensions_data
 from dimensions.collections import (
     MEASUREMENT_SNAP_PROXY_FLAG,
+    create_dimension_object,
     create_measurement_object,
     ensure_measurement_snap_proxy,
     remove_measurement_snap_proxies,
 )
+from dimensions.operators.generate_output import annotation_output_key
 from dimensions.projected_snap import get_projected_snap_timings
 from dimensions.scene_sync import sync_scene_objects
 from dimensions.viewport_state import get_state, set_state
@@ -102,23 +104,49 @@ class DimensionsLifecycleTests(unittest.TestCase):
                 for child in measurement.children
             ))
 
+    def test_save_reload_preserves_scene_owned_output_identity(self):
+        dimension = create_dimension_object(
+            bpy.context,
+            "Dimensions Lifecycle Output Identity",
+        )
+        dimension_name = dimension.name
+        set_world_anchor(dimension.dimension_props.start, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(dimension.dimension_props.end, Vector((2.0, 0.0, 0.0)))
+        source_key = annotation_output_key(bpy.context.scene, dimension)
+        self.assertIsNone(dimension.get("dimensions_annotation_output_key"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "dimensions-output-identity.blend"
+            bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
+            bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
+            reloaded = bpy.data.objects.get(dimension_name)
+            self.assertIsNotNone(reloaded)
+            self.assertEqual(
+                annotation_output_key(bpy.context.scene, reloaded),
+                source_key,
+            )
+            bpy.data.objects.remove(reloaded, do_unlink=True)
+
 
 class DimensionsReleasedFileTests(unittest.TestCase):
     """Migration against a real file saved by an earlier release.
 
     ``tests/fixtures/schema-v0.blend`` was written before schema stamping existed: its
-    vertex anchors carry no durable point IDs and its scene carries no stamp. Every
-    schema change adds a fixture here so migrations keep being tested against files
-    that actually shipped, not only against synthetic data.
+    vertex anchors carry no durable point IDs and its scene carries no stamp. The
+    0.3.2 fixture represents schema v1 before output settings were introduced.
+    Every schema change adds a fixture here so migrations keep being tested against
+    files that actually shipped, not only against synthetic data.
     """
 
     FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v0.blend"
+    OUTPUT_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v1-0.3.2.blend"
 
     def setUp(self):
         dimensions.register()
 
     def test_the_fixture_is_present(self):
         self.assertTrue(self.FIXTURE.is_file(), f"missing fixture: {self.FIXTURE}")
+        self.assertTrue(self.OUTPUT_FIXTURE.is_file(), f"missing fixture: {self.OUTPUT_FIXTURE}")
 
     def test_an_unstamped_released_file_migrates_to_the_current_schema(self):
         bpy.ops.wm.open_mainfile(filepath=str(self.FIXTURE), load_ui=False)
@@ -151,6 +179,17 @@ class DimensionsReleasedFileTests(unittest.TestCase):
             ),
             identifiers,
         )
+
+    def test_the_0_3_2_fixture_migrates_output_settings(self):
+        bpy.ops.wm.open_mainfile(filepath=str(self.OUTPUT_FIXTURE), load_ui=False)
+        scene = bpy.context.scene
+        self.assertTrue(scene_has_dimensions_data(scene))
+        self.assertEqual(scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
+        self.assertEqual(scene.dimensions_settings.output_sizing_mode, "CAMERA")
+        self.assertEqual(scene.dimensions_settings.output_scope, "VISIBLE")
+        self.assertAlmostEqual(scene.dimensions_settings.output_line_width, 2.0)
+        self.assertAlmostEqual(scene.dimensions_settings.output_text_height, 14.0)
+        self.assertEqual(len(scene.dimensions_settings.output_source_bindings), 0)
 
 
 def main():

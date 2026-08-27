@@ -48,7 +48,7 @@ Milestones organize work. Versions track compatibility. They are deliberately no
 | **M5 — Documentation-grade** | `DIM-*`. Chain, baseline, radial, diameter, arc-length, coordinate dimensions. | Patches, mostly additive. |
 | **M6 — 1.0 gate** | Hardening, migration fixtures, compatibility promise. | **`1.0.0`**. |
 
-Milestone numbers group related work and version impact; they are not a strict delivery queue. M1 gates everything else, because building on an unversioned schema and an unsound selection architecture just increases what has to be unwound later. Early user feedback moved `UX-01` and `UX-08` into 0.3.1; with that focused work delivered, `OUT-01` is next and remains ahead of M3 construction. Other M2 and M3 tickets may still land while the larger output work is in progress.
+Milestone numbers group related work and version impact; they are not a strict delivery queue. M1 gates everything else, because building on an unversioned schema and an unsound selection architecture just increases what has to be unwound later. Early user feedback moved `UX-01` and `UX-08` into 0.3.1, architectural ticks into 0.3.2, and the first renderable linear output surface into 0.4.0. The 0.4.0 release also advances the saved-data schema additively from v1 to v2; existing values are preserved. `OUT-04` completes angle and area coverage on the 0.4.x line while other M2 and M3 work can proceed in parallel.
 
 ## The 1.0 gate
 

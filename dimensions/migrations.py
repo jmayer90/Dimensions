@@ -75,7 +75,48 @@ def migrate_v0_to_v1(scene):
     return changed
 
 
-_MIGRATIONS = {0: migrate_v0_to_v1}
+def migrate_v1_to_v2(scene):
+    """Initialize additive output settings introduced by the 0.4.0 release.
+
+    Blender supplies RNA property defaults when an older file is opened, so a
+    normal v1 file already has valid values.  The guarded assignments keep the
+    migration safe for files written while the property group was incomplete,
+    without overwriting any values a user may already have set.
+    """
+    settings = scene.dimensions_settings
+    defaults = {
+        "output_sizing_mode": "CAMERA",
+        "output_line_width": 2.0,
+        "output_text_height": 14.0,
+        "output_arrow_size": 10.0,
+        "output_world_line_width": 0.01,
+        "output_world_text_height": 0.2,
+        "output_world_arrow_size": 0.15,
+        "output_scope": "VISIBLE",
+    }
+    changed = False
+    for property_name, default in defaults.items():
+        if not hasattr(settings, property_name):
+            continue
+        value = getattr(settings, property_name)
+        if value is None or value == "":
+            setattr(settings, property_name, default)
+            changed = True
+
+    # The registry is new in v2.  Preserve complete bindings, while dropping
+    # entries that cannot identify a generated source and would otherwise make
+    # the first regeneration ambiguous.
+    bindings = getattr(settings, "output_source_bindings", None)
+    if bindings is not None:
+        for index in reversed(range(len(bindings))):
+            binding = bindings[index]
+            if binding.source is None or not binding.key:
+                bindings.remove(index)
+                changed = True
+    return changed
+
+
+_MIGRATIONS = {0: migrate_v0_to_v1, 1: migrate_v1_to_v2}
 
 
 def migrate_open_scenes():

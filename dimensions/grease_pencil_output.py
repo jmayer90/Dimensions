@@ -7,9 +7,9 @@ it cannot affect the annotation or source geometry.
 
 Blender 5.x uses the Grease Pencil v3 API exposed by ``bpy.data.grease_pencils``.
 ``line_width`` in the public spec is mapped to each Grease Pencil point radius.
-Text-to-stroke
-conversion and camera-relative sizing are intentionally not implemented here;
-the interface leaves those concerns outside this bounded linear-stroke backend.
+Label conversion and camera-relative sizing live in the higher-level output
+modules; this backend accepts their resolved strokes without depending on
+annotation semantics.
 """
 
 from dataclasses import dataclass
@@ -25,7 +25,7 @@ OUTPUT_SOURCE_KEY = "dimensions_output_source_key"
 OUTPUT_VERSION_KEY = "dimensions_output_version"
 OUTPUT_VERSION = 1
 OUTPUT_LAYER_NAME = "Dimensions Output"
-TEXT_TO_STROKE_SUPPORTED = False
+TEXT_TO_STROKE_SUPPORTED = True
 
 
 @dataclass(frozen=True)
@@ -116,11 +116,25 @@ def _collection_in_scene(scene, collection):
     )
 
 
+def _collection_scene_owners(collection):
+    return tuple(
+        scene for scene in bpy.data.scenes if _collection_in_scene(scene, collection)
+    )
+
+
+def _collection_is_exclusive_to_scene(scene, collection):
+    owners = _collection_scene_owners(collection)
+    return len(owners) == 1 and owners[0] == scene
+
+
 def find_output_collection(scene):
     if scene is None:
         return None
     for collection in scene.collection.children_recursive:
-        if collection.get("dimensions_collection_role") == OUTPUT_COLLECTION_ROLE:
+        if (
+            collection.get("dimensions_collection_role") == OUTPUT_COLLECTION_ROLE
+            and _collection_is_exclusive_to_scene(scene, collection)
+        ):
             return collection
     return None
 
@@ -135,10 +149,6 @@ def get_or_create_output_collection(scene):
         return existing
 
     named_collection = bpy.data.collections.get(OUTPUT_COLLECTION_NAME)
-    if named_collection is not None and _collection_in_scene(scene, named_collection):
-        named_collection["dimensions_collection_role"] = OUTPUT_COLLECTION_ROLE
-        return named_collection
-
     collection_name = OUTPUT_COLLECTION_NAME
     if named_collection is not None:
         collection_name = f"{OUTPUT_COLLECTION_NAME} ({scene.name})"

@@ -16,6 +16,9 @@ try {
     & $python.FullName -m compileall -q dimensions tests
     if ($LASTEXITCODE -ne 0) { throw "Python compilation failed" }
 
+    & $python.FullName tests\stroke_font_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "Stroke font smoke tests failed" }
+
     & $Blender --background --factory-startup --python tests\blender_smoke.py
     if ($LASTEXITCODE -ne 0) { throw "Blender smoke tests failed" }
 
@@ -30,6 +33,9 @@ try {
 
     & $Blender --background --factory-startup --python tests\output_smoke.py
     if ($LASTEXITCODE -ne 0) { throw "Grease Pencil output smoke tests failed" }
+
+    & $Blender --background --factory-startup --python tests\output_operator_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "Output operator smoke tests failed" }
 
     & $Blender --background --factory-startup --command extension validate dimensions
     if ($LASTEXITCODE -ne 0) { throw "Extension manifest validation failed" }

@@ -67,13 +67,14 @@ Snapping lines and points as a first-class way to build dimensionally, not just 
 
 ### M4 — Output
 
-Milestone numbers group related work; they are not a strict delivery queue. With the focused `UX-01` and `UX-08` work delivered in 0.3.1, repeated early requests for rendered dimensions make `OUT-01` the next major workstream, before the M3 construction tickets. `OUT-02` and `OUT-03` retain their existing scopes and dependencies.
+Milestone numbers group related work; they are not a strict delivery queue. The focused `UX-01` and `UX-08` work shipped in 0.3.1, architectural ticks in 0.3.2, and linear Grease Pencil generation in 0.4.0. `OUT-04` completes angle and area output; `OUT-02` and `OUT-03` retain their existing scopes and dependencies.
 
 | ID | Title | Effort | Depends on |
 | --- | --- | --- | --- |
 | [OUT-01](OUT-01-grease-pencil-output.md) | Render path via generated Grease Pencil | L | FND-03 |
 | [OUT-02](OUT-02-vector-export.md) | SVG and PDF vector export | L | OUT-01 |
 | [OUT-03](OUT-03-styles.md) | Named, reusable annotation styles | M | FND-02 |
+| [OUT-04](OUT-04-angle-area-output.md) | Extend generated output to angle and area annotations | M | OUT-01 |
 
 ### M5 — Documentation-grade dimensions
 
@@ -86,7 +87,7 @@ Milestone numbers group related work; they are not a strict delivery queue. With
 
 ## Suggested order
 
-M1 is complete. The next highest-value sequence is `UX-01` (continuous placement plus its persistent axis mode), `UX-08` (close the reported label-scaling ambiguity), then `OUT-01` (renderable output). `OUT-01` can proceed before M3 because its `FND-03` dependency is already complete. `OUT-03` should precede the broader `DIM-04` presentation work; the architectural tick-mark slice is the first `DIM-04` deliverable after styles exist.
+M1, `UX-01`, `UX-08`, the architectural-tick slice, and linear `OUT-01` are delivered. Next, complete angle/area generation in `OUT-04` and reusable styles in `OUT-03`; `OUT-03` then unlocks the broader remaining `DIM-04` presentation work. M2 and M3 fluency/construction tickets can proceed alongside those output workstreams.
 
 ## Effort key
 

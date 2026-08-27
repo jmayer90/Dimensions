@@ -486,6 +486,13 @@ class CADDIM_PG_Guide(bpy.types.PropertyGroup):
     visible: bpy.props.BoolProperty(name="Visible", default=True, update=update_dimension_display)
 
 
+class CADDIM_PG_OutputSourceBinding(bpy.types.PropertyGroup):
+    """Scene-owned identity for one generated-output source annotation."""
+
+    source: bpy.props.PointerProperty(type=bpy.types.Object)
+    key: bpy.props.StringProperty(default="", options={"HIDDEN"})
+
+
 class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
     schema_version: bpy.props.IntProperty(
         name="Dimensions Schema Version",
@@ -621,6 +628,90 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
         ],
         default="ARROW",
         update=update_dimension_display,
+    )
+
+    output_sizing_mode: bpy.props.EnumProperty(
+        name="Output Sizing",
+        description="Use camera pixels or explicit scene units for generated Grease Pencil output",
+        items=[
+            ("CAMERA", "Camera Relative", "Convert output sizes from pixels at each annotation depth"),
+            ("WORLD", "World Scale", "Use the configured output sizes as scene units"),
+        ],
+        default="CAMERA",
+        update=update_dimension_display,
+    )
+
+    output_line_width: bpy.props.FloatProperty(
+        name="Camera Line Width",
+        description="Generated line width in output pixels for Camera Relative sizing",
+        default=2.0,
+        min=0.1,
+        max=100.0,
+        update=update_dimension_display,
+    )
+
+    output_text_height: bpy.props.FloatProperty(
+        name="Camera Text Height",
+        description="Generated vector-label height in output pixels for Camera Relative sizing",
+        default=14.0,
+        min=1.0,
+        max=100.0,
+        update=update_dimension_display,
+    )
+
+    output_arrow_size: bpy.props.FloatProperty(
+        name="Camera Arrow Size",
+        description="Generated endpoint size in output pixels for Camera Relative sizing",
+        default=10.0,
+        min=1.0,
+        max=100.0,
+        update=update_dimension_display,
+    )
+
+    output_world_line_width: bpy.props.FloatProperty(
+        name="World Line Width",
+        description="Generated line width in scene units for World Scale sizing",
+        default=0.01,
+        min=0.0001,
+        max=10.0,
+        subtype="DISTANCE",
+        update=update_dimension_display,
+    )
+
+    output_world_text_height: bpy.props.FloatProperty(
+        name="World Text Height",
+        description="Generated vector-label height in scene units for World Scale sizing",
+        default=0.2,
+        min=0.0001,
+        max=100.0,
+        subtype="DISTANCE",
+        update=update_dimension_display,
+    )
+
+    output_world_arrow_size: bpy.props.FloatProperty(
+        name="World Arrow Size",
+        description="Generated endpoint size in scene units for World Scale sizing",
+        default=0.15,
+        min=0.0001,
+        max=100.0,
+        subtype="DISTANCE",
+        update=update_dimension_display,
+    )
+
+    output_scope: bpy.props.EnumProperty(
+        name="Output Scope",
+        description="Choose which visible linear annotations receive generated output",
+        items=[
+            ("SELECTED", "Selected", "Generate output for selected visible linear annotations"),
+            ("VISIBLE", "Visible", "Generate output for every visible linear annotation"),
+        ],
+        default="VISIBLE",
+        update=update_dimension_display,
+    )
+
+    output_source_bindings: bpy.props.CollectionProperty(
+        type=CADDIM_PG_OutputSourceBinding,
+        options={"HIDDEN"},
     )
 
     text_placement: bpy.props.EnumProperty(
@@ -767,5 +858,6 @@ classes = (
     CADDIM_PG_AreaFaceBinding,
     CADDIM_PG_Dimension,
     CADDIM_PG_Guide,
+    CADDIM_PG_OutputSourceBinding,
     CADDIM_PG_SceneSettings,
 )

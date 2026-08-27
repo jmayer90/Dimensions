@@ -45,11 +45,13 @@ fi
 
 cd "$root"
 "$python" -m compileall -q dimensions tests
+"$python" tests/stroke_font_smoke.py
 "$blender" --background --factory-startup --python tests/blender_smoke.py
 "$blender" --background --factory-startup --python tests/blender_modal.py
 "$blender" --background --factory-startup --python tests/blender_lifecycle.py
 "$blender" --background --factory-startup --python tests/output_geometry_smoke.py
 "$blender" --background --factory-startup --python tests/output_smoke.py
+"$blender" --background --factory-startup --python tests/output_operator_smoke.py
 "$blender" --background --factory-startup --command extension validate dimensions
 "$root/scripts/build_extension.sh" --blender "$blender"
 

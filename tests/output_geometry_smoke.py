@@ -18,6 +18,9 @@ from dimensions.collections import create_dimension_object
 from dimensions.output_geometry import (
     TEXT_OUTPUT_SUPPORTED,
     WorldSizingPolicy,
+    _linear_dimension_label_text,
+    linear_dimension_label_layout,
+    linear_dimension_label_strokes,
     linear_dimension_output_spec,
 )
 
@@ -26,8 +29,10 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
     def setUp(self):
         self.created = []
         self.context = type("Context", (), {"scene": bpy.context.scene})()
+        self.original_text_placement = bpy.context.scene.dimensions_settings.text_placement
 
     def tearDown(self):
+        bpy.context.scene.dimensions_settings.text_placement = self.original_text_placement
         for obj in self.created:
             if obj.name in bpy.data.objects:
                 bpy.data.objects.remove(obj, do_unlink=True)
@@ -92,7 +97,7 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
             spec.strokes[0].points[1],
         )
 
-    def test_invalid_sources_return_no_output_and_text_is_deferred(self):
+    def test_invalid_sources_return_no_output_and_text_is_supported(self):
         dimension = self._linear_dimension()
         dimension.dimension_props.annotation_kind = "AREA"
         self.assertIsNone(
@@ -102,7 +107,59 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
                 WorldSizingPolicy(line_width=0.02, arrow_size=0.4),
             )
         )
-        self.assertFalse(TEXT_OUTPUT_SUPPORTED)
+        self.assertTrue(TEXT_OUTPUT_SUPPORTED)
+
+    def test_linear_label_generates_world_space_strokes(self):
+        dimension = self._linear_dimension()
+        strokes = linear_dimension_label_strokes(
+            bpy.context,
+            dimension,
+            text_height=0.2,
+            line_width=0.01,
+        )
+        self.assertGreater(len(strokes), 0)
+        self.assertTrue(all(stroke.line_width == 0.01 for stroke in strokes))
+
+    def test_label_layout_matches_inline_above_and_outside_presentation(self):
+        dimension = self._linear_dimension()
+        settings = bpy.context.scene.dimensions_settings
+
+        settings.text_placement = "INLINE"
+        inline = linear_dimension_label_layout(
+            bpy.context, dimension, 0.2, 0.01, 0.2
+        )
+        self.assertEqual(len(inline.dimension_line_strokes), 2)
+
+        settings.text_placement = "ABOVE"
+        above = linear_dimension_label_layout(
+            bpy.context, dimension, 0.2, 0.01, 0.2
+        )
+        self.assertEqual(above.dimension_line_strokes, ())
+        self.assertGreater(
+            min(point[1] for stroke in above.strokes for point in stroke.points),
+            1.0,
+        )
+
+        settings.text_placement = "OUTSIDE"
+        outside = linear_dimension_label_layout(
+            bpy.context, dimension, 0.2, 0.01, 0.2
+        )
+        self.assertEqual(outside.dimension_line_strokes, ())
+        self.assertGreater(
+            min(point[0] for stroke in outside.strokes for point in stroke.points),
+            4.0,
+        )
+
+    def test_custom_text_position_preserves_live_line_order(self):
+        dimension = self._linear_dimension()
+        props = dimension.dimension_props
+        props.custom_text = "NOTE"
+        props.custom_text_position = "ABOVE"
+        above = _linear_dimension_label_text(bpy.context, props, 4.0)
+        self.assertTrue(above.startswith("NOTE\n"))
+        props.custom_text_position = "BELOW"
+        below = _linear_dimension_label_text(bpy.context, props, 4.0)
+        self.assertTrue(below.endswith("\nNOTE"))
 
     def test_annotation_presentation_offset_moves_generated_linework(self):
         dimension = self._linear_dimension()

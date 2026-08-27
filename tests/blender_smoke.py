@@ -164,6 +164,48 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
 
         settings.schema_version = original_version
 
+    def test_output_settings_migrate_additively_from_schema_v1(self):
+        mesh_object = self._make_object(
+            "Output Schema Migration Source",
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)],
+            [(0, 1)],
+        )
+        dimension = bpy.data.objects.new("Output Schema Migration Dimension", None)
+        bpy.context.scene.collection.objects.link(dimension)
+        self.addCleanup(bpy.data.objects.remove, dimension, do_unlink=True)
+        dimension.dimension_props.enabled = True
+        set_anchor(dimension.dimension_props.start, mesh_object, 0)
+        set_anchor(dimension.dimension_props.end, mesh_object, 1)
+        settings = bpy.context.scene.dimensions_settings
+        original_version = settings.schema_version
+        original_values = (
+            settings.output_sizing_mode,
+            settings.output_line_width,
+            settings.output_scope,
+        )
+        settings.schema_version = 1
+        settings.output_sizing_mode = "WORLD"
+        settings.output_line_width = 3.5
+        settings.output_scope = "SELECTED"
+        preserved_binding = settings.output_source_bindings.add()
+        preserved_binding.source = dimension
+        preserved_binding.key = "preserved-output-key"
+        incomplete_binding = settings.output_source_bindings.add()
+        incomplete_binding.source = dimension
+
+        self.assertTrue(migrate_scene(bpy.context.scene))
+        self.assertEqual(settings.schema_version, CURRENT_SCHEMA_VERSION)
+        self.assertEqual(settings.output_sizing_mode, "WORLD")
+        self.assertAlmostEqual(settings.output_line_width, 3.5)
+        self.assertEqual(settings.output_scope, "SELECTED")
+        self.assertEqual(len(settings.output_source_bindings), 1)
+        self.assertEqual(settings.output_source_bindings[0].key, "preserved-output-key")
+        self.assertFalse(migrate_scene(bpy.context.scene))
+
+        settings.schema_version = original_version
+        settings.output_sizing_mode, settings.output_line_width, settings.output_scope = original_values
+        settings.output_source_bindings.clear()
+
     def test_newer_schema_is_not_modified(self):
         dimension = bpy.data.objects.new("Future Schema Dimension", None)
         bpy.context.scene.collection.objects.link(dimension)

@@ -2,6 +2,15 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
+## 0.4.0 — August 27, 2026
+
+- Added explicit Grease Pencil generation for selected or all visible linear dimensions. Generated output contains dimension and extension lines, open arrows or architectural ticks, vector-stroke labels, prefixes, suffixes, tolerances, custom text, and per-annotation color. Labels preserve Inline, Above, and Outside placement plus custom-text ordering.
+- Added Camera Relative sizing, which resolves line, label, and endpoint sizes from render pixels at each annotation's midpoint depth, plus view-independent World Scale sizing with separate scene-unit controls. Camera Relative is the default and requires an active camera.
+- Generated artifacts live in an exclusive scene-owned `Dimensions Output` collection, remain separate from live annotations, and regenerate predictably through a scene-owned source registry. Name collisions do not repurpose user collections, duplicated annotations receive independent identities, and generation does not write metadata to annotation objects. Regeneration is intentionally disposable and replaces hand edits to matching generated objects; the Output panel warns before use.
+- Verified non-empty generated strokes in both EEVEE and Cycles on Blender 5.2. Repeated local runs generated 100 labeled linear annotations in under 0.4 seconds.
+- This is a minor release because renderable output is a new product surface under version-policy trigger 3. Angle and area generation remain follow-up work.
+- Added the schema v1 to v2 migration for the new output settings and scene-owned source registry; existing `.blend` files keep their saved values, receive defaults only when a field is absent, and discard incomplete registry bindings.
+
 ## 0.3.2 — August 26, 2026
 
 - Added an **Architectural Tick** endpoint style for linear dimensions, configurable globally for new annotations and as a local per-annotation override. Existing and new files continue to use open arrows by default.

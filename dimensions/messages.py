@@ -42,6 +42,9 @@ CREATED_SELECTED_ANGLE = "Created angle dimension from selected edges"
 CREATED_DIMENSION = "Created dimension"
 CREATED_GUIDE = "Created construction guide"
 CREATED_MEASUREMENT = "Created persistent measurement"
+OUTPUT_NO_LINEAR_ANNOTATIONS = "No visible linear annotations match the output scope"
+OUTPUT_CAMERA_REQUIRED = "Set an active camera for Camera Relative output sizing"
+OUTPUT_NO_VALID_LINEAR_ANNOTATIONS = "No valid linear annotations could be generated"
 
 
 def invalid_distance(value):
@@ -88,3 +91,10 @@ def cleared_guides(count):
 
 def cleared_measurements(count):
     return f"Removed {count} measurement(s)"
+
+
+def generated_output(generated, skipped=0):
+    message = f"Generated Grease Pencil output for {generated} linear annotation(s)"
+    if skipped:
+        message += f"; skipped {skipped} unavailable annotation(s)"
+    return message

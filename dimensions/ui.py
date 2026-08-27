@@ -259,6 +259,32 @@ class CADDIM_PT_ConstructionGuides(CADDIM_PT_PanelBase, bpy.types.Panel):
         actions.operator("dimensions.clear_measurements", text="Clear Measures", icon="TRASH")
 
 
+class CADDIM_PT_Output(CADDIM_PT_PanelBase, bpy.types.Panel):
+    bl_label = "Grease Pencil Output"
+    bl_idname = "CADDIM_PT_output"
+    bl_parent_id = CADDIM_PT_MainPanel.bl_idname
+    bl_order = 5
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        settings = context.scene.dimensions_settings
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        layout.prop(settings, "output_scope")
+        layout.prop(settings, "output_sizing_mode")
+        if settings.output_sizing_mode == "CAMERA":
+            layout.prop(settings, "output_line_width")
+            layout.prop(settings, "output_text_height")
+            layout.prop(settings, "output_arrow_size")
+        else:
+            layout.prop(settings, "output_world_line_width")
+            layout.prop(settings, "output_world_text_height")
+            layout.prop(settings, "output_world_arrow_size")
+        layout.operator("dimensions.generate_output", icon="GREASEPENCIL")
+        layout.label(text="Disposable: regeneration replaces hand edits", icon="ERROR")
+
+
 def _vertex_picker_text(anchor):
     if getattr(anchor, "anchor_type", "VERTEX") == "WORLD":
         return "World Point"
@@ -279,5 +305,6 @@ classes = (
     CADDIM_PT_GlobalSettings,
     CADDIM_PT_GlobalStyle,
     CADDIM_PT_ConstructionGuides,
+    CADDIM_PT_Output,
     CADDIM_PT_SelectedDimension,
 )

@@ -82,8 +82,8 @@ class DimensionsOutputSmokeTests(unittest.TestCase):
         self.assertEqual(outputs, (second,))
         self.assertEqual(len(generated_output_objects(self.scene)), 1)
 
-    def test_text_conversion_is_explicitly_deferred(self):
-        self.assertFalse(TEXT_TO_STROKE_SUPPORTED)
+    def test_output_pipeline_supports_text_strokes(self):
+        self.assertTrue(TEXT_TO_STROKE_SUPPORTED)
 
     def test_querying_output_does_not_create_a_collection(self):
         other_scene = bpy.data.scenes.new("Dimensions Empty Output Query")
@@ -140,6 +140,50 @@ class DimensionsOutputSmokeTests(unittest.TestCase):
             bpy.data.scenes.remove(other_scene)
             if collection is not None and collection.users == 0:
                 bpy.data.collections.remove(collection)
+
+    def test_user_collection_name_collision_is_not_adopted(self):
+        existing_named = bpy.data.collections.get("Dimensions Output")
+        existing_name = existing_named.name if existing_named is not None else None
+        if existing_named is not None:
+            existing_named.name = "Dimensions Output Existing Test"
+        other_scene = bpy.data.scenes.new("Dimensions Output Name Collision")
+        user_collection = bpy.data.collections.new("Dimensions Output")
+        other_scene.collection.children.link(user_collection)
+        output_collection = None
+        try:
+            output_collection = get_or_create_output_collection(other_scene)
+            self.assertNotEqual(output_collection, user_collection)
+            self.assertIsNone(user_collection.get("dimensions_collection_role"))
+            self.assertEqual(
+                output_collection.get("dimensions_collection_role"),
+                "DIMENSIONS_OUTPUT",
+            )
+        finally:
+            bpy.data.scenes.remove(other_scene)
+            for collection in (output_collection, user_collection):
+                if collection is not None and collection.users == 0:
+                    bpy.data.collections.remove(collection)
+            if existing_named is not None and existing_named.name in bpy.data.collections:
+                existing_named.name = existing_name
+
+    def test_shared_tagged_collection_is_not_reused_by_another_scene(self):
+        original_collection = get_or_create_output_collection(self.scene)
+        other_scene = bpy.data.scenes.new("Dimensions Shared Output Guard")
+        other_scene.collection.children.link(original_collection)
+        other_collection = None
+        try:
+            other_collection = get_or_create_output_collection(other_scene)
+            self.assertNotEqual(other_collection, original_collection)
+            owners = [
+                scene
+                for scene in bpy.data.scenes
+                if other_collection in scene.collection.children_recursive
+            ]
+            self.assertEqual(owners, [other_scene])
+        finally:
+            bpy.data.scenes.remove(other_scene)
+            if other_collection is not None and other_collection.users == 0:
+                bpy.data.collections.remove(other_collection)
 
     def test_generated_strokes_render_in_eevee_and_cycles_when_available(self):
         output = generate_grease_pencil_output(

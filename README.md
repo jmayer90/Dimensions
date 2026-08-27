@@ -4,7 +4,7 @@ A Blender extension for precise viewport dimensions, measurements, and construct
 
 Dimensions gives you persistent, editable annotations that stay attached to your model as it changes. It's aimed at people who need to communicate sizes and angles from a Blender scene: product and furniture design, architectural massing, fabrication drawings, and anyone who has wished Blender's measure tool remembered anything.
 
-**Status:** early and actively developed (`0.3.x`). The interaction model is settled; the property schema is not yet frozen, but scenes now carry a schema version and are migrated on load, so annotations saved with an older version are upgraded rather than recreated. Requires **Blender 5.1 or newer**.
+**Status:** early and actively developed (`0.4.x`). The interaction model is settled; the property schema is not yet frozen, but scenes now carry a schema version and are migrated on load, so annotations saved with an older version are upgraded rather than recreated. Requires **Blender 5.1 or newer**.
 
 ## Features
 
@@ -16,6 +16,7 @@ Dimensions gives you persistent, editable annotations that stay attached to your
 - **Typed input** in scene units — `125mm`, `2ft`, `5"` — with `A`, `X`, `Y`, and `Z` axis constraints.
 - **Continuous placement** for dimensions, angles, areas, measurements, and guides, with a session axis that persists while the tool remains active.
 - **Presentation control** — metric and imperial formatting, projected distances, architectural tick or arrow endpoints, value prefixes and suffixes, linear tolerances, and per-annotation style overrides.
+- **Renderable linear dimensions** generated as Grease Pencil strokes for EEVEE or Cycles, using camera-relative pixels or explicit world-space sizing.
 - **A viewport HUD** showing selected-mesh dimensions and evaluated volume.
 
 Annotations are ordinary Blender objects in dedicated `Dimensions` and `Construction Guides` collections, so they select, undo, save, and link like anything else in your scene.
@@ -51,6 +52,8 @@ In Mesh Edit Mode, **Create Dimension** is selection-first: with exactly one edg
 
 **An angle dimension** acquires Edge A, then Edge B, then the arc radius. Connected edges use their shared vertex; disconnected or skew edges derive a virtual center from their supporting lines. A selected angle can switch solution or replace either edge independently.
 
+**Renderable output:** open **Grease Pencil Output** in the Dimensions sidebar, choose Selected or Visible linear annotations, and choose Camera Relative or World Scale sizing. Camera Relative uses the active camera and resolves pixel sizes at each annotation's depth; World Scale uses explicit scene-unit sizes. Click **Generate Grease Pencil Output** to create renderable strokes in the scene-owned `Dimensions Output` collection. Labels preserve Inline, Above, Outside, and custom-text ordering. Live annotations remain the source of truth. Generated objects are disposable: regenerating the same annotation replaces its prior output and any hand edits to that generated object.
+
 ### Keys
 
 | Key | Action |
@@ -67,13 +70,15 @@ Every key in this table is rebindable, and the modal keys take effect as soon as
 
 Linear and area annotations are placement objects. Move one with Blender's normal transform tools and you move its presentation — the source anchors stay attached, and the offset you set survives later changes to the source geometry or object transform.
 
-Text Size and Arrow Size are fixed viewport-pixel sizes. View zoom, projection, source transforms, and the annotation Empty's scale do not enlarge the live overlay. Generated render output will use separate sizing rules when that output path is added.
+Text Size and Arrow Size are fixed viewport-pixel sizes. View zoom, projection, source transforms, and the annotation Empty's scale do not enlarge the live overlay. Generated output has separate camera-pixel and world-space sizing controls.
 
 Linear dimensions can use the default open arrows or **Architectural Tick** endpoints. Set the default under **Global Dimension Style**, or override it for the selected dimension under **Local Style**.
 
 ## Known limitations
 
-- **Dimensions are viewport overlays and do not appear in renders.** A render or export path is planned but not built.
+- Grease Pencil generation currently supports linear dimensions only. Angle and area output are tracked separately; measurements and guides remain viewport/construction data.
+- Camera-relative output resolves presentation size at each dimension's midpoint. Coplanar dimensions target one output pixel of the live camera layout; dimensions that span substantially different camera depths can vary under perspective.
+- Generated output is an explicit snapshot, not a live link. Regeneration replaces matching generated objects and their hand edits. The compact stroke font maps lowercase custom text to uppercase and shows a visible fallback glyph for unsupported characters.
 - Construction guides are Object Mode only. Dimensions and measurements work in both modes.
 - Vertex anchors use persistent mesh point IDs. If topology removes an anchored point or duplicates its ID, the anchor resolves to the closest stored position rather than reporting a detached state. Surface anchors follow object transforms but not later deformation.
 - Live areas bind base-mesh faces from a single object. Modifier-evaluated and multi-object areas are not supported; lost or ambiguous faces surface a visible **Needs Repair** state rather than guessing.

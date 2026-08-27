@@ -39,9 +39,15 @@ The extension may inspect Edit Mode topology to acquire anchors or calculate val
 | `properties.py`, `ui.py` | Persist settings and expose scene and local editing. |
 | `preferences.py` | Stores per-user interaction thresholds and defaults without changing Blender settings outside the add-on. |
 | `units.py`, `volume.py` | Parse and format units and calculate evaluated closed-mesh volume. |
-| `output_geometry.py`, `grease_pencil_output.py` | Build world-space linear-annotation stroke specs and generate isolated, replaceable Grease Pencil output artifacts. |
+| `stroke_font.py`, `output_geometry.py`, `grease_pencil_output.py`, `operators/generate_output.py` | Build vector labels and world-space linear stroke specs, then generate isolated, replaceable Grease Pencil output artifacts. |
 
 Annotations are Empty objects with presentation properties and an annotation kind. Linear annotations use two measurement anchors. Live Areas store persistent face IDs in `dimensions_area_face_id`, source metadata, a cached value, and explicit Live/Captured/Needs Repair state. Two-edge Angles store four persistent endpoint anchors and derive a shared or virtual center. Vertex anchors store integer IDs in the mesh's `dimensions_anchor_id` point attribute. Angle arcs are generated in world space before viewport projection. A canonical source frame plus user presentation offset keeps annotation transforms editable. Guides and measurements are Empty objects in a separate collection.
+
+### Generated output
+
+The live overlay remains the editable source of truth. An explicit operator resolves visible or selected linear annotations into world-space stroke specifications, then creates separate Grease Pencil v3 objects in an exclusive scene-owned `Dimensions Output` collection. Grease Pencil was chosen over curves or meshes because it is Blender's native stroke surface, remains editable, and is verified to render in EEVEE and Cycles. A scene-owned object-pointer registry assigns persistent source keys without modifying annotation objects; regeneration replaces only the matching artifact, and the UI warns that hand edits are disposable. Existing user collections with the same display name are never adopted.
+
+Camera Relative sizing converts configured render pixels to world units at each annotation's midpoint depth and is the default. World Scale sizing uses explicit scene-unit values. Labels use a bundled single-line vector font so text, tolerances, and custom notes remain Grease Pencil strokes instead of introducing a second render-object type; their Inline, Above, Outside, and custom-text ordering rules mirror the live overlay. For a linear annotation whose endpoints share camera depth, camera-relative layout targets agreement within one output pixel. A perspective line spanning materially different depths uses the documented midpoint approximation. The initial surface is deliberately linear-only; angle and area output build on the same backend in [OUT-04](tickets/OUT-04-angle-area-output.md).
 
 ### Saved-data schema
 
@@ -52,6 +58,7 @@ Add-on preferences are per-user defaults and interaction tuning. Scene and annot
 | Schema | Introduced | Change |
 | --- | --- | --- |
 | 1 | 0.2.3 | Baseline schema; legacy vertex anchors receive persistent point IDs during `v0 → v1` migration. |
+| 2 | 0.4.0 | Additive Grease Pencil output settings and scene-owned source registry; v1 files receive documented defaults without overwriting existing values, and incomplete registry bindings are discarded. |
 
 ## Interaction contract
 
@@ -109,7 +116,7 @@ Set `DIMENSIONS_SNAP_PROFILE=1` for the add-on's own per-stage build, reproject,
 1. **Snap cache build cost on very dense scenes.** Query and draw costs are measured and within budget (see [Measured performance](#measured-performance)). Building the projected snap source cache is not: a 1M-vertex scene takes about 4.9 s because `_build_sources()` allocates one dictionary per vertex and projects each one individually. Caching around the outside cannot fix a per-vertex constant, so [FND-11](tickets/FND-11-snap-cache-build-cost.md) tracks replacing the per-vertex objects with bulk array reads. Scenes at or below 100k vertices build in under 0.4 s and are usable now.
 2. **Duplicated anchor IDs.** Blender topology duplication may copy a point ID. Resolution chooses the candidate closest to the stored fallback coordinate.
 3. **Face identity after topology duplication.** Live Areas use persistent face IDs. Missing, structurally changed, or duplicated identities intentionally enter Needs Repair instead of guessing; modifier-evaluated face correspondence is not yet defined.
-4. **Incomplete render output.** The OUT-01 foundation now generates tagged, scene-owned linear linework that renders in EEVEE and Cycles, but it is not exposed to users yet and text-to-stroke plus camera-relative sizing remain unresolved. Renderable dimensions were independently requested by two of the first five public reviewers, so [OUT-01](tickets/OUT-01-grease-pencil-output.md) remains the active major workstream ahead of construction milestones.
+4. **Partial annotation-kind output.** Renderable linear dimensions shipped in 0.4.0 with camera/world sizing and vector labels. Angle and area annotations do not generate yet; [OUT-04](tickets/OUT-04-angle-area-output.md) extends the established backend. Generated objects are snapshots and intentionally lose hand edits when regenerated.
 5. **Proxy lifecycle.** Native measurement snap proxies clear transient caches on undo/redo and linked annotations are read-only. Background lifecycle tests cover save/reload, proxy repair, duplicate proxy cleanup, and visibility. Append/link, library override, and two-window foreground QA remain release requirements because Blender background mode cannot exercise them.
 
 ## Lifecycle behavior matrix
@@ -135,7 +142,7 @@ Early public feedback reinforces the product definition rather than expanding it
 | --- | --- | --- |
 | Keep placing dimensions without leaving the tool | Accepted and delivered | [UX-01](tickets/UX-01-continuous-placement.md), delivered in 0.3.1 |
 | Choose Auto/X/Y/Z once, place a group, then switch direction | Accepted and delivered with repeated placement | [UX-01](tickets/UX-01-continuous-placement.md), delivered in 0.3.1 |
-| Render dimensions | Accept and accelerate; requested independently twice | [OUT-01](tickets/OUT-01-grease-pencil-output.md), next major workstream before new construction types |
+| Render dimensions | Accepted; linear path delivered | [OUT-01](tickets/OUT-01-grease-pencil-output.md), delivered in 0.4.0; angle and area follow in [OUT-04](tickets/OUT-04-angle-area-output.md) |
 | Replace arrows with architectural tick marks | Accepted and delivered | First slice of [DIM-04](tickets/DIM-04-presentation-controls.md), delivered in 0.3.2 with global and per-annotation controls |
 | Keep numeric labels from growing | Existing behavior verified and documented | [UX-08](tickets/UX-08-stable-overlay-sizing.md), delivered in 0.3.1; any zoom- or transform-driven growth is a bug |
 
@@ -152,7 +159,7 @@ Early public feedback reinforces the product definition rather than expanding it
 
 ### P1 — Renderable output, precision inference, and management
 
-- Generate selected or visible annotations as camera- or world-scaled Grease Pencil output that renders in EEVEE and Cycles, without replacing the live overlay annotations.
+- Extend the shipped linear Grease Pencil output path to angle and area annotations.
 - Add local-axis, parallel, perpendicular, extension, intersection, and active-plane inference with an explicit lock.
 - Add a scene annotation manager for search, rename, select, hide, isolate, repair, and bulk style operations.
 - Add temporary hover measurement with delta X/Y/Z and an explicit action to save it.
@@ -171,7 +178,7 @@ Mesh-line drawing, face cutting, rectangles, Push/Pull, general Offset, Move/Cop
 
 ## Release gate
 
-Version policy, the triggers that move the minor component, and the full 1.0 checklist are defined in [Versioning and release policy](VERSIONING.md). In short: the minor component only moves when a change breaks saved data, breaks the interaction contract, or adds a new product surface. M1 tripped the first two, which is why the manifest is on `0.3.0`.
+Version policy, the triggers that move the minor component, and the full 1.0 checklist are defined in [Versioning and release policy](VERSIONING.md). In short: the minor component only moves when a change breaks saved data, breaks the interaction contract, or adds a new product surface. M1 tripped the first two for 0.3.0; renderable Grease Pencil output tripped the third for 0.4.0.
 
 A release candidate should pass:
 
