@@ -1,6 +1,7 @@
 # DIM-02 — Radial, diameter, and arc-length dimensions
 
 **Milestone:** M5 Documentation-grade
+**Status:** ⬜ Planned.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.

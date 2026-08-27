@@ -1,6 +1,7 @@
 # UX-05 — User control over which snap targets are active
 
 **Milestone:** M2 Fluency
+**Status:** ⬜ Planned.
 **Effort:** S
 **Depends on:** FND-04
 **Version impact:** Patch.

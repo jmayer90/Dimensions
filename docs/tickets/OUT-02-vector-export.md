@@ -1,6 +1,7 @@
 # OUT-02 — SVG and PDF vector export
 
 **Milestone:** M4 Output
+**Status:** ⬜ Planned — sequenced after generated output and reusable styles stabilize.
 **Effort:** L
 **Depends on:** OUT-01
 **Version impact:** Patch, once `OUT-01` has established the output surface.

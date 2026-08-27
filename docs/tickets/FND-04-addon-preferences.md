@@ -1,6 +1,7 @@
 # FND-04 — Add-on preferences
 
 **Milestone:** M1 Foundation
+**Status:** ✅ Complete — delivered in 0.3.0.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch.

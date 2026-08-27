@@ -1,6 +1,7 @@
 # CON-04 — Angular guides and repeated spacing
 
 **Milestone:** M3 Construction
+**Status:** ⛔ Blocked — waiting on `CON-02`.
 **Effort:** M
 **Depends on:** CON-02
 **Version impact:** Patch. Additive.

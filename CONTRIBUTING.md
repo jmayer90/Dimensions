@@ -88,6 +88,7 @@ In particular:
 - Bug fixes need a docs update when the fix changes user-visible behavior or corrects something the docs currently claim.
 - New limitations discovered along the way belong in the README's limitations list and `docs/DESIGN.md`'s known risks.
 - A change that sets a clear product direction should update the roadmap in `docs/DESIGN.md`.
+- Ticket delivery state is maintained in two places: the ticket's `Status` header and the matching row in `docs/tickets/README.md`. Update both in the same change, using **Complete**, **Partial**, **Next**, **Planned**, or **Blocked** from the index legend.
 
 ### Operator reports
 

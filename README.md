@@ -91,7 +91,7 @@ Linear dimensions can use the default open arrows or **Architectural Tick** endp
 Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test, and what the project is and isn't trying to be.
 
 - [docs/DESIGN.md](docs/DESIGN.md) — architecture, design invariants, known risks, and the prioritized roadmap. Read this first for anything non-trivial.
-- [docs/tickets/](docs/tickets/) — structured work tickets on the path to 1.0, each with acceptance criteria and a code map.
+- [docs/tickets/](docs/tickets/) — the canonical milestone/status dashboard plus structured work tickets with acceptance criteria and code maps.
 - [docs/VERSIONING.md](docs/VERSIONING.md) — what moves the version number, and what 1.0 will mean.
 
 ## License

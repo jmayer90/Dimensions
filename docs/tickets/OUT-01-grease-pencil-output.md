@@ -1,6 +1,7 @@
 # OUT-01 — Render path via generated Grease Pencil
 
 **Milestone:** M4 Output
+**Status:** ✅ Complete — the linear surface shipped in 0.4.0; angle and area continuation is `OUT-04`.
 **Effort:** L
 **Depends on:** FND-03
 **Version impact:** **Minor trigger 3 (new product surface)** — lands in `0.4.0`.

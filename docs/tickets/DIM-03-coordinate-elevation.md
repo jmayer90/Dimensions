@@ -1,6 +1,7 @@
 # DIM-03 — Coordinate and elevation dimensions
 
 **Milestone:** M5 Documentation-grade
+**Status:** ⬜ Planned.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.

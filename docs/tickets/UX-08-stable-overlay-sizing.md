@@ -1,6 +1,7 @@
 # UX-08 — Verify and enforce stable screen-space label sizing
 
 **Milestone:** M2 Fluency
+**Status:** ✅ Complete — verified, documented, and regression-tested in 0.3.1.
 **Effort:** S
 **Depends on:** —
 **Version impact:** Patch if a bug is found; documentation and regression coverage otherwise.

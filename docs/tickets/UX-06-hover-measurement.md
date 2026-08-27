@@ -1,6 +1,7 @@
 # UX-06 — Transient hover measurement with delta X/Y/Z
 
 **Milestone:** M2 Fluency
+**Status:** ⬜ Planned.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch.

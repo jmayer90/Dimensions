@@ -39,49 +39,51 @@ See the [1.0 gate](#the-10-gate) below for the full checklist.
 
 Milestones organize work. Versions track compatibility. They are deliberately not the same axis.
 
-| Milestone | Content | Likely version impact |
-| --- | --- | --- |
-| **M1 — Foundation** | `FND-*`. Schema versioning, selection architecture, draw performance, preferences, keymaps, test infrastructure. | **`0.3.0`** — trips triggers 1 and 2. |
-| **M2 — Fluency** | `UX-*`. Continuous placement, annotation manager, inference, direct handles, snap control. | Patches on the `0.3.x` line, unless a specific ticket trips trigger 2. |
-| **M3 — Construction** | `CON-*`. Guide points, offset and angular guides, guide planes, spacing. | Patches. New surfaces that reuse the existing contract. |
-| **M4 — Output** | `OUT-*`. Grease Pencil generation, vector export, styles. | **`0.4.0`** — trips trigger 3. |
-| **M5 — Documentation-grade** | `DIM-*`. Chain, baseline, radial, diameter, arc-length, coordinate dimensions. | Patches, mostly additive. |
-| **M6 — 1.0 gate** | Hardening, migration fixtures, compatibility promise. | **`1.0.0`**. |
+Delivery status is summarized here and maintained in detail in the [work-ticket index](tickets/README.md).
+
+| Milestone | Delivery status | Content | Likely version impact |
+| --- | --- | --- | --- |
+| **M1 — Foundation** | 🟨 Partial | Implementation shipped in 0.3.0; `FND-07` foreground append/link and two-window QA remains. | **`0.3.0`** — trips triggers 1 and 2. |
+| **M2 — Fluency** | 🟨 Partial | `UX-01` and `UX-08` complete; `FND-11` is next; remaining `UX-*` planned. | Patches on the `0.3.x`/`0.4.x` lines unless a ticket trips trigger 2. |
+| **M3 — Construction** | ⬜ Planned | `CON-*`. Guide points, offset and angular guides, guide planes, spacing. | Patches. New surfaces that reuse the existing contract. |
+| **M4 — Output** | 🟨 Partial | Linear `OUT-01` complete; `OUT-03` and `OUT-04` next; vector export planned. | **`0.4.0`** tripped trigger 3; follow-ups are patches unless scope changes. |
+| **M5 — Documentation-grade** | 🟨 Partial | Architectural ticks complete; remaining `DIM-04` and `DIM-01` through `DIM-03` planned. | Patches, mostly additive. |
+| **M6 — 1.0 gate** | ⬜ Planned | Hardening, migration fixtures, compatibility promise. | **`1.0.0`**. |
 
 Milestone numbers group related work and version impact; they are not a strict delivery queue. M1 gates everything else, because building on an unversioned schema and an unsound selection architecture just increases what has to be unwound later. Early user feedback moved `UX-01` and `UX-08` into 0.3.1, architectural ticks into 0.3.2, and the first renderable linear output surface into 0.4.0. The 0.4.0 release also advances the saved-data schema additively from v1 to v2; existing values are preserved. `OUT-04` completes angle and area coverage on the 0.4.x line while other M2 and M3 work can proceed in parallel.
 
 ## The 1.0 gate
 
-Every item must be true. Ticket IDs point at the work that makes it true.
+Every item must be true before 1.0. Checked items are already satisfied in the current release; unchecked items remain part of the gate. Ticket IDs point at the supporting work.
 
 **Data integrity**
 
-- [ ] Property groups carry a schema version and a migration dispatcher runs on load — `FND-02`.
-- [ ] Migration is covered by fixture `.blend` files saved by each earlier released version — `FND-02`, `FND-06`.
+- [x] Property groups carry a schema version and a migration dispatcher runs on load — `FND-02`.
+- [x] Migration is covered by fixture `.blend` files saved by each earlier released schema — `FND-02`, `FND-06`.
 - [ ] Every persistent object type survives save/reload, undo/redo, append, and link — `FND-07`.
 
 **Architecture**
 
-- [ ] Selection uses a `WorkSpaceTool` or registered keymap, not a self-restarting background modal — `FND-01`.
-- [ ] Draw cost scales with annotation count, not scene object count, and meets a documented budget — `FND-03`.
+- [x] Selection uses a `WorkSpaceTool` or registered keymap, not a self-restarting background modal — `FND-01`.
+- [x] Draw cost scales with annotation count, not scene object count, and meets a documented budget — `FND-03`.
 - [ ] Snap acquisition meets a documented budget on a dense reference scene — `FND-08`.
 
 **User control**
 
-- [ ] Add-on preferences expose thresholds, sizes, and defaults — `FND-04`.
-- [ ] Keymaps are registered and user-customizable — `FND-05`.
+- [x] Add-on preferences expose thresholds, sizes, and defaults — `FND-04`.
+- [x] Keymaps are registered and user-customizable — `FND-05`.
 - [ ] Annotations can be managed in bulk: list, search, isolate, repair, restyle — `UX-02`.
 
 **Capability**
 
-- [ ] Dimensions reach final output through at least one render or export path — `OUT-01`.
-- [ ] Continuous placement works for the common annotation types — `UX-01`.
+- [x] Dimensions reach final output through at least one render or export path — `OUT-01`.
+- [x] Continuous placement works for the common annotation types — `UX-01`.
 
 **Quality**
 
-- [ ] Modal operators have automated coverage — `FND-06`.
+- [x] Modal operators have automated coverage — `FND-06`.
 - [ ] No known data-loss or crash defects.
-- [ ] README, DESIGN, and CONTRIBUTING describe shipped behavior, with the limitations list current.
+- [x] README, DESIGN, and CONTRIBUTING describe shipped behavior, with the limitations list current.
 
 ## After 1.0
 

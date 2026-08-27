@@ -1,6 +1,7 @@
 # FND-06 — Make modal operators testable, then test them
 
 **Milestone:** M1 Foundation
+**Status:** ✅ Complete — delivered in 0.3.0; suites continue to expand with features.
 **Effort:** L
 **Depends on:** —
 **Version impact:** Patch.

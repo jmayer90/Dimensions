@@ -1,6 +1,7 @@
 # UX-02 — Annotation manager: list, search, isolate, repair, restyle
 
 **Milestone:** M2 Fluency
+**Status:** ⬜ Planned.
 **Effort:** L
 **Depends on:** —
 **Version impact:** Patch.

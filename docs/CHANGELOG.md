@@ -10,6 +10,7 @@ All notable user-visible changes are recorded here. Versions before 0.2.0 were r
 - Verified non-empty generated strokes in both EEVEE and Cycles on Blender 5.2. Repeated local runs generated 100 labeled linear annotations in under 0.4 seconds.
 - This is a minor release because renderable output is a new product surface under version-policy trigger 3. Angle and area generation remain follow-up work.
 - Added the schema v1 to v2 migration for the new output settings and scene-owned source registry; existing `.blend` files keep their saved values, receive defaults only when a field is absent, and discard incomplete registry bindings.
+- Reorganized roadmap documentation around explicit Complete, Partial, Next, Planned, and Blocked states, with a milestone rollup, delivery sequence, and matching status headers on every work ticket.
 
 ## 0.3.2 — August 26, 2026
 

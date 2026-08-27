@@ -134,7 +134,18 @@ The expected result is shared across linear, angle, and area annotations, measur
 
 ## Prioritized roadmap
 
-The items below are the standing direction. They are broken into executable work in [`tickets/`](tickets/), which maps each priority band to a milestone and a set of tickets with acceptance criteria.
+The canonical ticket status, milestone rollup, and status legend live in the [work-ticket index](tickets/README.md). The items below explain priority and product direction; status labels use the same meanings as that index.
+
+### Current delivery sequence
+
+| Order | Work | Status | Outcome |
+| --- | --- | --- | --- |
+| 1 | 0.4.0 foreground and Blender 5.1 release QA | 🔍 Release QA | Validate the completed linear-output package in a clean interactive install. |
+| 2 | [OUT-04](tickets/OUT-04-angle-area-output.md) | ⏭ Next | Add angle and area Grease Pencil generation. |
+| 3 | [OUT-03](tickets/OUT-03-styles.md) | ⏭ Next | Add reusable named styles and unblock remaining presentation controls. |
+| Parallel | [FND-11](tickets/FND-11-snap-cache-build-cost.md) | ⏭ Next | Bring the 1M-vertex projected snap-cache build within budget. |
+| After OUT-03 | [DIM-04](tickets/DIM-04-presentation-controls.md) | 🟨 Partial | Complete the presentation controls beyond shipped architectural ticks. |
+| Later | [OUT-02](tickets/OUT-02-vector-export.md) | ⬜ Planned | Add scaled SVG/PDF output after generated output and styles stabilize. |
 
 Early public feedback reinforces the product definition rather than expanding it: every request concerns faster annotation, clearer presentation, or usable output. None requires mesh authoring. The disposition is:
 
@@ -148,29 +159,29 @@ Early public feedback reinforces the product definition rather than expanding it
 
 ### P0 — Trustworthy acquisition and repeated placement
 
-- Add an explicit rebind or convert-to-world action for users who need to override fallback anchor resolution.
-- Extend the Live/Captured/Needs Repair model with a guided repair picker and source highlighting.
-- Add direct viewport handles for Angle radius and Area label placement.
-- Define evaluated-modifier semantics for live Area bindings.
-- Give the canonical-frame and placement-offset model deliberate rotation and scale semantics.
-- Add foreground modal coverage for the constrained Area and two-edge Angle workflows.
-- Add repeatable dense-scene performance budgets and foreground modal-event tests.
-- Complete foreground lifecycle QA for measurement proxies and annotations.
+- ⬜ **Planned** — add an explicit rebind or convert-to-world action for users who need to override fallback anchor resolution.
+- ⛔ **Blocked** — extend the Live/Captured/Needs Repair model with a guided repair picker and source highlighting in [UX-07](tickets/UX-07-guided-repair.md), after [UX-02](tickets/UX-02-annotation-manager.md).
+- ⬜ **Planned** — add direct viewport handles for Angle radius and Area label placement in [UX-04](tickets/UX-04-direct-handles.md).
+- ⬜ **Planned** — define evaluated-modifier semantics for live Area bindings.
+- ⬜ **Planned** — give the canonical-frame and placement-offset model deliberate rotation and scale semantics.
+- 🔍 **Release QA** — add foreground modal coverage for the constrained Area and two-edge Angle workflows.
+- 🟨 **Partial** — dense-scene budgets and background tests exist; [FND-11](tickets/FND-11-snap-cache-build-cost.md) and foreground modal-event coverage remain.
+- 🔍 **Release QA** — complete foreground lifecycle QA for measurement proxies and annotations.
 
 ### P1 — Renderable output, precision inference, and management
 
-- Extend the shipped linear Grease Pencil output path to angle and area annotations.
-- Add local-axis, parallel, perpendicular, extension, intersection, and active-plane inference with an explicit lock.
-- Add a scene annotation manager for search, rename, select, hide, isolate, repair, and bulk style operations.
-- Add temporary hover measurement with delta X/Y/Z and an explicit action to save it.
-- Add offset guides, guide points, guide planes, angular guides, and repeated spacing.
+- ⏭ **Next** — extend the shipped linear Grease Pencil path to angle and area annotations in [OUT-04](tickets/OUT-04-angle-area-output.md).
+- ⬜ **Planned** — add local-axis, parallel, perpendicular, extension, intersection, and active-plane inference in [UX-03](tickets/UX-03-inference-engine.md).
+- ⬜ **Planned** — add search, rename, select, hide, isolate, repair, and bulk style operations in [UX-02](tickets/UX-02-annotation-manager.md).
+- ⬜ **Planned** — add temporary hover measurement with delta X/Y/Z in [UX-06](tickets/UX-06-hover-measurement.md).
+- ⬜ **Planned / blocked by sequence** — start construction with [CON-01](tickets/CON-01-guide-points.md); `CON-02` through `CON-04` follow its dependency chain.
 
 ### P2 — Documentation-grade dimensions
 
-- Extend true/global-axis projected length with local-axis and view-plane modes.
-- Add chain, baseline, radial, diameter, arc-length, coordinate, and elevation dimensions.
-- Add extension gaps and overshoot, additional arrow variants, label alignment, tolerance, prefix or suffix, and dual-unit display. Architectural ticks shipped in 0.3.2.
-- Add scaled SVG and PDF export after the renderable Grease Pencil path is established.
+- ⬜ **Planned** — extend true/global-axis projected length with local-axis and view-plane modes through [UX-03](tickets/UX-03-inference-engine.md).
+- ⬜ **Planned** — add chain, baseline, radial, diameter, arc-length, coordinate, and elevation dimensions in [DIM-01](tickets/DIM-01-chain-baseline.md), [DIM-02](tickets/DIM-02-radial-diameter-arc.md), and [DIM-03](tickets/DIM-03-coordinate-elevation.md).
+- 🟨 **Partial** — architectural ticks shipped in 0.3.2; extension gaps, overshoot, arrow variants, alignment, and dual units remain in [DIM-04](tickets/DIM-04-presentation-controls.md).
+- ⬜ **Planned** — add scaled SVG and PDF export in [OUT-02](tickets/OUT-02-vector-export.md) after generated output and styles stabilize.
 
 ## Explicitly excluded scope
 

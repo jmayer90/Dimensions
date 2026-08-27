@@ -1,6 +1,7 @@
 # UX-03 — Inference: parallel, perpendicular, extension, intersection, local axis
 
 **Milestone:** M2 Fluency
+**Status:** ⬜ Planned.
 **Effort:** L
 **Depends on:** FND-08
 **Version impact:** Patch, unless it changes documented constraint keys — coordinate with `FND-05`.

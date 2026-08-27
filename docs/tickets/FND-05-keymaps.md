@@ -1,6 +1,7 @@
 # FND-05 — Registered, customizable keymaps
 
 **Milestone:** M1 Foundation
+**Status:** ✅ Complete — delivered in 0.3.0.
 **Effort:** M
 **Depends on:** FND-01, FND-04
 **Version impact:** Patch, unless default bindings change a documented contract key.

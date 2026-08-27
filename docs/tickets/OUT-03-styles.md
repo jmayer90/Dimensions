@@ -1,6 +1,7 @@
 # OUT-03 — Named, reusable annotation styles
 
 **Milestone:** M4 Output
+**Status:** ⏭ Next — selected alongside `OUT-04` for the next delivery phase.
 **Effort:** M
 **Depends on:** FND-02
 **Version impact:** Patch, provided existing per-annotation properties keep working.

@@ -1,6 +1,7 @@
 # DIM-01 — Chain and baseline dimensions
 
 **Milestone:** M5 Documentation-grade
+**Status:** ⬜ Planned.
 **Effort:** M
 **Depends on:** UX-01
 **Version impact:** Patch. Additive.

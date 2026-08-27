@@ -1,6 +1,7 @@
 # CON-03 — Guide planes and an active construction plane
 
 **Milestone:** M3 Construction
+**Status:** ⛔ Blocked — waiting on `CON-02`.
 **Effort:** L
 **Depends on:** CON-02
 **Version impact:** Patch to add planes. Minor trigger 2 if the active plane changes how existing axis constraints resolve.

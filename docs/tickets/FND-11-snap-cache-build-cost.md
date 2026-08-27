@@ -1,6 +1,7 @@
 # FND-11 — Bring the projected snap cache build within budget
 
 **Milestone:** M2 Fluency (carried from M1)
+**Status:** ⏭ Next — the query path is complete; the 1M-vertex cache build remains over budget.
 **Effort:** M
 **Depends on:** FND-08
 **Version impact:** Patch.

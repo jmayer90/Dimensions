@@ -1,6 +1,7 @@
 # FND-03 — Make draw cost scale with annotations, not scene size
 
 **Milestone:** M1 Foundation
+**Status:** ✅ Complete — delivered in 0.3.0.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch.

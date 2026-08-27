@@ -1,6 +1,7 @@
 # UX-07 — Guided repair for broken anchors and area bindings
 
 **Milestone:** M2 Fluency
+**Status:** ⛔ Blocked — waiting on `UX-02`.
 **Effort:** M
 **Depends on:** UX-02
 **Version impact:** Patch.

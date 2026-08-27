@@ -1,6 +1,7 @@
 # CON-02 — Offset and parallel guides at a typed distance
 
 **Milestone:** M3 Construction
+**Status:** ⛔ Blocked — waiting on `CON-01`.
 **Effort:** M
 **Depends on:** CON-01
 **Version impact:** Patch. Additive.

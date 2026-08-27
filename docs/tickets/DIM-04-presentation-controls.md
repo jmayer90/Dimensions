@@ -1,6 +1,7 @@
 # DIM-04 — Drafting presentation controls: ticks, arrows, units, and alignment
 
 **Milestone:** M5 Documentation-grade
+**Status:** 🟨 Partial — architectural ticks shipped in 0.3.2; remaining controls follow `OUT-03`.
 **Effort:** M
 **Depends on:** OUT-03
 **Version impact:** Patch. Additive.

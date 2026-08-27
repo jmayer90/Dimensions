@@ -1,6 +1,7 @@
 # OUT-04 — Extend generated output to angle and area annotations
 
 **Milestone:** M4 Output
+**Status:** ⏭ Next — extends the completed linear `OUT-01` surface.
 **Effort:** M
 **Depends on:** OUT-01
 **Version impact:** Patch on the `0.4.x` line.

@@ -1,6 +1,7 @@
 # FND-07 — Lifecycle hardening: undo, append, link, multi-scene
 
 **Milestone:** M1 Foundation
+**Status:** 🟨 Partial — background hardening shipped in 0.3.0; append/link and two-window foreground QA remain.
 **Effort:** M
 **Depends on:** FND-02
 **Version impact:** Patch.

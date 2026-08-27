@@ -1,6 +1,7 @@
 # CON-01 — Guide points
 
 **Milestone:** M3 Construction
+**Status:** ⬜ Planned.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.

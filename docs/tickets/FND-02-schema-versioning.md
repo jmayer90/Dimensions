@@ -1,6 +1,7 @@
 # FND-02 — Saved-data schema versioning and migration
 
 **Milestone:** M1 Foundation
+**Status:** ✅ Complete — delivered in 0.3.0; schema v2 followed in 0.4.0.
 **Effort:** L
 **Depends on:** —
 **Version impact:** Patch to add the framework. Any later schema change that loses data is minor trigger 1.

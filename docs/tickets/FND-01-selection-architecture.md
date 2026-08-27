@@ -1,6 +1,7 @@
 # FND-01 — Replace the always-on click-select modal
 
 **Milestone:** M1 Foundation
+**Status:** ✅ Complete — delivered in 0.3.0.
 **Effort:** L
 **Depends on:** —
 **Version impact:** Minor trigger 2 (interaction-contract change) — lands in `0.3.0`.

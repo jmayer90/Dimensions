@@ -1,6 +1,7 @@
 # UX-01 — Continuous placement with a persistent axis mode
 
 **Milestone:** M2 Fluency
+**Status:** ✅ Complete — delivered in 0.3.1.
 **Effort:** M
 **Depends on:** — (test coverage from `FND-06` strongly recommended first)
 **Version impact:** Patch. Additive and default-off, or default-on with an obvious exit.

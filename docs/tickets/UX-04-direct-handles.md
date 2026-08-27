@@ -1,6 +1,7 @@
 # UX-04 — Direct viewport handles for placement, radius, and offset
 
 **Milestone:** M2 Fluency
+**Status:** ⬜ Planned.
 **Effort:** M
 **Depends on:** FND-01
 **Version impact:** Patch.

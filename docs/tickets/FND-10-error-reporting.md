@@ -1,6 +1,7 @@
 # FND-10 — Consistent, actionable error reporting
 
 **Milestone:** M1 Foundation
+**Status:** ✅ Complete — delivered in 0.3.0.
 **Effort:** S
 **Depends on:** —
 **Version impact:** Patch.
