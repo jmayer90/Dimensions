@@ -52,6 +52,7 @@ class LayoutRecorder:
     def __init__(self):
         self.labels = []
         self.properties = []
+        self.enum_properties = []
         self.operators = []
         self.events = []
         self.enabled = True
@@ -73,6 +74,10 @@ class LayoutRecorder:
     def prop(self, target, name, **kwargs):
         self.properties.append((target, name, kwargs))
         self.events.append(("PROPERTY", name))
+
+    def prop_enum(self, target, name, value, **kwargs):
+        self.enum_properties.append((target, name, value, kwargs))
+        self.events.append(("PROPERTY_ENUM", name, value))
 
     def operator(self, identifier, **_kwargs):
         self.operators.append(identifier)
@@ -242,14 +247,16 @@ class InteractionContextTests(unittest.TestCase):
             self.assertEqual(session_axis(context), "Z")
 
         self.assertIn("Direction", layout.labels)
-        self.assertIn(
-            (preferences, "default_axis_mode", {"text": "", "expand": True}),
-            layout.properties,
-        )
+        self.assertEqual(layout.enum_properties, [
+            (preferences, "default_axis_mode", "ALIGNED", {"text": "Auto"}),
+            (preferences, "default_axis_mode", "X", {"text": "X"}),
+            (preferences, "default_axis_mode", "Y", {"text": "Y"}),
+            (preferences, "default_axis_mode", "Z", {"text": "Z"}),
+        ])
         self.assertEqual(layout.events.count("COLUMN"), 2)
         self.assertLess(
             layout.events.index(("OPERATOR", "dimensions.create_dimension")),
-            layout.events.index(("PROPERTY", "default_axis_mode")),
+            layout.events.index(("PROPERTY_ENUM", "default_axis_mode", "ALIGNED")),
         )
 
     def test_mesh_selection_actions_use_an_edit_mode_child_panel(self):

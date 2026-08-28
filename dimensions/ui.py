@@ -29,12 +29,10 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
 
         direction = self.layout.column(align=True)
         direction.label(text="Direction")
-        direction.prop(
-            get_preferences(context),
-            "default_axis_mode",
-            text="",
-            expand=True,
-        )
+        direction_buttons = direction.row(align=True)
+        preferences = get_preferences(context)
+        for value, label in (("ALIGNED", "Auto"), ("X", "X"), ("Y", "Y"), ("Z", "Z")):
+            direction_buttons.prop_enum(preferences, "default_axis_mode", value, text=label)
 
 
 class CADDIM_PT_MeshSelection(CADDIM_PT_PanelBase, bpy.types.Panel):

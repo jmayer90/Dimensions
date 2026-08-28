@@ -9,7 +9,7 @@ All notable user-visible changes are recorded here. Versions before 0.2.0 were r
 - Extended Selected and Visible output scope, Camera Relative and World Scale sizing, per-annotation regeneration, and mixed EEVEE/Cycles render coverage across linear, angle, and area annotations. Areas in Needs Repair are skipped with an actionable warning.
 - Restored a discoverable pre-placement direction workflow: the main sidebar exposes Auto/X/Y/Z choices, and a compact lower-corner badge identifies the active tool and direction without covering the working geometry.
 - Replaced the cursor-following placement instructions with the compact badge. Typed distance appears there only while entering it, and invalid input remains visibly flagged.
-- Kept the direction choice directly below the creation tools in tool-first, settings-second order, while giving its Auto/X/Y/Z buttons the full sidebar width so their labels remain visible in narrow panels.
+- Kept the direction choice directly below the creation tools in tool-first, settings-second order, using four explicitly labeled Auto/X/Y/Z buttons across the full sidebar width so Blender cannot omit their captions.
 - Converted the Edit Mode **From Mesh Selection** action box into a contextual, collapsible child panel matching the rest of the Dimensions sidebar.
 - Generated Grease Pencil objects now disable Use Lights and use 3D Location stroke depth; generation also enables the active view layer's Depth and Grease Pencil data passes for render-ready output.
 - Added **Outside Start** text placement as the mirror of the existing **Outside End** option, with matching live-overlay and generated-output behavior. Existing Outside End settings keep their appearance.
