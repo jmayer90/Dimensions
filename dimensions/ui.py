@@ -26,23 +26,6 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
         guide_row = self.layout.row()
         guide_row.enabled = context.mode == "OBJECT"
         guide_row.operator("dimensions.create_guide", icon="EMPTY_AXIS")
-        if context.mode == "EDIT_MESH":
-            selection_box = self.layout.box()
-            selection_box.label(text="From Mesh Selection")
-            selection_box.operator(
-                "dimensions.dimension_selected_edge",
-                icon="DRIVER_DISTANCE",
-            )
-            selection_box.operator(
-                "dimensions.angle_selected_edges",
-                icon="DRIVER_ROTATIONAL_DIFFERENCE",
-            )
-            selection_box.operator("dimensions.create_area", text="Area from Selected Faces", icon="FACESEL")
-            selection_box.operator(
-                "dimensions.rebind_area_from_selection",
-                text="Apply Faces to Selected Area",
-                icon="FILE_REFRESH",
-            )
 
         direction = self.layout.column(align=True)
         direction.label(text="Direction")
@@ -54,11 +37,33 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
         )
 
 
+class CADDIM_PT_MeshSelection(CADDIM_PT_PanelBase, bpy.types.Panel):
+    bl_label = "From Mesh Selection"
+    bl_idname = "CADDIM_PT_mesh_selection"
+    bl_parent_id = CADDIM_PT_MainPanel.bl_idname
+    bl_order = 0
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == "EDIT_MESH"
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.operator("dimensions.dimension_selected_edge", icon="DRIVER_DISTANCE")
+        layout.operator("dimensions.angle_selected_edges", icon="DRIVER_ROTATIONAL_DIFFERENCE")
+        layout.operator("dimensions.create_area", text="Area from Selected Faces", icon="FACESEL")
+        layout.operator(
+            "dimensions.rebind_area_from_selection",
+            text="Apply Faces to Selected Area",
+            icon="FILE_REFRESH",
+        )
+
+
 class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Global Dimension Settings"
     bl_idname = "CADDIM_PT_global_settings"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 1
+    bl_order = 2
 
     def draw(self, context):
         layout = self.layout
@@ -92,7 +97,7 @@ class CADDIM_PT_MeshSizeHUD(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Selected Mesh Size HUD"
     bl_idname = "CADDIM_PT_mesh_size_hud"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 0
+    bl_order = 1
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -114,7 +119,7 @@ class CADDIM_PT_GlobalStyle(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Global Dimension Style"
     bl_idname = "CADDIM_PT_global_style"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 2
+    bl_order = 3
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -136,7 +141,7 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Selected Dimension (Local)"
     bl_idname = "CADDIM_PT_selected_dimension"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 4
+    bl_order = 5
 
     def draw(self, context):
         layout = self.layout
@@ -253,7 +258,7 @@ class CADDIM_PT_ConstructionGuides(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Construction Guides"
     bl_idname = "CADDIM_PT_construction_guides"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 3
+    bl_order = 4
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -273,7 +278,7 @@ class CADDIM_PT_Output(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Grease Pencil Output"
     bl_idname = "CADDIM_PT_output"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 5
+    bl_order = 6
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -311,6 +316,7 @@ def _vertex_picker_text(anchor):
 
 classes = (
     CADDIM_PT_MainPanel,
+    CADDIM_PT_MeshSelection,
     CADDIM_PT_MeshSizeHUD,
     CADDIM_PT_GlobalSettings,
     CADDIM_PT_GlobalStyle,

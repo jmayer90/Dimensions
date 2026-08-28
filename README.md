@@ -46,7 +46,7 @@ To select an existing annotation directly in the viewport, activate **Dimensions
 
 After a commit, the tool starts another placement while retaining its session axis and placement offset. A small lower-corner badge shows the active tool and direction, plus typed distance only while you are entering one. Press `A`, `X`, `Y`, or `Z` at the fresh stage to change direction for the next annotation. Press `Esc` or right-click to exit the session. Changing mode or the active object also ends it cleanly.
 
-In Mesh Edit Mode, **Create Dimension** is selection-first: with exactly one edge selected it commits a length immediately, and any other selection falls through to interactive picking.
+In Mesh Edit Mode, **Create Dimension** is selection-first: with exactly one edge selected it commits a length immediately, and any other selection falls through to interactive picking. The contextual, collapsible **From Mesh Selection** panel also provides explicit selected-edge angle and length actions plus selected-face area actions.
 
 **An area dimension** works in both modes. In Edit Mode, select faces first, run the tool, then place the label. In Object Mode, click a face — Shift-click to add more, `Enter` to proceed — then place the label. A selected area also exposes **Remake Area**, **Select Source Faces**, and **Capture**.
 

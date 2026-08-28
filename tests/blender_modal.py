@@ -29,7 +29,7 @@ from dimensions.drawing import _draw_interaction_status
 from dimensions.interaction import remember_session_context, session_axis, session_context_changed
 from dimensions.modal_state import PointPlacementState
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
-from dimensions.ui import CADDIM_PT_MainPanel
+from dimensions.ui import CADDIM_PT_MainPanel, CADDIM_PT_MeshSelection
 
 from support import (
     EmptySnapProvider,
@@ -251,6 +251,26 @@ class InteractionContextTests(unittest.TestCase):
             layout.events.index(("OPERATOR", "dimensions.create_dimension")),
             layout.events.index(("PROPERTY", "default_axis_mode")),
         )
+
+    def test_mesh_selection_actions_use_an_edit_mode_child_panel(self):
+        object_context = make_context(scene=bpy.context.scene)
+        edit_context = make_context(scene=bpy.context.scene)
+        edit_context.mode = "EDIT_MESH"
+
+        self.assertFalse(CADDIM_PT_MeshSelection.poll(object_context))
+        self.assertTrue(CADDIM_PT_MeshSelection.poll(edit_context))
+
+        layout = LayoutRecorder()
+        panel = SimpleNamespace(layout=layout)
+        CADDIM_PT_MeshSelection.draw(panel, edit_context)
+        self.assertEqual(layout.operators, [
+            "dimensions.dimension_selected_edge",
+            "dimensions.angle_selected_edges",
+            "dimensions.create_area",
+            "dimensions.rebind_area_from_selection",
+        ])
+        self.assertEqual(CADDIM_PT_MeshSelection.bl_parent_id, CADDIM_PT_MainPanel.bl_idname)
+        self.assertLess(CADDIM_PT_MeshSelection.bl_order, 1)
 
 
 class CreateDimensionModalTests(unittest.TestCase):
