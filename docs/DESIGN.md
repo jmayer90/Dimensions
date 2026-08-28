@@ -69,6 +69,7 @@ Add-on preferences are per-user defaults and interaction tuning. Scene and annot
 - Middle-mouse drag chooses a projected global axis after a start point exists; before that, middle mouse remains viewport navigation.
 - Typed scene-unit distance can precede or follow an axis choice. `Enter` confirms the current valid stage.
 - Creation tools use continuous placement by default. After each commit they retain the session axis and placement offset, clear per-annotation snaps and typed input, and return to their first stage. `Esc` or right-click exits a continuous session; changing mode or the active object ends it without leaking preview state. Users can disable continuous placement in add-on preferences to restore the step-back behavior.
+- Active modal tools use a fixed, compact lower-corner badge showing only the tool, direction when applicable, and typed input while present. Shortcut and exit instructions stay in the README key reference instead of following the cursor or obscuring geometry.
 - Dimension and measurement point acquisition works in Object and Mesh Edit Mode without modifying the mesh.
 - The main Dimension command is selection-first in Edit Mode: exactly one selected edge commits a length immediately; other selections enter interactive point acquisition.
 - Edit selection can create a length from one edge, an angle from any two non-parallel edges, or an area leader from one or more faces.

@@ -44,7 +44,7 @@ To select an existing annotation directly in the viewport, activate **Dimensions
 3. Optionally press `A`, `X`, `Y`, or `Z` — or drag middle mouse after the first point — to lock to a global axis.
 4. Optionally type a distance and press `Enter`. Clicking also commits a valid stage.
 
-After a commit, the tool starts another placement while retaining its session axis and placement offset. Press `A`, `X`, `Y`, or `Z` at the fresh stage to change direction for the next annotation. Press `Esc` or right-click to exit the session. Changing mode or the active object also ends it cleanly.
+After a commit, the tool starts another placement while retaining its session axis and placement offset. A small lower-corner badge shows the active tool and direction, plus typed distance only while you are entering one. Press `A`, `X`, `Y`, or `Z` at the fresh stage to change direction for the next annotation. Press `Esc` or right-click to exit the session. Changing mode or the active object also ends it cleanly.
 
 In Mesh Edit Mode, **Create Dimension** is selection-first: with exactly one edge selected it commits a length immediately, and any other selection falls through to interactive picking.
 

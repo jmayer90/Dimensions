@@ -317,11 +317,45 @@ class CreateDimensionModalTests(unittest.TestCase):
         self.assertEqual(preview["axis"], "Y")
         self.assertTrue(preview["axis_selectable"])
 
-    def test_selectable_axis_status_identifies_the_pre_pick_keys(self):
+    def test_interaction_status_is_a_compact_corner_badge(self):
         with patch("dimensions.drawing._draw_text_left") as draw_text:
-            _draw_interaction_status({"axis": "X", "axis_selectable": True})
+            _draw_interaction_status({
+                "axis": "X",
+                "axis_selectable": True,
+                "continuous_placement": True,
+                "hover_label": "Vertex",
+                "hover_screen": (600.0, 400.0),
+            })
 
-        self.assertIn("Direction: X (press A/X/Y/Z)", draw_text.call_args.args[0])
+        text, position, _color, text_size = draw_text.call_args.args
+        self.assertEqual(text, "DIM · X")
+        self.assertEqual(tuple(position), (24.0, 44.0))
+        self.assertEqual(text_size, 12)
+        self.assertNotIn("Esc", text)
+        self.assertNotIn("Right", text)
+        self.assertNotIn("Vertex", text)
+
+    def test_interaction_status_only_adds_input_while_typing(self):
+        with patch("dimensions.drawing._draw_text_left") as draw_text:
+            _draw_interaction_status({
+                "tool_label": "GUIDE",
+                "axis": "ALIGNED",
+                "distance_text": "2m",
+            })
+
+        self.assertEqual(draw_text.call_args.args[0], "GUIDE · Auto · 2m")
+
+    def test_invalid_interaction_input_stays_visible(self):
+        with patch("dimensions.drawing._draw_text_left") as draw_text:
+            _draw_interaction_status({
+                "tool_label": "MEASURE",
+                "axis": "Z",
+                "distance_text": "bad",
+                "distance_input_valid": False,
+            })
+
+        self.assertEqual(draw_text.call_args.args[0], "MEASURE · Z · ! bad")
+        self.assertEqual(draw_text.call_args.args[2], (1.0, 0.22, 0.12, 1.0))
 
     def test_two_clicks_advance_to_the_placement_stage(self):
         self._pick_two_points()

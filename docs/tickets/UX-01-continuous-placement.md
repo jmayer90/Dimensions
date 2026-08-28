@@ -35,7 +35,7 @@ Which state persists across a repeat is the main design decision, so decide it d
 
 **Exit clearly.** `Esc` and right-click already cancel. In continuous mode they must exit the tool entirely rather than only stepping back a stage — the user needs one reliable way out. Since `Esc` currently clears numeric input first, then steps back, the full sequence from a fresh stage should reach exit rather than looping.
 
-**Show that it is active.** A user who does not realize the tool is still running will be confused by their next click creating a dimension. The status text drawn by `_draw_interaction_status()` must say so, and Blender's header status area should show the available actions.
+**Show that it is active.** A user who does not realize the tool is still running will be confused by their next click creating a dimension. The compact lower-corner badge drawn by `_draw_interaction_status()` shows the active tool and direction without repeating shortcut instructions over the working geometry; the README key reference documents the available actions.
 
 **Make it a preference, not a mode.** Add a "Continuous placement" preference in `FND-04`'s Interaction section. Recommend defaulting it **on** — it matches every comparable tool — provided the exit is obvious and the status text is clear. If defaulting on, say so in the CHANGELOG, since it changes behavior for existing users.
 
@@ -49,7 +49,7 @@ Which state persists across a repeat is the main design decision, so decide it d
 - [ ] The active session mode is visible in the header or viewport status throughout placement.
 - [ ] A new session starts from a documented add-on preference whose default is Auto; finished annotations retain their own stored extension-axis value.
 - [ ] `Esc` from a fresh stage exits the tool; right-click exits from any stage.
-- [ ] Viewport status text shows that the tool is active and how to exit.
+- [ ] A compact viewport badge shows the active tool and direction without obscuring working geometry; exit controls are documented in the key reference.
 - [ ] Each committed annotation is a separate undo step — undoing once removes one dimension, not the whole session.
 - [ ] The behavior is a preference, and its default is documented in the CHANGELOG.
 - [ ] Applied to `create_dimension`, `create_angle`, `create_area`, `create_guide`, and `measure`.

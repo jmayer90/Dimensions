@@ -110,7 +110,12 @@ class SegmentBatcher:
 
 
 def set_preview_state(preview_state):
-    set_state("DIMENSION", preview_state)
+    state = dict(preview_state)
+    state.setdefault("tool_label", {
+        "ANGLE": "ANGLE",
+        "AREA": "AREA",
+    }.get(state.get("annotation_kind"), "DIM"))
+    set_state("DIMENSION", state)
 
 
 def clear_preview_state():
@@ -118,7 +123,9 @@ def clear_preview_state():
 
 
 def set_measure_state(state):
-    set_state("MEASURE", state)
+    display_state = dict(state)
+    display_state.setdefault("tool_label", "MEASURE")
+    set_state("MEASURE", display_state)
 
 
 def clear_measure_state():
@@ -126,7 +133,9 @@ def clear_measure_state():
 
 
 def set_guide_preview_state(state):
-    set_state("GUIDE", state)
+    display_state = dict(state)
+    display_state.setdefault("tool_label", "GUIDE")
+    set_state("GUIDE", display_state)
 
 
 def clear_guide_preview_state():
@@ -788,35 +797,19 @@ def _snap_highlight_geometry(context, snap, include_object_context=True):
 
 
 def _draw_interaction_status(state):
-    parts = []
-    if state.get("continuous_placement"):
-        parts.append("Continuous placement active (Esc or Right-click exits)")
-    label = state.get("hover_label")
-    if label:
-        parts.append(label)
+    parts = [state.get("tool_label", "DIM")]
     axis = state.get("axis")
     if axis is not None:
-        prefix = "MMB " if state.get("axis_gesture_active") else ""
-        direction = f"{prefix}Direction: {'Auto' if axis == 'ALIGNED' else axis}"
-        if state.get("axis_selectable"):
-            direction += " (press A/X/Y/Z)"
-        parts.append(direction)
+        parts.append("Auto" if axis == "ALIGNED" else axis)
     distance_text = state.get("distance_text", "").strip()
     if distance_text:
-        parts.append(f"Input: {distance_text}")
-    if not parts:
-        return
-    position = state.get("hover_screen")
-    if position is None:
-        position = Vector((24.0, 44.0))
-    else:
-        position = Vector((position.x + 14.0, position.y + 18.0))
+        parts.append(distance_text if state.get("distance_input_valid", True) else f"! {distance_text}")
     color = (
         (1.0, 0.22, 0.12, 1.0)
         if not state.get("distance_input_valid", True)
-        else (1.0, 0.82, 0.28, 1.0)
+        else (0.72, 0.78, 0.88, 0.78)
     )
-    _draw_text_left(" | ".join(parts), position, color)
+    _draw_text_left(" · ".join(parts), Vector((24.0, 44.0)), color, 12)
 
 
 def _draw_transient_measure(context, shader, state):
