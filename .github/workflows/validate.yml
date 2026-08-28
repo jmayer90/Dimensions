@@ -4,6 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   blender:
     name: ${{ matrix.os }} / Blender ${{ matrix.blender.version }}
@@ -14,17 +21,18 @@ jobs:
         blender:
           - version: 5.1.2
             series: "5.1"
-          - version: 5.2.0
+          - version: 5.2.1
             series: "5.2"
     env:
       BLENDER_VERSION: ${{ matrix.blender.version }}
       BLENDER_SERIES: ${{ matrix.blender.series }}
-      BLENDER_DIR: ${{ runner.temp }}/blender
     steps:
       - uses: actions/checkout@v4
       - name: Download Blender (Windows)
         if: runner.os == 'Windows'
         shell: powershell
+        env:
+          BLENDER_DIR: ${{ runner.temp }}/blender
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "blender.zip"
           Invoke-WebRequest "https://download.blender.org/release/Blender$env:BLENDER_SERIES/blender-$env:BLENDER_VERSION-windows-x64.zip" -OutFile $archive
@@ -33,6 +41,8 @@ jobs:
       - name: Download Blender (Linux)
         if: runner.os == 'Linux'
         shell: bash
+        env:
+          BLENDER_DIR: ${{ runner.temp }}/blender
         run: |
           archive="$RUNNER_TEMP/blender.tar.xz"
           curl --fail --location "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz" --output "$archive"
@@ -41,6 +51,8 @@ jobs:
       - name: Download Blender (macOS)
         if: runner.os == 'macOS'
         shell: bash
+        env:
+          BLENDER_DIR: ${{ runner.temp }}/blender
         run: |
           archive="$RUNNER_TEMP/blender.dmg"
           mount_point="$RUNNER_TEMP/blender-mount"
@@ -52,18 +64,34 @@ jobs:
       - name: Validate (Windows)
         if: runner.os == 'Windows'
         shell: powershell
+        env:
+          BLENDER_DIR: ${{ runner.temp }}/blender
         run: powershell -ExecutionPolicy Bypass -File scripts\validate.ps1 -Blender "$env:BLENDER_DIR\blender.exe"
       - name: Validate (Linux)
         if: runner.os == 'Linux'
         shell: bash
+        env:
+          BLENDER_DIR: ${{ runner.temp }}/blender
         run: scripts/validate.sh --blender "$BLENDER_DIR/blender"
       - name: Validate (macOS)
         if: runner.os == 'macOS'
         shell: bash
+        env:
+          BLENDER_DIR: ${{ runner.temp }}/blender
         run: scripts/validate.sh --blender "$BLENDER_DIR.app/Contents/MacOS/Blender"
+      - name: Select validated extension package
+        shell: bash
+        run: |
+          version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*$/\1/p' dimensions/blender_manifest.toml)"
+          archive="builds/dimensions-${version}.zip"
+          if [[ -z "$version" || ! -f "$archive" ]]; then
+            echo "Validated extension archive was not created: $archive" >&2
+            exit 1
+          fi
+          echo "EXTENSION_ARCHIVE=$archive" >> "$GITHUB_ENV"
       - name: Upload validated extension package
         uses: actions/upload-artifact@v4
         with:
           name: dimensions-extension-${{ runner.os }}-${{ matrix.blender.version }}
-          path: builds/dimensions-*.zip
+          path: ${{ env.EXTENSION_ARCHIVE }}
           if-no-files-found: error

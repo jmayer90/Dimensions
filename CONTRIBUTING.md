@@ -54,7 +54,7 @@ To run one suite directly:
 blender --background --factory-startup --python tests\blender_smoke.py
 ```
 
-Tests run inside Blender because nearly everything here depends on `bpy`. CI covers Blender 5.1.2 and 5.2.0 on Windows, Linux, and macOS.
+Tests run inside Blender because nearly everything here depends on `bpy`. CI covers Blender 5.1.2 and 5.2.1 on Windows, Linux, and macOS. Each matrix job retains only the current manifest version's validated archive; historical archives under `builds/` are not duplicated into CI artifacts.
 
 Both scripts accept an explicit Blender executable path; on POSIX systems they fall back to `blender` on `PATH`.
 
@@ -115,7 +115,7 @@ git tag v0.4.0
 git push origin v0.4.0
 ```
 
-The workflow refuses to publish if the tag does not match the manifest version, or if the changelog has no section for it. It runs the full validation suite and attaches the archive that suite produced, so the released ZIP is the one that was tested rather than a separate build. Release notes come from that changelog section.
+The workflow refuses to publish if the tag does not match the manifest version, if the changelog has no section for it, or if that section is still marked Unreleased. It runs the full validation suite and attaches the archive that suite produced, so the released ZIP is the one that was tested rather than a separate build. Release notes come from that changelog section.
 
 The version-changing commit must also contain the validated archive under `builds/`, as described in [Building](#building). The checked-in archive is a durable snapshot for the commit; the tagged release asset remains the archive produced and tested by the release workflow.
 
