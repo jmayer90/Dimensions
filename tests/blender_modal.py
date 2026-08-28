@@ -59,7 +59,8 @@ class LayoutRecorder:
     def box(self):
         return self
 
-    def column(self):
+    def column(self, **_kwargs):
+        self.events.append("COLUMN")
         return self
 
     def row(self, **_kwargs):
@@ -227,7 +228,7 @@ class InteractionContextTests(unittest.TestCase):
         context.mode = "EDIT_MESH"
         self.assertTrue(session_context_changed(operator, context))
 
-    def test_sidebar_exposes_compact_direction_after_creation_tools(self):
+    def test_sidebar_exposes_full_width_direction_after_creation_tools(self):
         preferences = SimpleNamespace(default_axis_mode="Z")
         layout = LayoutRecorder()
         panel = SimpleNamespace(layout=layout)
@@ -245,6 +246,7 @@ class InteractionContextTests(unittest.TestCase):
             (preferences, "default_axis_mode", {"text": "", "expand": True}),
             layout.properties,
         )
+        self.assertEqual(layout.events.count("COLUMN"), 2)
         self.assertLess(
             layout.events.index(("OPERATOR", "dimensions.create_dimension")),
             layout.events.index(("PROPERTY", "default_axis_mode")),

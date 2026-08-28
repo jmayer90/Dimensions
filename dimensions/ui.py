@@ -44,7 +44,7 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
                 icon="FILE_REFRESH",
             )
 
-        direction = self.layout.row(align=True)
+        direction = self.layout.column(align=True)
         direction.label(text="Direction")
         direction.prop(
             get_preferences(context),

@@ -33,7 +33,7 @@ To build the archive yourself instead, see [CONTRIBUTING.md](CONTRIBUTING.md). W
 
 Open the 3D Viewport sidebar with `N` and choose the **Dimensions** tab.
 
-Choose a creation tool first, then use the compact **Direction** row beneath the tool buttons to select Auto, X, Y, or Z before placing points. The same default is available under **Edit ▸ Preferences ▸ Add-ons ▸ Dimensions**, alongside snap and selection radii, continuous placement, and defaults for new annotations. Continuous placement is on by default. Scene and per-annotation settings remain part of the `.blend` file.
+Choose a creation tool first, then use the compact, full-width **Direction** selector beneath the tool buttons to select Auto, X, Y, or Z before placing points. The same default is available under **Edit ▸ Preferences ▸ Add-ons ▸ Dimensions**, alongside snap and selection radii, continuous placement, and defaults for new annotations. Continuous placement is on by default. Scene and per-annotation settings remain part of the `.blend` file.
 
 To select an existing annotation directly in the viewport, activate **Dimensions Selection** from the 3D View toolbar in Object Mode. Clicks that do not hit a Dimensions object continue to Blender's normal selection tool.
 
