@@ -46,6 +46,7 @@ fi
 cd "$root"
 "$python" -m compileall -q dimensions tests
 "$python" tests/stroke_font_smoke.py
+"$blender" --background --factory-startup --python tests/sheet_layout_smoke.py
 "$blender" --background --factory-startup --python tests/blender_smoke.py
 "$blender" --background --factory-startup --python tests/blender_modal.py
 "$blender" --background --factory-startup --python tests/blender_lifecycle.py

@@ -19,6 +19,9 @@ try {
     & $python.FullName tests\stroke_font_smoke.py
     if ($LASTEXITCODE -ne 0) { throw "Stroke font smoke tests failed" }
 
+    & $Blender --background --factory-startup --python tests\sheet_layout_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "Drawing sheet layout tests failed" }
+
     & $Blender --background --factory-startup --python tests\blender_smoke.py
     if ($LASTEXITCODE -ne 0) { throw "Blender smoke tests failed" }
 

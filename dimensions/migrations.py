@@ -393,6 +393,33 @@ def migrate_v13_to_v14(scene):
     return changed
 
 
+def migrate_v14_to_v15(scene):
+    """Initialize additive single-sheet border and title-block settings."""
+    settings = scene.dimensions_settings
+    defaults = {
+        "sheet_border_enabled": False,
+        "sheet_title_block_enabled": False,
+        "sheet_margin_mm": 10.0,
+        "sheet_title_block_width_mm": 80.0,
+        "sheet_title_block_height_mm": 30.0,
+        "sheet_drawing_title": "",
+        "sheet_drawing_number": "",
+        "sheet_revision": "",
+        "sheet_author": "",
+        "sheet_date": "",
+    }
+    changed = False
+    for property_name, default in defaults.items():
+        value = getattr(settings, property_name, None)
+        invalid = value is None
+        if isinstance(default, float):
+            invalid = invalid or float(value) <= 0.0
+        if invalid:
+            setattr(settings, property_name, default)
+            changed = True
+    return changed
+
+
 _MIGRATIONS = {
     0: migrate_v0_to_v1,
     1: migrate_v1_to_v2,
@@ -408,6 +435,7 @@ _MIGRATIONS = {
     11: migrate_v11_to_v12,
     12: migrate_v12_to_v13,
     13: migrate_v13_to_v14,
+    14: migrate_v14_to_v15,
 }
 
 

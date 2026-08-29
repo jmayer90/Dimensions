@@ -1242,6 +1242,51 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
         precision=2,
     )
 
+    sheet_border_enabled: bpy.props.BoolProperty(
+        name="Sheet Border",
+        description="Include a physical-page border in vector exports",
+        default=False,
+    )
+
+    sheet_title_block_enabled: bpy.props.BoolProperty(
+        name="Title Block",
+        description="Include a physical-page title block in vector exports",
+        default=False,
+    )
+
+    sheet_margin_mm: bpy.props.FloatProperty(
+        name="Sheet Margin",
+        description="Distance from the paper edge to the sheet border in millimetres",
+        default=10.0,
+        min=1.0,
+        max=100.0,
+        precision=2,
+    )
+
+    sheet_title_block_width_mm: bpy.props.FloatProperty(
+        name="Title Block Width",
+        description="Physical title-block width in millimetres",
+        default=80.0,
+        min=60.0,
+        max=300.0,
+        precision=2,
+    )
+
+    sheet_title_block_height_mm: bpy.props.FloatProperty(
+        name="Title Block Height",
+        description="Physical title-block height in millimetres",
+        default=30.0,
+        min=24.0,
+        max=200.0,
+        precision=2,
+    )
+
+    sheet_drawing_title: bpy.props.StringProperty(name="Drawing Title", default="")
+    sheet_drawing_number: bpy.props.StringProperty(name="Drawing Number", default="")
+    sheet_revision: bpy.props.StringProperty(name="Revision", default="")
+    sheet_author: bpy.props.StringProperty(name="Author", default="")
+    sheet_date: bpy.props.StringProperty(name="Date", default="")
+
     text_placement: bpy.props.EnumProperty(
         name="Text Placement",
         items=[

@@ -2,6 +2,12 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
+## 0.6.0 — Unreleased
+
+- Added an optional single-sheet drawing layout to scale-correct SVG and PDF export. A physical-mm border and fixed lower-right vector title block carry drawing title, number, revision, author, date, and the current 1:N scale without changing camera projection or annotation styling. Border and title block can be enabled independently; invalid margins, undersized blocks, and overflowing metadata are refused before a file is written. The default block accommodates the full supported `1:100000` scale denominator and common metadata without shrinking physical text. Scene-owned schema v15 settings preserve the furniture-free 0.5 behavior by default and migrate from an immutable released 0.5.0/schema-v14 fixture. Blender 5.1.2 exported 100 labeled annotations plus sheet furniture in 0.092 seconds.
+
+- This is a minor release because producing an identified drawing sheet is a new product surface under versioning trigger 3. The first slice remains one page with a fixed layout; multi-sheet documents, arbitrary templates, DXF, selectable text, schedules, and model geometry authoring remain out of scope.
+
 ## 0.5.0 — August 29, 2026
 
 - Added source-following Angular Guides with typed degree/radian entry, live line/angle preview, `F` direction flip, and editable angles around an anchored pivot, plus one-object repeated-spacing guide sets in interval/count, interval/extent, and evenly-distributed modes. Repeated lines draw and snap individually without materialized objects, remain one manager entry, and can be baked into equivalent fixed guides. Schema v14 adds the definitions after guide-plane schema v13; existing guides remain unchanged.

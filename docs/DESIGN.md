@@ -43,6 +43,7 @@ The extension may inspect Edit Mode topology to acquire anchors or calculate val
 | `units.py`, `volume.py` | Parse and format units and calculate evaluated closed-mesh volume. |
 | `stroke_font.py`, `output_geometry.py`, `grease_pencil_output.py`, `operators/generate_output.py` | Build vector labels and world-space annotation stroke specs, then generate isolated, replaceable Grease Pencil output artifacts. |
 | `vector_export.py`, `operators/export_vector.py` | Project valid world-space annotation strokes through an orthographic camera and serialize physical-page SVG/PDF output. |
+| `sheet_layout.py` | Compose optional physical-mm page borders and a fixed vector title block after camera projection, independent of model or drawing scale. |
 
 Annotations are Empty objects with presentation properties and an annotation kind. Linear annotations use two measurement anchors. Live Areas store persistent face IDs in `dimensions_area_face_id`, source metadata, a cached value, and explicit Live/Captured/Needs Repair state. Two-edge Angles store four persistent endpoint anchors and derive a shared or virtual center. Vertex anchors store integer IDs in the mesh's `dimensions_anchor_id` point attribute. Angle arcs are generated in world space before viewport projection. A canonical source frame plus user presentation offset keeps annotation transforms editable. Guides and measurements are Empty objects in a separate collection.
 
@@ -72,7 +73,9 @@ Camera Relative sizing converts configured render pixels to world units at each 
 
 Generated output resolves named style color, endpoint variant, precision, unit format, prefix, suffix, and tolerance. Line width, label height, and endpoint size intentionally come from the separate Camera Relative or World Scale output policy rather than viewport-pixel style fields; this keeps sheet output consistently scaled.
 
-Scale-correct SVG/PDF export reads the same resolved world-space strokes without first creating Grease Pencil objects. An orthographic camera defines the crop; scene-unit scale and the requested 1:N denominator map model coordinates into physical millimetres. The camera frame is centered without rescaling on A4, A3, or US Letter in portrait or landscape, and a frame that does not fit is rejected. Export presentation uses explicit paper-millimetre line, label, and endpoint sizes while preserving resolved annotation RGB colors. Fallback and Needs Repair annotations are omitted so a broken binding cannot appear authoritative. Labels use the bundled stroke font and are therefore vector outlines, not selectable text. Output is intentionally one page with no title block, DXF, or sheet system.
+Scale-correct SVG/PDF export reads the same resolved world-space strokes without first creating Grease Pencil objects. An orthographic camera defines the crop; scene-unit scale and the requested 1:N denominator map model coordinates into physical millimetres. The camera frame is centered without rescaling on A4, A3, or US Letter in portrait or landscape, and a frame that does not fit is rejected. Export presentation uses explicit paper-millimetre line, label, and endpoint sizes while preserving resolved annotation RGB colors. Fallback and Needs Repair annotations are omitted so a broken binding cannot appear authoritative. Labels use the bundled stroke font and are therefore vector outlines, not selectable text.
+
+The 0.6 single-sheet surface composes page-space furniture only after annotation projection. A scene may enable a rectangular border and a fixed lower-right title block with drawing title, number, revision, author, date, and the current scale. Margin and block dimensions are physical millimetres and therefore remain unchanged under camera, scene-unit, or drawing-scale changes. Invalid layouts fail before writing. This is deliberately one bounded sheet, not a multi-sheet registry or arbitrary template engine; it never shifts, rescales, or restyles annotation strokes.
 
 Persistent chain/baseline sets enter the same Grease Pencil and SVG/PDF pipelines as one source artifact containing all member strokes and labels. A set with any unresolved member is withheld from authoritative vector export until repaired.
 
@@ -96,8 +99,9 @@ Add-on preferences are per-user defaults and interaction tuning. Scene and annot
 | 10 | 0.4.3 | Additive circular-dimension binding, captured arc-frame storage, and fit-warning threshold; legacy annotations remain unchanged. |
 | 11 | 0.4.3 | Additive derived-guide source descriptors, offset/side/direction state, and last-resolved fallback presentation; existing guides migrate as fixed and Live. |
 | 12 | 0.4.3 | Additive named/oriented datum flags on guide points plus coordinate/elevation binding, alignment, sign, axis, relative-reference, and independent elevation-format fields. Existing guide points remain ordinary points. |
-| 13 | 0.5.0 candidate | Additive saved guide-plane definitions, bounded presentation extent, plane repair state, dedicated snap/manager defaults, and one scene active-plane frame. The v12 → v13 migration is idempotent and the released schema-v2 fixture exercises the full path. |
-| 14 | 0.5.0 candidate | Additive angular-guide pivot/angle and repeated-spacing mode/interval/count/extent definitions; existing guides remain fixed or retain their prior derived mode. |
+| 13 | 0.5.0 | Additive saved guide-plane definitions, bounded presentation extent, plane repair state, dedicated snap/manager defaults, and one scene active-plane frame. The v12 → v13 migration is idempotent and the released schema-v2 fixture exercises the full path. |
+| 14 | 0.5.0 | Additive angular-guide pivot/angle and repeated-spacing mode/interval/count/extent definitions; existing guides remain fixed or retain their prior derived mode. |
+| 15 | 0.6.0 candidate | Additive scene-owned drawing-sheet toggles, physical margin/title-block dimensions, and title/number/revision/author/date metadata. Existing vector export remains furniture-free by default. |
 
 ## Interaction contract
 
@@ -114,7 +118,7 @@ Add-on preferences are per-user defaults and interaction tuning. Scene and annot
 - Snap candidates are filtered at generation from ten independent targets, including surface-constraining Guide Plane candidates. Per-user preferences are the default; an opt-in scene override persists document-specific choices. With no targets active, acquisition falls through to free placement on the active construction plane or the normal view-derived plane.
 - Drafting inference is a transient layer inside the shared acquisition contract. The most recently hovered eligible edge, guide, or face becomes the implicit reference; rebindable `L` freezes that reference until `L` releases it. Edge and guide inference respects the corresponding `UX-05` target, while active-plane inference requires Face Center or Face Point. Exact-topology source and repair workflows stay geometry-only.
 - Derived candidates are deterministic: nearest screen distance wins, with a stable inference-type tie break; existing geometry wins whenever its screen distance is within 2 px of a derived candidate. Parallel, perpendicular, extension, intersection, local-axis, and active-plane glyphs use orange while active and blue after acceptance, and the corner badge names the current inference.
-- Repeating `X`, `Y`, or `Z` switches that session constraint from world to the active object's local axis; a third press returns to world. Local-axis inference stores the acquired world point, not a persistent constraint.
+- Repeating `X`, `Y`, or `Z` switches that session constraint from the current world/active-plane frame to the active object's local axis; a third press returns to the current frame. Local-axis inference stores the acquired world point, not a persistent constraint.
 - Dimension and measurement point acquisition works in Object and Mesh Edit Mode without modifying the mesh.
 - The primary Measure command is a per-viewport transient tape measure. Its preview shows total distance and signed ΔX/ΔY/ΔZ using the configured unit formatter, chains the accepted end into the next start, and creates neither a measurement nor a snap proxy until rebindable `P` explicitly saves. Rebindable `Ctrl+C` copies the same formatted text without colliding with typed `cm` input. `Measure (Persistent)` preserves direct save-on-confirm invocation for scripts, Search, and an optional user key binding.
 - The main Dimension command is selection-first in Edit Mode: exactly one selected edge commits a length immediately; other selections enter interactive point acquisition.
@@ -216,6 +220,7 @@ The canonical ticket status, milestone rollup, and status legend live in the [wo
 | 7 | [DIM-01](tickets/DIM-01-chain-baseline.md) | ✅ Complete | Persistent chain/baseline sets, reflow editing, repair, and output delivered in 0.4.3. |
 | 8 | [CON-02](tickets/CON-02-offset-guides.md) | ✅ Complete | Persistent edge/guide/face offsets and centerlines, detach, repair, and cycle refusal delivered in 0.4.3. |
 | 9 | [DIM-03](tickets/DIM-03-coordinate-elevation.md), [CON-03](tickets/CON-03-guide-planes.md), and [CON-04](tickets/CON-04-angular-guides-spacing.md) | ✅ Complete | Validated datums, coordinate/elevation annotations, active planes, angular guides, and repeated spacing in 0.5.0. |
+| 10 | [OUT-05](tickets/OUT-05-drawing-sheet.md) | ✅ Complete | Composed the existing physical-page SVG/PDF export into a bounded single drawing sheet in 0.6.0. |
 
 Early public feedback reinforces the product definition rather than expanding it: every request concerns faster annotation, clearer presentation, or usable output. None requires mesh authoring. The disposition is:
 
@@ -236,6 +241,7 @@ The next roadmap keeps the non-destructive product boundary while broadening mea
 | Saved/view/face/world construction planes | [CON-03](tickets/CON-03-guide-planes.md) | Delivered and validated in 0.5.0. |
 | Named datums, ordinate coordinates, and elevations | [DIM-03](tickets/DIM-03-coordinate-elevation.md) | Delivered and validated in 0.5.0. |
 | Angular and repeated construction guides | [CON-04](tickets/CON-04-angular-guides-spacing.md) | Delivered and benchmarked in 0.5.0. |
+| Physical border and fixed title block | [OUT-05](tickets/OUT-05-drawing-sheet.md) | Delivered and validated as the bounded 0.6.0 drawing-sheet surface. |
 
 ### P0 — Trustworthy acquisition and repeated placement
 

@@ -19,8 +19,9 @@ import dimensions
 from dimensions.anchors import set_world_anchor
 from dimensions.collections import create_dimension_object
 from dimensions.grease_pencil_output import OutputStroke
-from dimensions.operators.export_vector import vector_output_strokes
+from dimensions.operators.export_vector import build_scene_vector_document, vector_output_strokes
 from dimensions.vector_export import (
+    VectorExportError,
     build_vector_document,
     paper_dimensions_mm,
     pdf_bytes,
@@ -53,6 +54,16 @@ class DimensionsVectorExportTests(unittest.TestCase):
         settings.vector_line_width_mm = 0.25
         settings.vector_text_height_mm = 3.5
         settings.vector_arrow_size_mm = 2.5
+        settings.sheet_border_enabled = False
+        settings.sheet_title_block_enabled = False
+        settings.sheet_margin_mm = 10.0
+        settings.sheet_title_block_width_mm = 80.0
+        settings.sheet_title_block_height_mm = 30.0
+        settings.sheet_drawing_title = ""
+        settings.sheet_drawing_number = ""
+        settings.sheet_revision = ""
+        settings.sheet_author = ""
+        settings.sheet_date = ""
 
     def tearDown(self):
         for obj in reversed(self.created):
@@ -140,6 +151,100 @@ class DimensionsVectorExportTests(unittest.TestCase):
             self.assertEqual(root.findall(".//{http://www.w3.org/2000/svg}text"), [])
             self.assertTrue(pdf_path.read_bytes().startswith(b"%PDF-1.4"))
 
+    def test_sheet_controls_are_independent_and_svg_pdf_serialize_the_same_strokes(self):
+        self._dimension("DIM OUT-05 Sheet Parity")
+        settings = self.scene.dimensions_settings
+        self.camera.data.ortho_scale = 1.0
+
+        settings.sheet_border_enabled = True
+        border_document = build_scene_vector_document(bpy.context)
+        self.assertEqual(
+            [stroke.role for stroke in border_document.strokes].count("BORDER"), 1,
+        )
+        self.assertFalse(any(
+            stroke.role.startswith("TITLE") or stroke.role.startswith("TEXT_")
+            for stroke in border_document.strokes
+        ))
+
+        settings.sheet_border_enabled = False
+        settings.sheet_title_block_enabled = True
+        settings.sheet_drawing_title = "BRACKET"
+        settings.sheet_drawing_number = "D-100"
+        settings.sheet_revision = "A"
+        settings.sheet_author = "Ada Lovelace"
+        settings.sheet_date = "2026-08-29"
+        settings.vector_scale_denominator = 100000.0
+        document = build_scene_vector_document(bpy.context)
+        roles = {stroke.role for stroke in document.strokes}
+        self.assertNotIn("BORDER", roles)
+        self.assertIn("TITLE_BLOCK", roles)
+        for role in (
+            "TEXT_TITLE", "TEXT_DRAWING_NUMBER", "TEXT_REVISION",
+            "TEXT_AUTHOR", "TEXT_DATE", "TEXT_SCALE",
+        ):
+            self.assertIn(role, roles)
+
+        root = ET.fromstring(svg_text(document))
+        polylines = root.findall(".//{http://www.w3.org/2000/svg}polyline")
+        pdf = pdf_bytes(document)
+        self.assertEqual(len(polylines), len(document.strokes))
+        self.assertEqual(pdf.count(b"\nS\n"), len(document.strokes))
+        self.assertIn(b"/Count 1", pdf)
+
+    def test_sheet_geometry_is_physical_and_does_not_change_annotation_projection(self):
+        self._dimension("DIM OUT-05 Physical Invariance")
+        settings = self.scene.dimensions_settings
+        self.camera.data.ortho_scale = 0.1
+        baseline = build_scene_vector_document(bpy.context)
+        baseline_annotations = tuple(
+            stroke for stroke in baseline.strokes if stroke.role == "ANNOTATION"
+        )
+
+        settings.sheet_border_enabled = True
+        settings.sheet_title_block_enabled = True
+        settings.sheet_drawing_title = "PART"
+        settings.sheet_drawing_number = "D-1"
+        settings.sheet_revision = "A"
+        settings.sheet_author = "ADA"
+        settings.sheet_date = "2026-08-29"
+        with_sheet = build_scene_vector_document(bpy.context)
+        self.assertEqual(
+            tuple(stroke for stroke in with_sheet.strokes if stroke.role == "ANNOTATION"),
+            baseline_annotations,
+        )
+
+        invariant_roles = {"BORDER", "TITLE_BLOCK", "TITLE_GRID"}
+        layouts = []
+        for camera_scale, unit_scale, denominator in (
+            (0.1, 1.0, 10.0),
+            (0.2, 0.001, 10.0),
+            (0.05, 1.0, 100.0),
+        ):
+            self.camera.data.ortho_scale = camera_scale
+            self.scene.unit_settings.scale_length = unit_scale
+            settings.vector_scale_denominator = denominator
+            document = build_scene_vector_document(bpy.context)
+            layouts.append(tuple(
+                stroke for stroke in document.strokes if stroke.role in invariant_roles
+            ))
+        self.assertEqual(layouts[0], layouts[1])
+        self.assertEqual(layouts[0], layouts[2])
+
+    def test_invalid_sheet_layout_is_rejected_before_writing(self):
+        self._dimension("DIM OUT-05 Invalid Sheet")
+        settings = self.scene.dimensions_settings
+        settings.sheet_title_block_enabled = True
+        settings.sheet_title_block_width_mm = 300.0
+        with self.assertRaisesRegex(VectorExportError, "does not fit"):
+            build_scene_vector_document(bpy.context)
+        with tempfile.TemporaryDirectory(prefix="dimensions-invalid-sheet-") as directory:
+            filepath = Path(directory) / "invalid.svg"
+            self.assertEqual(
+                bpy.ops.dimensions.export_svg(filepath=str(filepath)),
+                {"CANCELLED"},
+            )
+            self.assertFalse(filepath.exists())
+
     def test_fallback_and_needs_repair_annotations_are_skipped(self):
         live = self._dimension("DIM OUT-02 Live", start=(-0.2, 0.0, 0.0), end=(-0.1, 0.0, 0.0))
         fallback = self._dimension("DIM OUT-02 Fallback", start=(0.0, 0.0, 0.0), end=(0.1, 0.0, 0.0))
@@ -147,13 +252,27 @@ class DimensionsVectorExportTests(unittest.TestCase):
         live.dimension_props.measurement_state = "LIVE"
         fallback.dimension_props.measurement_state = "FALLBACK"
         repair.dimension_props.measurement_state = "NEEDS_REPAIR"
+        settings = self.scene.dimensions_settings
+        settings.sheet_border_enabled = True
+        settings.sheet_title_block_enabled = True
         strokes, exported, skipped = vector_output_strokes(bpy.context)
         self.assertTrue(strokes)
         self.assertEqual(exported, 1)
         self.assertEqual(skipped, 2)
+        document = build_scene_vector_document(bpy.context)
+        self.assertEqual(document.annotation_count, 1)
+        self.assertEqual(document.skipped_count, 2)
 
     def test_exporting_one_hundred_annotations_stays_interactive(self):
         self.camera.data.ortho_scale = 1.0
+        settings = self.scene.dimensions_settings
+        settings.sheet_border_enabled = True
+        settings.sheet_title_block_enabled = True
+        settings.sheet_drawing_title = "100 ANNOTATIONS"
+        settings.sheet_drawing_number = "BENCH-100"
+        settings.sheet_revision = "A"
+        settings.sheet_author = "TEST"
+        settings.sheet_date = "2026-08-29"
         for index in range(100):
             y = -0.45 + index * 0.009
             self._dimension(
@@ -172,7 +291,7 @@ class DimensionsVectorExportTests(unittest.TestCase):
             root = ET.parse(filepath).getroot()
             self.assertEqual(root.tag, "{http://www.w3.org/2000/svg}svg")
             self.assertLess(elapsed, 5.0)
-            print(f"OUT-02 exported 100 linear annotations to SVG in {elapsed:.3f} s")
+            print(f"OUT-05 exported 100 annotations with a drawing sheet in {elapsed:.3f} s")
 
 
 def main():

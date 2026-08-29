@@ -21,10 +21,12 @@ from ..output_geometry import (
 )
 from ..operators.generate_output import annotations_for_output
 from ..properties import resolve_dimension_style
+from ..sheet_layout import SheetLayoutError, SheetMetadata, build_sheet_layout
 from ..dimension_sets import dimension_set_state
 from ..vector_export import (
     VectorExportError,
     build_vector_document,
+    paper_dimensions_mm,
     paper_mm_to_model,
     write_pdf,
     write_svg,
@@ -140,6 +142,33 @@ def build_scene_vector_document(context):
     strokes, exported, skipped = vector_output_strokes(context)
     if exported == 0:
         raise VectorExportError(messages.VECTOR_NO_VALID_ANNOTATIONS)
+    sheet_strokes = ()
+    if settings.sheet_border_enabled or settings.sheet_title_block_enabled:
+        width_mm, height_mm = paper_dimensions_mm(
+            settings.vector_paper_size, settings.vector_orientation,
+        )
+        metadata = SheetMetadata(
+            title=settings.sheet_drawing_title,
+            drawing_number=settings.sheet_drawing_number,
+            revision=settings.sheet_revision,
+            author=settings.sheet_author,
+            date=settings.sheet_date,
+            scale=f"1:{settings.vector_scale_denominator:g}",
+        )
+        try:
+            sheet_strokes = build_sheet_layout(
+                width_mm,
+                height_mm,
+                margins_mm=settings.sheet_margin_mm,
+                title_block_width_mm=settings.sheet_title_block_width_mm,
+                title_block_height_mm=settings.sheet_title_block_height_mm,
+                metadata=metadata,
+                line_width_mm=settings.vector_line_width_mm,
+                border_enabled=settings.sheet_border_enabled,
+                title_block_enabled=settings.sheet_title_block_enabled,
+            ).strokes
+        except SheetLayoutError as error:
+            raise VectorExportError(str(error)) from error
     return build_vector_document(
         scene,
         scene.camera,
@@ -149,6 +178,7 @@ def build_scene_vector_document(context):
         scale_denominator=settings.vector_scale_denominator,
         annotation_count=exported,
         skipped_count=skipped,
+        sheet_strokes=sheet_strokes,
     )
 
 

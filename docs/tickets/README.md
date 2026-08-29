@@ -36,7 +36,7 @@ Acceptance checkboxes inside a ticket define its intended scope; they are not ma
 | M1 — Foundation | ✅ Complete | `FND-01` through `FND-10`; expanded `FND-07` background matrix and two-window foreground QA completed in 0.4.2 | — |
 | M2 — Fluency | 🟨 Partial | `UX-01`, `UX-08` in 0.3.1; `FND-11`, `UX-02`, `UX-03`, `UX-07` in 0.4.2; `UX-04`, `UX-06` in 0.4.3 | Final `UX-05` QA. |
 | M3 — Construction | ✅ Complete | `CON-01`, `CON-02` in 0.4.3; validated `CON-03` and `CON-04` in 0.5.0 | — |
-| M4 — Output | ✅ Complete | `OUT-01` in 0.4.0; angle/area `OUT-04` in 0.4.1; `OUT-02` and `OUT-03` in 0.4.2 | — |
+| M4 — Output | ✅ Complete | Render/vector output through `OUT-04`; single-sheet `OUT-05` in 0.6.0 | — |
 | M5 — Documentation-grade | ✅ Complete | Architectural ticks in 0.3.2; Outside Start placement in 0.4.1; `DIM-01`, `DIM-02`, `DIM-04` in 0.4.3; validated `DIM-03` in 0.5.0 | — |
 
 ## Index
@@ -97,6 +97,7 @@ Milestone numbers group related work; they are not a strict delivery queue. The 
 | [OUT-02](OUT-02-vector-export.md) | SVG and PDF vector export | ✅ Complete | 0.4.2 | L | OUT-01 |
 | [OUT-03](OUT-03-styles.md) | Named, reusable annotation styles | ✅ Complete | 0.4.2 | M | FND-02 |
 | [OUT-04](OUT-04-angle-area-output.md) | Extend generated output to angle and area annotations | ✅ Complete | 0.4.1 | M | OUT-01 |
+| [OUT-05](OUT-05-drawing-sheet.md) | Single-sheet drawing frame and title block | ✅ Complete | 0.6.0 | M | OUT-02, OUT-03 |
 
 ### M5 — Documentation-grade dimensions
 

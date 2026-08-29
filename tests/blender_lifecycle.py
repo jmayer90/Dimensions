@@ -138,6 +138,36 @@ class DimensionsLifecycleTests(unittest.TestCase):
             self.assertTrue(settings.use_snap_target_override)
             self.assertEqual(enabled_snap_targets(bpy.context), {"measurement_endpoint"})
 
+    def test_save_reload_preserves_sheet_layout_settings(self):
+        settings = bpy.context.scene.dimensions_settings
+        settings.sheet_border_enabled = True
+        settings.sheet_title_block_enabled = True
+        settings.sheet_margin_mm = 12.5
+        settings.sheet_title_block_width_mm = 92.0
+        settings.sheet_title_block_height_mm = 34.0
+        settings.sheet_drawing_title = "North Elevation"
+        settings.sheet_drawing_number = "A-201"
+        settings.sheet_revision = "B"
+        settings.sheet_author = "Ada Lovelace"
+        settings.sheet_date = "2026-08-29"
+
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "dimensions-sheet-layout.blend"
+            bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
+            bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
+            restored = bpy.context.scene.dimensions_settings
+            self.assertEqual(restored.schema_version, CURRENT_SCHEMA_VERSION)
+            self.assertTrue(restored.sheet_border_enabled)
+            self.assertTrue(restored.sheet_title_block_enabled)
+            self.assertAlmostEqual(restored.sheet_margin_mm, 12.5)
+            self.assertAlmostEqual(restored.sheet_title_block_width_mm, 92.0)
+            self.assertAlmostEqual(restored.sheet_title_block_height_mm, 34.0)
+            self.assertEqual(restored.sheet_drawing_title, "North Elevation")
+            self.assertEqual(restored.sheet_drawing_number, "A-201")
+            self.assertEqual(restored.sheet_revision, "B")
+            self.assertEqual(restored.sheet_author, "Ada Lovelace")
+            self.assertEqual(restored.sheet_date, "2026-08-29")
+
     def test_save_reload_preserves_guide_plane_and_active_plane(self):
         plane = create_guide_plane_object(bpy.context, "Dimensions Lifecycle Plane")
         plane_name = plane.name
@@ -345,6 +375,25 @@ class DimensionsLifecycleMatrixTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         dimensions.unregister()
+
+    def test_sheet_settings_are_isolated_between_scenes(self):
+        primary = self.scene.dimensions_settings
+        primary.sheet_border_enabled = True
+        primary.sheet_drawing_title = "PRIMARY"
+
+        secondary_scene = bpy.data.scenes.new("Dimensions Secondary Sheet")
+        try:
+            secondary = secondary_scene.dimensions_settings
+            self.assertFalse(secondary.sheet_border_enabled)
+            self.assertEqual(secondary.sheet_drawing_title, "")
+            secondary.sheet_title_block_enabled = True
+            secondary.sheet_drawing_title = "SECONDARY"
+            self.assertTrue(primary.sheet_border_enabled)
+            self.assertFalse(primary.sheet_title_block_enabled)
+            self.assertEqual(primary.sheet_drawing_title, "PRIMARY")
+            self.assertEqual(secondary.sheet_drawing_title, "SECONDARY")
+        finally:
+            bpy.data.scenes.remove(secondary_scene)
 
     def _source_mesh(self, name="Lifecycle Source"):
         mesh = bpy.data.meshes.new(f"{name} Mesh")
@@ -670,6 +719,7 @@ class DimensionsReleasedFileTests(unittest.TestCase):
     FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v0.blend"
     OUTPUT_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v1-0.3.2.blend"
     SCHEMA_V2_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v2-0.4.0.blend"
+    SCHEMA_V14_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v14-0.5.0.blend"
 
     def setUp(self):
         dimensions.register()
@@ -678,6 +728,50 @@ class DimensionsReleasedFileTests(unittest.TestCase):
         self.assertTrue(self.FIXTURE.is_file(), f"missing fixture: {self.FIXTURE}")
         self.assertTrue(self.OUTPUT_FIXTURE.is_file(), f"missing fixture: {self.OUTPUT_FIXTURE}")
         self.assertTrue(self.SCHEMA_V2_FIXTURE.is_file(), f"missing fixture: {self.SCHEMA_V2_FIXTURE}")
+        self.assertTrue(self.SCHEMA_V14_FIXTURE.is_file(), f"missing fixture: {self.SCHEMA_V14_FIXTURE}")
+
+    def test_schema_v14_fixture_migrates_sheet_defaults_idempotently(self):
+        load_handlers = bpy.app.handlers.load_post
+        migration_handler = migrations_module._load_post_handler
+        handler_was_registered = migration_handler in load_handlers
+        if handler_was_registered:
+            load_handlers.remove(migration_handler)
+        try:
+            bpy.ops.wm.open_mainfile(filepath=str(self.SCHEMA_V14_FIXTURE), load_ui=False)
+        finally:
+            if handler_was_registered and migration_handler not in load_handlers:
+                load_handlers.append(migration_handler)
+
+        scene = bpy.context.scene
+        settings = scene.dimensions_settings
+        self.assertTrue(scene_has_dimensions_data(scene))
+        self.assertEqual(settings.schema_version, 14)
+
+        self.assertTrue(migrate_scene(scene))
+        self.assertEqual(settings.schema_version, CURRENT_SCHEMA_VERSION)
+        self.assertFalse(settings.sheet_border_enabled)
+        self.assertFalse(settings.sheet_title_block_enabled)
+        self.assertAlmostEqual(settings.sheet_margin_mm, 10.0)
+        self.assertAlmostEqual(settings.sheet_title_block_width_mm, 80.0)
+        self.assertAlmostEqual(settings.sheet_title_block_height_mm, 30.0)
+        self.assertEqual(settings.sheet_drawing_title, "")
+        self.assertEqual(settings.sheet_drawing_number, "")
+        self.assertEqual(settings.sheet_revision, "")
+        self.assertEqual(settings.sheet_author, "")
+        self.assertEqual(settings.sheet_date, "")
+
+        property_names = (
+            "sheet_border_enabled", "sheet_title_block_enabled", "sheet_margin_mm",
+            "sheet_title_block_width_mm", "sheet_title_block_height_mm",
+            "sheet_drawing_title", "sheet_drawing_number", "sheet_revision",
+            "sheet_author", "sheet_date",
+        )
+        expected = {name: getattr(settings, name) for name in property_names}
+        self.assertFalse(migrate_scene(scene))
+        self.assertEqual(
+            {name: getattr(settings, name) for name in property_names},
+            expected,
+        )
 
     def test_an_unstamped_released_file_migrates_to_the_current_schema(self):
         bpy.ops.wm.open_mainfile(filepath=str(self.FIXTURE), load_ui=False)

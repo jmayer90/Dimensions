@@ -8,6 +8,7 @@ from bpy_extras.object_utils import world_to_camera_view
 from mathutils import Vector
 
 from .grease_pencil_output import OutputStroke
+from .sheet_layout import SheetStroke
 
 
 PAPER_SIZES_MM = {
@@ -26,6 +27,7 @@ class PageStroke:
     points: tuple
     color: tuple
     line_width_mm: float
+    role: str = "ANNOTATION"
 
 
 @dataclass(frozen=True)
@@ -118,6 +120,7 @@ def build_vector_document(
     scale_denominator=10.0,
     annotation_count=0,
     skipped_count=0,
+    sheet_strokes=(),
 ):
     """Project world strokes through an orthographic camera onto a physical page."""
     width_mm, height_mm = paper_dimensions_mm(paper_size, orientation)
@@ -158,6 +161,15 @@ def build_vector_document(
             ))
     if not page_strokes:
         raise VectorExportError("No valid annotation strokes fall inside the camera frame")
+    for stroke in sheet_strokes:
+        if not isinstance(stroke, SheetStroke):
+            raise TypeError("sheet_strokes must contain SheetStroke values")
+        page_strokes.append(PageStroke(
+            points=stroke.points,
+            color=stroke.color,
+            line_width_mm=stroke.line_width_mm,
+            role=stroke.role,
+        ))
     return VectorDocument(
         width_mm=width_mm,
         height_mm=height_mm,
