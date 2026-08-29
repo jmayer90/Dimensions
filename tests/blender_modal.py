@@ -31,6 +31,8 @@ from dimensions.interaction import remember_session_context, session_axis, sessi
 from dimensions.inference import InferenceSession
 from dimensions.modal_state import HandleManipulationState, PointPlacementState
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
+from dimensions.operators.create_angle import DIMENSIONS_OT_CreateAngle
+from dimensions.operators.create_area import DIMENSIONS_OT_CreateArea
 from dimensions.operators.measure import CADDIM_OT_Measure
 from dimensions.operators.angular_spacing import angular_preview_state
 from dimensions.viewport_state import clear_state, get_state, set_state
@@ -551,6 +553,158 @@ class CreateDimensionModalTests(unittest.TestCase):
         undo_step.assert_called_once_with("Create Dimension")
 
 
+class CreateAngleModalTests(unittest.TestCase):
+    def setUp(self):
+        mesh = bpy.data.meshes.new("Dimensions Modal Angle Mesh")
+        mesh.from_pydata(
+            [(0, 0, 0), (2, 0, 0), (0, -1, 0), (0, 1, 0)],
+            [(0, 1), (2, 3)],
+            [],
+        )
+        self.source = bpy.data.objects.new("Dimensions Modal Angle Source", mesh)
+        bpy.context.scene.collection.objects.link(self.source)
+        self.before_names = set(bpy.data.objects)
+        self.context = make_context(scene=bpy.context.scene)
+        self.context.view_layer = bpy.context.view_layer
+        self.operator = make_operator_harness(
+            DIMENSIONS_OT_CreateAngle,
+            target_name="",
+            continuous_placement=False,
+            angle_mode="MINOR",
+            state="PICK_EDGE_A",
+            edge_a_snap=None,
+            edge_b_snap=None,
+            hover_snap=None,
+            radius=0.25,
+        )
+
+    def tearDown(self):
+        for obj in list(bpy.data.objects):
+            if obj not in self.before_names and obj != self.source:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        mesh = self.source.data
+        bpy.data.objects.remove(self.source, do_unlink=True)
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+    def _edge_snap(self, index, vertices):
+        points = tuple(self.source.matrix_world @ self.source.data.vertices[item].co for item in vertices)
+        return {
+            "type": "EDGE",
+            "label": "Edge",
+            "object": self.source,
+            "edge_index": index,
+            "edge_vertices": vertices,
+            "world_points": points,
+            "world_co": (points[0] + points[1]) * 0.5,
+            "screen_co": Vector((0.0, 0.0)),
+        }
+
+    def test_two_edge_workflow_reaches_radius_and_commits(self):
+        self.operator.hover_snap = self._edge_snap(0, (0, 1))
+        self.assertEqual(
+            self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS")),
+            {"RUNNING_MODAL"},
+        )
+        self.assertEqual(self.operator.state, "PICK_EDGE_B")
+        self.operator.hover_snap = self._edge_snap(1, (2, 3))
+        self.assertEqual(
+            self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS")),
+            {"RUNNING_MODAL"},
+        )
+        self.assertEqual(self.operator.state, "PICK_RADIUS")
+        self.assertEqual(
+            self.operator.modal(self.context, make_event("RET", "PRESS")),
+            {"FINISHED"},
+        )
+        annotation = bpy.context.view_layer.objects.active
+        self.assertEqual(annotation.dimension_props.annotation_kind, "ANGLE")
+        self.assertEqual(annotation.dimension_props.angle_a_start.target_object, self.source)
+        self.assertEqual(annotation.dimension_props.angle_b_start.target_object, self.source)
+
+
+class CreateAreaModalTests(unittest.TestCase):
+    def setUp(self):
+        mesh = bpy.data.meshes.new("Dimensions Modal Area Mesh")
+        mesh.from_pydata(
+            [(-1, -1, 0), (1, -1, 0), (1, 1, 0), (-1, 1, 0)],
+            [],
+            [(0, 1, 2, 3)],
+        )
+        self.source = bpy.data.objects.new("Dimensions Modal Area Source", mesh)
+        bpy.context.scene.collection.objects.link(self.source)
+        self.before_names = set(bpy.data.objects)
+        self.context = make_context(scene=bpy.context.scene)
+        self.context.view_layer = bpy.context.view_layer
+        self.operator = make_operator_harness(
+            DIMENSIONS_OT_CreateArea,
+            target_name="",
+            source_object=None,
+            face_indices=[],
+            hover_snap=None,
+            label_snap=None,
+            area_result=None,
+            placement_axis="ALIGNED",
+            continuous_placement=False,
+            offset_distance=0.25,
+            distance_text="",
+            distance_input_valid=True,
+            typed_distance=None,
+            state="PICK_FACE",
+        )
+
+    def tearDown(self):
+        for obj in list(bpy.data.objects):
+            if obj not in self.before_names and obj != self.source:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        mesh = self.source.data
+        bpy.data.objects.remove(self.source, do_unlink=True)
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+    def test_face_axis_and_typed_distance_commit_one_constrained_area(self):
+        self.operator.hover_snap = {
+            "type": "FACE",
+            "label": "Face",
+            "object": self.source,
+            "face_index": 0,
+            "world_co": Vector((0.0, 0.0, 0.0)),
+            "screen_co": Vector((0.0, 0.0)),
+        }
+        self.assertEqual(
+            self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS")),
+            {"RUNNING_MODAL"},
+        )
+        self.assertEqual(self.operator.state, "PLACE_LABEL")
+        self.assertEqual(
+            self.operator.modal(self.context, make_event("X", "PRESS")),
+            {"RUNNING_MODAL"},
+        )
+        self.operator.hover_snap = {
+            "type": "WORLD",
+            "label": "Point",
+            "world_co": Vector((3.0, 4.0, 0.0)),
+            "screen_co": Vector((0.0, 0.0)),
+        }
+        self.assertEqual(
+            self.operator.modal(
+                self.context,
+                make_event("TEXTINPUT", "PRESS", ascii_character="2"),
+            ),
+            {"RUNNING_MODAL"},
+        )
+        self.assertTrue(self.operator.distance_input_valid)
+        self.assertEqual(tuple(self.operator.label_snap["world_co"]), (2.0, 0.0, 0.0))
+        self.assertEqual(
+            self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS")),
+            {"FINISHED"},
+        )
+        annotation = bpy.context.view_layer.objects.active
+        self.assertEqual(annotation.dimension_props.annotation_kind, "AREA")
+        self.assertEqual(annotation.dimension_props.dimension_type, "X")
+        self.assertAlmostEqual(annotation.dimension_props.area_value, 4.0)
+
+
 class TransientMeasureModalTests(unittest.TestCase):
     def setUp(self):
         self.context = make_context(scene=bpy.context.scene)
@@ -661,6 +815,8 @@ def main():
                 HandleManipulationStateTests,
                 InteractionContextTests,
                 CreateDimensionModalTests,
+                CreateAngleModalTests,
+                CreateAreaModalTests,
                 TransientMeasureModalTests,
             )
         )

@@ -34,7 +34,7 @@ Acceptance checkboxes inside a ticket define its intended scope; they are not ma
 | Milestone | Status | Delivered | Remaining |
 | --- | --- | --- | --- |
 | M1 — Foundation | ✅ Complete | `FND-01` through `FND-10`; expanded `FND-07` background matrix and two-window foreground QA completed in 0.4.2 | — |
-| M2 — Fluency | 🟨 Partial | `UX-01`, `UX-08` in 0.3.1; `FND-11`, `UX-02`, `UX-03`, `UX-07` in 0.4.2; `UX-04`, `UX-06` in 0.4.3 | Final `UX-05` QA. |
+| M2 — Fluency | ✅ Complete | `UX-01`, `UX-08` in 0.3.1; `FND-11`, `UX-02`, `UX-03`, `UX-05`, `UX-07` in 0.4.2; `UX-04`, `UX-06`, `UX-09` in 0.4.3; final foreground QA in the 0.6.0 candidate | — |
 | M3 — Construction | ✅ Complete | `CON-01`, `CON-02` in 0.4.3; validated `CON-03` and `CON-04` in 0.5.0 | — |
 | M4 — Output | ✅ Complete | Render/vector output through `OUT-04`; single-sheet `OUT-05` in 0.6.0 | — |
 | M5 — Documentation-grade | ✅ Complete | Architectural ticks in 0.3.2; Outside Start placement in 0.4.1; `DIM-01`, `DIM-02`, `DIM-04` in 0.4.3; validated `DIM-03` in 0.5.0 | — |
@@ -71,10 +71,11 @@ The difference between a tool that works and one people keep using.
 | [UX-02](UX-02-annotation-manager.md) | Annotation manager: list, search, isolate, repair, restyle | ✅ Complete | 0.4.2 | L | — |
 | [UX-03](UX-03-inference-engine.md) | Inference: parallel, perpendicular, extension, intersection, local axis | ✅ Complete | 0.4.2 | L | FND-08 |
 | [UX-04](UX-04-direct-handles.md) | Direct viewport handles for placement, radius, and offset | ✅ Complete | 0.4.3 | M | FND-01 |
-| [UX-05](UX-05-snap-control.md) | User control over which snap targets are active | 🟨 Partial | 0.4.2 | S | FND-04 |
+| [UX-05](UX-05-snap-control.md) | User control over which snap targets are active | ✅ Complete | 0.4.2; foreground QA in 0.6.0 candidate | S | FND-04 |
 | [UX-06](UX-06-hover-measurement.md) | Transient hover measurement with delta X/Y/Z | ✅ Complete | 0.4.3 | M | — |
 | [UX-07](UX-07-guided-repair.md) | Guided repair for broken anchors and area bindings | ✅ Complete | 0.4.2 | M | UX-02 |
 | [UX-08](UX-08-stable-overlay-sizing.md) | Verify and enforce stable screen-space label sizing | ✅ Complete | 0.3.1 | S | — |
+| [UX-09](UX-09-annotation-transform-semantics.md) | Define annotation rotation and scale semantics | ✅ Complete | 0.4.3 work; verified in 0.6.0 candidate | S | UX-04, UX-08 |
 
 ### M3 — Construction
 
@@ -110,7 +111,7 @@ Milestone numbers group related work; they are not a strict delivery queue. The 
 
 ## Suggested order
 
-M1, M3, M4, M5, `FND-11`, `UX-01` through `UX-04`, and `UX-06` through `UX-08` are delivered. Final `UX-05` foreground disable/re-enable QA remains, alongside the release-QA items recorded in `DESIGN.md`.
+M1 through M5 and every indexed implementation ticket are delivered. Remaining work is the explicit 1.0 release gate in `VERSIONING.md`, not an untracked feature ticket.
 
 ## Effort key
 

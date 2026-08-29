@@ -52,7 +52,7 @@ This is a small trust issue with high visibility. A numeric label that changes a
 
 - User-selectable world-space viewport text. Generated render output has separate camera-relative and world-scale modes in `OUT-01`.
 - Label alignment, tight-space leaders, and arrow variants — `DIM-04`.
-- Defining annotation Empty rotation and scale as user-facing placement controls. That broader canonical-frame decision remains in `DESIGN.md` P0.
+- Defining annotation Empty rotation and scale as user-facing placement controls. [UX-09](UX-09-annotation-transform-semantics.md) resolves the broader canonical-frame decision with a translation-only policy.
 
 ## Invariants
 

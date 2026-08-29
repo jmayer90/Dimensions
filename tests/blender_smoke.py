@@ -146,6 +146,11 @@ from dimensions.snapping import (
     find_nearest_mesh_snap_point,
 )
 from dimensions.snap_targets import TARGET_IDS, enabled_snap_targets
+from dimensions.preferences import (
+    DEFAULT_PREFERENCES,
+    remember_preferences_for_reregister,
+    restore_preferences_after_reregister,
+)
 from dimensions.units import format_dual_length, format_volume, parse_distance_input
 from dimensions.volume import (
     VOLUME_APPROXIMATE,
@@ -3413,6 +3418,21 @@ class DimensionsPackagingTests(unittest.TestCase):
 
         self.assertIs(get_preferences(SimpleNamespace()), DEFAULT_PREFERENCES)
         self.assertIsNotNone(get_preferences(None))
+
+    def test_default_and_reset_preferences_cover_every_snap_target(self):
+        for identifier in TARGET_IDS:
+            self.assertTrue(getattr(DEFAULT_PREFERENCES, f"snap_{identifier}"))
+
+    def test_preferences_survive_an_in_session_reregister(self):
+        before = SimpleNamespace(**vars(DEFAULT_PREFERENCES))
+        after = SimpleNamespace(**vars(DEFAULT_PREFERENCES))
+        before.snap_vertex = False
+        before.snap_guide_plane = False
+        with patch("dimensions.preferences.get_preferences", side_effect=(before, after)):
+            remember_preferences_for_reregister()
+            restore_preferences_after_reregister()
+        self.assertFalse(after.snap_vertex)
+        self.assertFalse(after.snap_guide_plane)
 
     def test_registering_migrations_survives_restricted_blend_data(self):
         from dimensions import migrations

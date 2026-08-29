@@ -4,6 +4,8 @@ All notable user-visible changes are recorded here. Versions before 0.2.0 were r
 
 ## 0.6.0 — Unreleased
 
+- Completed the roadmap QA and consistency pass: snap targets now have recorded Blender 5.2 foreground disable/re-enable evidence; constrained Area and two-edge Angle workflows have dedicated modal regression coverage; add-on preferences survive an in-session disable/re-enable cycle; and Reset Preferences once again covers every current snap target, including Guide Point and Guide Plane. The previously delivered translation-only annotation transform policy now has its own completed `UX-09` ticket instead of remaining incorrectly marked Planned.
+
 - Added an optional single-sheet drawing layout to scale-correct SVG and PDF export. A physical-mm border and fixed lower-right vector title block carry drawing title, number, revision, author, date, and the current 1:N scale without changing camera projection or annotation styling. Border and title block can be enabled independently; invalid margins, undersized blocks, and overflowing metadata are refused before a file is written. The default block accommodates the full supported `1:100000` scale denominator and common metadata without shrinking physical text. Scene-owned schema v15 settings preserve the furniture-free 0.5 behavior by default and migrate from an immutable released 0.5.0/schema-v14 fixture. Blender 5.1.2 exported 100 labeled annotations plus sheet furniture in 0.092 seconds.
 
 - This is a minor release because producing an identified drawing sheet is a new product surface under versioning trigger 3. The first slice remains one page with a fixed layout; multi-sheet documents, arbitrary templates, DXF, selectable text, schedules, and model geometry authoring remain out of scope.

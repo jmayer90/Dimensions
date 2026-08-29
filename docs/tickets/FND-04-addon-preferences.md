@@ -75,6 +75,12 @@ Organize the preferences UI into labeled sections — Interaction, Display, Defa
 - A test that a preference change does not mutate existing annotation properties.
 - Register/unregister/re-register cycle with preference values preserved.
 
+The 0.6.0 candidate closes two later-expansion gaps in this contract. The defaults
+and Reset operator now include Guide Point and Guide Plane snap targets, and a live
+Blender 5.2 disable/re-enable cycle preserves changed target values before restoring
+the user's original settings. A regression test covers the in-session preservation
+path without unregistering the test runner itself.
+
 ## Out of scope
 
 - Keymap editing UI — `FND-05` adds it to the Keymap section this ticket creates.

@@ -62,6 +62,10 @@ Do this incrementally, one operator per PR, starting with `create_dimension.py` 
 
 The ticket is its own verification. The bar is that a contributor can change axis-constraint behavior and find out from the test suite, not from a user.
 
+The 0.6.0 candidate adds dedicated adapter regressions for the two-edge Angle flow
+through radius commit and for face acquisition plus axis-constrained, typed-distance
+Area placement. Both flows also passed against a real Blender 5.2 viewport context.
+
 ## Out of scope
 
 - Changing modal behavior. This is a refactor plus tests; user-visible behavior must be identical. If a test reveals a genuine bug, file it separately and fix it in its own PR so the refactor stays reviewable.

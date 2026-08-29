@@ -70,7 +70,7 @@ Placement is iterative. Nobody gets a label position right the first time, and t
 
 ## Out of scope
 
-- Rotation and scale handles for annotation placement. `DESIGN.md` P0 calls for deliberate rotation and scale semantics for the canonical-frame model; that decision precedes handles for it and is its own ticket.
+- Rotation and scale handles for annotation placement. [UX-09](UX-09-annotation-transform-semantics.md) deliberately defines annotation objects as translation-only, so rotation and scale handles remain outside this interaction model.
 - Handles for editing anchors — that is rebinding, covered by `UX-07`.
 - Gizmo API adoption. UX-04 deliberately uses custom overlay handles so its hit priority and modal behavior share the established selection and per-viewport interaction paths; the decision is recorded in `DESIGN.md`.
 

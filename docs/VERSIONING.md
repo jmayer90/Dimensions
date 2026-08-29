@@ -44,7 +44,7 @@ Delivery status is summarized here and maintained in detail in the [work-ticket 
 | Milestone | Delivery status | Content | Likely version impact |
 | --- | --- | --- | --- |
 | **M1 — Foundation** | ✅ Complete | Core implementation shipped in 0.3.0; the expanded `FND-07` lifecycle matrix and two-window foreground QA completed in 0.4.2. | **`0.3.0`** — trips triggers 1 and 2. |
-| **M2 — Fluency** | 🟨 Partial | `FND-11`, `UX-01` through `UX-04`, and `UX-06` through `UX-08` complete; `UX-05` awaits final foreground QA. | Further fluency work remains on the current patch line unless it trips a minor trigger. |
+| **M2 — Fluency** | ✅ Complete | `FND-11` and `UX-01` through `UX-09` are complete; final snap-target foreground QA passed for the 0.6.0 candidate. | The delivered fluency work remains on its existing patch/minor lines. |
 | **M3 — Construction** | ✅ Complete | `CON-01` and `CON-02` delivered in 0.4.3; validated guide planes, active-plane input, angular guides, and repeated spacing complete in 0.5.0. | `CON-03` deliberately remaps X/Y/Z while active, triggering 0.5.0 under rule 2; other construction work is additive. |
 | **M4 — Output** | ✅ Complete | Render, styles, scale-correct SVG/PDF, and the bounded `OUT-05` single-sheet surface are complete. | **`0.4.0`** established renderable output; **`0.6.0`** trips trigger 3 by turning export into an identified drawing-sheet surface. |
 | **M5 — Documentation-grade** | ✅ Complete | `DIM-01`, `DIM-02`, and `DIM-04` delivered in 0.4.3; coordinate and elevation validation completed in 0.5.0. | Additive dimension types remain patches when they reuse existing contracts. |

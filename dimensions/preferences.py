@@ -35,12 +35,38 @@ DEFAULT_PREFERENCES = SimpleNamespace(
     default_axis_mode="ALIGNED",
     **{f"snap_{identifier}": True for identifier in (
         "vertex", "edge", "midpoint", "face_center", "face_point", "guide",
+        "guide_point", "guide_plane",
         "measurement_endpoint", "measurement_midpoint", "measurement_segment",
     )},
     **{f"inference_{identifier}": True for identifier in (
         "parallel", "perpendicular", "extension", "intersection", "local_axis", "active_plane",
     )},
 )
+_reregistered_values = {}
+
+
+def remember_preferences_for_reregister(context=None):
+    """Retain user values across Blender's in-session add-on disable/enable cycle."""
+    preferences = get_preferences(context)
+    if preferences is DEFAULT_PREFERENCES:
+        return
+    _reregistered_values.clear()
+    _reregistered_values.update({
+        name: getattr(preferences, name)
+        for name in vars(DEFAULT_PREFERENCES)
+    })
+
+
+def restore_preferences_after_reregister(context=None):
+    """Restore values captured before Blender removed the AddonPreferences instance."""
+    if not _reregistered_values:
+        return
+    preferences = get_preferences(context)
+    if preferences is DEFAULT_PREFERENCES:
+        return
+    for name, value in _reregistered_values.items():
+        setattr(preferences, name, value)
+    _reregistered_values.clear()
 
 
 def _tag_redraw(_self, _context):

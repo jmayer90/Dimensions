@@ -8,6 +8,7 @@ from .operators import classes as operator_classes
 from .properties import classes as property_classes
 from .properties import register_properties, unregister_properties
 from .preferences import classes as preference_classes
+from .preferences import remember_preferences_for_reregister, restore_preferences_after_reregister
 from .tools import register_tools, unregister_tools
 from .ui import classes as ui_classes
 
@@ -42,12 +43,14 @@ def register():
         for component_register, component_unregister in _COMPONENTS:
             _registered_components.append(component_unregister)
             component_register()
+        restore_preferences_after_reregister()
     except Exception:
         _rollback_registration()
         raise
 
 
 def unregister():
+    remember_preferences_for_reregister()
     _rollback_registration()
 
 

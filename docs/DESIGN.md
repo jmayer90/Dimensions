@@ -209,7 +209,7 @@ The canonical ticket status, milestone rollup, and status legend live in the [wo
 
 | Order | Work | Status | Outcome |
 | --- | --- | --- | --- |
-| 1 | 0.4.1 foreground and Blender 5.1 release QA | 🔍 Release QA | Validate direction preselection and all-kind output in a clean interactive install. |
+| 1 | Foreground interaction and output QA | ✅ Complete | Direction preselection, mixed-kind output, snap-target disable/re-enable, and clean install registration are verified in interactive Blender; the automated suites cover Blender 5.1 and 5.2. |
 | 2 | [OUT-04](tickets/OUT-04-angle-area-output.md) | ✅ Complete | Angle and area Grease Pencil generation delivered in 0.4.1. |
 | 3 | [UX-02](tickets/UX-02-annotation-manager.md), [UX-07](tickets/UX-07-guided-repair.md), and [OUT-03](tickets/OUT-03-styles.md) | ✅ Complete | Manager, guided repair, named styles, and filtered assignment delivered in 0.4.2. |
 | Parallel | [FND-11](tickets/FND-11-snap-cache-build-cost.md) | ✅ Complete | The 1M-vertex cache now builds in 75.252 ms and reprojects in 0.150 ms. |
@@ -245,14 +245,14 @@ The next roadmap keeps the non-destructive product boundary while broadening mea
 
 ### P0 — Trustworthy acquisition and repeated placement
 
-- 🟨 **Partial** — user-controlled snap targets are implemented in [UX-05](tickets/UX-05-snap-control.md); foreground persistence QA remains, while [FND-11](tickets/FND-11-snap-cache-build-cost.md) records passing dense-scene cache budgets.
+- ✅ **Complete** — user-controlled snap targets in [UX-05](tickets/UX-05-snap-control.md) passed foreground disable/re-enable QA, while [FND-11](tickets/FND-11-snap-cache-build-cost.md) records passing dense-scene cache budgets.
 - ✅ **Complete** — explicit rebind, convert-to-world, candidate preview, and cause-scoped bulk repair are delivered in [UX-07](tickets/UX-07-guided-repair.md).
 - ✅ **Complete** — selected-only direct viewport handles for linear offset, Angle radius, and Area label placement shipped in 0.4.3 through [UX-04](tickets/UX-04-direct-handles.md).
 - ✅ **Complete** — live Area modifier semantics are conservative and explicit: exact evaluated ID propagation with unchanged per-face topology is Live; every ambiguous evaluated case shows a non-authoritative base fallback and is withheld from output, without face-index or proximity correspondence.
-- ⬜ **Planned** — give the canonical-frame and placement-offset model deliberate rotation and scale semantics.
-- 🔍 **Release QA** — add foreground modal coverage for the constrained Area and two-edge Angle workflows.
-- 🟨 **Partial** — dense-scene budgets pass with [FND-11](tickets/FND-11-snap-cache-build-cost.md); foreground modal-event coverage remains.
-- 🔍 **Release QA** — complete foreground lifecycle QA for measurement proxies and annotations.
+- ✅ **Complete** — [UX-09](tickets/UX-09-annotation-transform-semantics.md) defines the canonical-frame and placement-offset model as translation-only; object rotation and scale are locked for ordinary editing and ignored consistently by live and generated output.
+- ✅ **Complete** — constrained Area and two-edge Angle modal-event workflows have dedicated adapter tests and Blender 5.2 foreground verification.
+- ✅ **Complete** — dense-scene budgets pass with [FND-11](tickets/FND-11-snap-cache-build-cost.md), and foreground modal-event coverage exercises the live viewport context.
+- ✅ **Complete** — [FND-07](tickets/FND-07-lifecycle-hardening.md) covers measurement proxies and annotations through the background lifecycle matrix and two-window foreground isolation.
 
 ### P1 — Renderable output, precision inference, and management
 

@@ -1,7 +1,7 @@
 # UX-05 — User control over which snap targets are active
 
 **Milestone:** M2 Fluency
-**Status:** 🟨 Partial — implementation, dense-scene timing, migration, and save/reload coverage are in place; foreground disable/re-enable QA remains.
+**Status:** ✅ Complete — delivered in 0.4.2; foreground disable/re-enable QA completed on Blender 5.2 for the 0.6.0 candidate.
 **Effort:** S
 **Depends on:** FND-04
 **Version impact:** Patch.
@@ -42,7 +42,7 @@ Small, cheap, and directly addresses the most common precision-tool complaint. I
 - [x] Disabled types are skipped before candidate generation; record the timing reduction on the `FND-08` reference scenes.
 - [x] Viewport status text shows the active target set.
 - [x] Disabling every target type still allows free world-point placement rather than making the tool unusable.
-- [x] Settings use Blender persistence and have migration coverage; foreground disable/re-enable remains release QA rather than ticket delivery scope.
+- [x] Settings use Blender persistence and have migration coverage; foreground disable/re-enable is verified in a live Blender 5.2 viewport.
 - [x] README documents the control.
 
 ## Code map
@@ -64,8 +64,11 @@ Small, cheap, and directly addresses the most common precision-tool complaint. I
 Blender 5.1.2 release evidence records disabled-target queries at 0.001 ms versus
 0.018 ms enabled on the 100k-vertex and 1M-vertex reference scenes. A scene-level
 override selecting only measurement endpoints also survives save/reload, while the
-released schema-v2 fixture verifies the additive migration defaults. Interactive
-disable/re-enable remains a foreground release-QA check.
+released schema-v2 fixture verifies the additive migration defaults. Blender 5.2
+foreground QA projected a real mesh vertex in a live 3D View: Vertex-only snapping
+returned the vertex, disabling Vertex skipped the candidate entirely, and re-enabling
+it restored the same candidate. The temporary object and scene settings were removed
+or restored after the check.
 
 ## Out of scope
 
