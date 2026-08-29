@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import bpy
+from mathutils import Vector
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -24,11 +25,15 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dimensions
-from dimensions.collections import get_or_create_dimension_collection
+from dimensions.collections import get_or_create_dimension_collection, get_or_create_guide_collection
 from dimensions.drawing import _draw_interaction_status
 from dimensions.interaction import remember_session_context, session_axis, session_context_changed
-from dimensions.modal_state import PointPlacementState
+from dimensions.inference import InferenceSession
+from dimensions.modal_state import HandleManipulationState, PointPlacementState
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
+from dimensions.operators.measure import CADDIM_OT_Measure
+from dimensions.operators.angular_spacing import angular_preview_state
+from dimensions.viewport_state import clear_state, get_state, set_state
 from dimensions.ui import CADDIM_PT_MainPanel, CADDIM_PT_MeshSelection
 
 from support import (
@@ -44,6 +49,26 @@ from support import (
 PICK_START = PointPlacementState.PICK_START
 PICK_END = PointPlacementState.PICK_END
 PLACE = PointPlacementState.PLACE
+
+
+class AngularGuideModalStateTests(unittest.TestCase):
+    def setUp(self):
+        self.source = {"kind": "LINE", "origin": Vector(), "direction": Vector((1.0, 0.0, 0.0))}
+
+    def test_preview_contains_result_line_and_typed_angle_label(self):
+        state = angular_preview_state(self.source, Vector((2.0, 3.0, 0.0)), 1.5707963267948966)
+        self.assertEqual(tuple(state["start_world"]), (2.0, 3.0, 0.0))
+        self.assertAlmostEqual(state["end_world"].x, 2.0, places=5)
+        self.assertAlmostEqual(state["end_world"].y, 4.0, places=5)
+        self.assertEqual(state["derived_label"], "90.000°")
+
+    def test_flip_changes_signed_solution_without_changing_pivot(self):
+        normal = angular_preview_state(self.source, Vector(), 0.5, False)
+        flipped = angular_preview_state(self.source, Vector(), 0.5, True)
+        self.assertEqual(normal["start_world"], flipped["start_world"])
+        self.assertAlmostEqual(normal["end_world"].x, flipped["end_world"].x, places=5)
+        self.assertAlmostEqual(normal["end_world"].y, -flipped["end_world"].y, places=5)
+        self.assertTrue(flipped["flipped"])
 
 
 class LayoutRecorder:
@@ -280,6 +305,25 @@ class InteractionContextTests(unittest.TestCase):
         self.assertLess(CADDIM_PT_MeshSelection.bl_order, 1)
 
 
+class HandleManipulationStateTests(unittest.TestCase):
+    def test_constraint_numeric_confirm_and_cancel_match_the_creation_contract(self):
+        state = HandleManipulationState()
+        self.assertEqual(state.set_axis("X"), "AXIS_SET")
+        self.assertEqual(state.axis, "X")
+        self.assertEqual(state.set_numeric_text("50mm", valid=True), "NUMERIC_UPDATED")
+        self.assertEqual(state.confirm(), "COMMITTED")
+        self.assertEqual(state.escape(), "NUMERIC_CLEARED")
+        self.assertEqual(state.escape(), "CANCELLED")
+        self.assertTrue(state.cancelled)
+
+    def test_invalid_numeric_input_cannot_commit(self):
+        state = HandleManipulationState("Z")
+        state.set_numeric_text("not-a-distance", valid=False)
+        self.assertEqual(state.confirm(), "NUMERIC_INVALID")
+        self.assertFalse(state.cancelled)
+        self.assertEqual(state.cancel(), "CANCELLED")
+
+
 class CreateDimensionModalTests(unittest.TestCase):
     """The operator as a thin adapter over the contract, with a scripted viewport."""
 
@@ -294,6 +338,8 @@ class CreateDimensionModalTests(unittest.TestCase):
             offset_plane_normal=None,
             axis_gesture_active=False,
             continuous_placement=False,
+            inference_axis="ALIGNED",
+            inference_session=InferenceSession(),
         )
         self.reports = self.operator.reports
         self.context = make_context(scene=bpy.context.scene)
@@ -373,6 +419,37 @@ class CreateDimensionModalTests(unittest.TestCase):
             })
 
         self.assertEqual(draw_text.call_args.args[0], "GUIDE · Auto · 2m")
+
+    def test_modal_snap_key_cycles_targets_without_cancelling(self):
+        settings = self.context.scene.dimensions_settings
+        self.addCleanup(setattr, settings, "use_snap_target_override", False)
+        settings.use_snap_target_override = True
+        for identifier in (
+            "vertex", "edge", "midpoint", "face_center", "face_point", "guide",
+            "measurement_endpoint", "measurement_midpoint", "measurement_segment",
+        ):
+            setattr(settings, f"snap_{identifier}", True)
+        result = self.operator.modal(self.context, make_event("S", "PRESS"))
+        self.assertEqual(result, {"RUNNING_MODAL"})
+        self.assertTrue(settings.snap_vertex)
+        self.assertFalse(settings.snap_edge)
+
+    def test_modal_inference_lock_persists_until_the_same_action_releases_it(self):
+        self.operator.inference_session.references = [{
+            "label": "Edge",
+            "reference_line": ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
+        }]
+        self.assertEqual(self.operator.modal(self.context, make_event("L", "PRESS")), {"RUNNING_MODAL"})
+        self.assertTrue(self.operator.inference_session.locked)
+        self.assertEqual(self.operator.modal(self.context, make_event("L", "PRESS")), {"RUNNING_MODAL"})
+        self.assertFalse(self.operator.inference_session.locked)
+
+    def test_repeating_an_axis_enters_local_axis_mode(self):
+        self.assertEqual(self.operator.modal(self.context, make_event("X", "PRESS")), {"RUNNING_MODAL"})
+        self.assertEqual(self.operator.inference_axis, "X")
+        self.assertEqual(self.operator.modal(self.context, make_event("X", "PRESS")), {"RUNNING_MODAL"})
+        self.assertEqual(self.operator.inference_axis, "LOCAL_X")
+        self.assertEqual(self.operator.dimension_type, "ALIGNED")
 
     def test_invalid_interaction_input_stays_visible(self):
         with patch("dimensions.drawing._draw_text_left") as draw_text:
@@ -474,13 +551,118 @@ class CreateDimensionModalTests(unittest.TestCase):
         undo_step.assert_called_once_with("Create Dimension")
 
 
+class TransientMeasureModalTests(unittest.TestCase):
+    def setUp(self):
+        self.context = make_context(scene=bpy.context.scene)
+        self.context.view_layer = bpy.context.view_layer
+        self.context.window_manager = SimpleNamespace(clipboard="")
+        self.operator = make_operator_harness(
+            CADDIM_OT_Measure,
+            persistent_mode=False,
+            state="PICK_START",
+            axis="ALIGNED",
+            continuous_placement=True,
+            start_world=None,
+            start_snap=None,
+            end_world=None,
+            hover_snap=None,
+            distance_text="",
+            distance_input_valid=True,
+            axis_gesture_active=False,
+            inference_session=InferenceSession(),
+            completed_start_world=None,
+            completed_end_world=None,
+        )
+        self.reports = self.operator.reports
+        remember_session_context(self.operator, self.context)
+        self.before_names = {obj.name for obj in get_or_create_guide_collection(self.context).objects}
+
+    def tearDown(self):
+        collection = get_or_create_guide_collection(self.context)
+        for obj in list(collection.objects):
+            if obj.name not in self.before_names:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        clear_state("MEASURE", self.context)
+
+    def _drive_segment(self, start=(0, 0, 0), end=(3, 4, 0)):
+        provider = ScriptedSnapProvider([make_snap(start), make_snap(end)])
+        with patch("dimensions.operators.measure.find_nearest_snap_point", provider):
+            self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS"))
+            self.operator.modal(self.context, make_event("MOUSEMOVE", "PRESS"))
+            return self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS"))
+
+    def _measurement_count(self):
+        return sum(
+            1 for obj in get_or_create_guide_collection(self.context).objects
+            if hasattr(obj, "guide_props")
+            and obj.guide_props.enabled
+            and getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT"
+        )
+
+    def test_two_points_create_nothing_and_chain_from_the_second_point(self):
+        before = self._measurement_count()
+        before_objects = len(get_or_create_guide_collection(self.context).objects)
+        self.assertEqual(self._drive_segment(), {"RUNNING_MODAL"})
+        self.assertEqual(self._measurement_count(), before)
+        self.assertEqual(len(get_or_create_guide_collection(self.context).objects), before_objects)
+        self.assertEqual(tuple(self.operator.completed_start_world), (0.0, 0.0, 0.0))
+        self.assertEqual(tuple(self.operator.completed_end_world), (3.0, 4.0, 0.0))
+        self.assertEqual(tuple(self.operator.start_world), (3.0, 4.0, 0.0))
+        self.assertEqual(self.operator.state, "PICK_END")
+
+    def test_save_creates_exactly_one_persistent_measurement(self):
+        before = self._measurement_count()
+        self._drive_segment()
+        result = self.operator.modal(self.context, make_event("P", "PRESS"))
+        self.assertEqual(result, {"RUNNING_MODAL"})
+        self.assertEqual(self._measurement_count(), before + 1)
+
+    def test_copy_uses_the_current_formatted_total_and_components(self):
+        self._drive_segment((1, 5, 2), (4, 1, 14))
+        event = make_event("C", "PRESS")
+        event.ctrl = True
+        result = self.operator.modal(self.context, event)
+        self.assertEqual(result, {"RUNNING_MODAL"})
+        self.assertIn("Distance", self.context.window_manager.clipboard)
+        self.assertIn("ΔX", self.context.window_manager.clipboard)
+        self.assertIn("ΔY", self.context.window_manager.clipboard)
+        self.assertIn("ΔZ", self.context.window_manager.clipboard)
+
+    def test_copy_binding_does_not_intercept_typed_centimetres(self):
+        self.operator.state = "PICK_END"
+        self.operator.start_world = make_snap((0, 0, 0))["world_co"]
+        self.operator.hover_snap = None
+        self.operator.distance_text = "2"
+        event = make_event("C", "PRESS", ascii_character="c")
+        self.assertEqual(self.operator.modal(self.context, event), {"RUNNING_MODAL"})
+        self.assertEqual(self.operator.distance_text, "2c")
+        self.assertEqual(self.context.window_manager.clipboard, "")
+
+    def test_cancel_clears_only_the_invoking_viewport_state(self):
+        other = make_context(scene=bpy.context.scene)
+        set_state("MEASURE", {"marker": "current"}, self.context)
+        set_state("MEASURE", {"marker": "other"}, other)
+        result = self.operator.modal(self.context, make_event("RIGHTMOUSE", "PRESS"))
+        self.assertEqual(result, {"CANCELLED"})
+        self.assertIsNone(get_state("MEASURE", self.context))
+        self.assertEqual(get_state("MEASURE", other)["marker"], "other")
+        clear_state("MEASURE", other)
+
+
 def main():
     dimensions.register()
     try:
         loader = unittest.defaultTestLoader
         suite = unittest.TestSuite(
             loader.loadTestsFromTestCase(case)
-            for case in (PointPlacementStateTests, InteractionContextTests, CreateDimensionModalTests)
+            for case in (
+                PointPlacementStateTests,
+                AngularGuideModalStateTests,
+                HandleManipulationStateTests,
+                InteractionContextTests,
+                CreateDimensionModalTests,
+                TransientMeasureModalTests,
+            )
         )
         result = unittest.TextTestRunner(verbosity=2).run(suite)
     finally:

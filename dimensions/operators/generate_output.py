@@ -21,8 +21,17 @@ from ..output_geometry import (
     area_dimension_output_spec,
     linear_dimension_label_layout,
     linear_dimension_output_spec,
+    dimension_set_output_spec,
+    circle_dimension_output_spec,
+    coordinate_elevation_output_spec,
 )
-from ..properties import is_dimension_object
+from ..properties import is_dimension_object, resolve_dimension_style
+
+
+class _ResolvedAnnotation:
+    def __init__(self, annotation, settings):
+        self.name = annotation.name
+        self.dimension_props = resolve_dimension_style(settings, annotation.dimension_props)
 
 
 def _is_visible(context, obj):
@@ -45,7 +54,7 @@ def annotations_for_output(context, scope):
         if not is_dimension_object(obj):
             continue
         props = obj.dimension_props
-        if getattr(props, "annotation_kind", "LINEAR") not in {"LINEAR", "ANGLE", "AREA"}:
+        if getattr(props, "annotation_kind", "LINEAR") not in {"LINEAR", "ANGLE", "AREA", "DIMENSION_SET", "CIRCLE", "COORDINATE", "ELEVATION"}:
             continue
         if not props.visible or not _is_visible(context, obj):
             continue
@@ -147,6 +156,20 @@ def _camera_world_units_per_pixel(scene, camera, world_co):
 def _annotation_world_depth_point(annotation):
     props = annotation.dimension_props
     annotation_kind = getattr(props, "annotation_kind", "LINEAR")
+    if annotation_kind in {"COORDINATE", "ELEVATION"}:
+        from ..coordinate_dimensions import coordinate_values, elevation_value
+        result = coordinate_values(props) if annotation_kind == "COORDINATE" else elevation_value(props)
+        return None if result is None else (result["point"] + resolve_anchor(props.end)) * 0.5
+    if annotation_kind == "DIMENSION_SET":
+        from ..dimension_sets import dimension_set_world_geometry
+
+        geometry = dimension_set_world_geometry(props)
+        return None if not geometry else sum((item["line_mid_world"] for item in geometry), Vector()) / len(geometry)
+    if annotation_kind == "CIRCLE":
+        from ..circle_binding import circle_geometry
+
+        fit = circle_geometry(props)
+        return None if fit is None else fit["center"]
     if annotation_kind == "ANGLE":
         source = resolve_angle_source(props)
         if source is None:
@@ -155,9 +178,11 @@ def _annotation_world_depth_point(annotation):
             getattr(props, "presentation_offset", (0.0, 0.0, 0.0))
         )
     if annotation_kind == "AREA":
-        if props.measurement_state == "NEEDS_REPAIR":
+        if props.measurement_state not in {"LIVE", "CAPTURED"}:
             return None
         result = evaluate_area_binding(props) if props.measurement_state != "CAPTURED" else None
+        if result is not None and result.get("state", "LIVE") != "LIVE":
+            return None
         if result is None:
             if props.measurement_state != "CAPTURED":
                 return None
@@ -247,6 +272,7 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
         skipped_repair = 0
         output_keys = annotation_output_keys(context.scene, annotations)
         for annotation in annotations:
+            resolved_annotation = _ResolvedAnnotation(annotation, settings)
             sizing = output_sizing_for_annotation(context.scene, annotation, settings)
             if sizing is None:
                 skipped += 1
@@ -257,22 +283,55 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
                     skipped_repair += 1
                 continue
             annotation_kind = getattr(annotation.dimension_props, "annotation_kind", "LINEAR")
+            text_height = output_text_height_for_annotation(context.scene, annotation, settings)
+            if annotation_kind == "DIMENSION_SET":
+                spec = dimension_set_output_spec(
+                    context, resolved_annotation, output_keys[annotation.name], sizing,
+                    text_height, context.scene.camera,
+                )
+                if spec is None:
+                    skipped += 1
+                    continue
+                generate_grease_pencil_output(context.scene, spec)
+                generated += 1
+                continue
+            if annotation_kind == "CIRCLE":
+                spec = circle_dimension_output_spec(
+                    context, resolved_annotation, output_keys[annotation.name], sizing,
+                    text_height, context.scene.camera,
+                )
+                if spec is None:
+                    skipped += 1
+                    continue
+                generate_grease_pencil_output(context.scene, spec)
+                generated += 1
+                continue
+            if annotation_kind in {"COORDINATE", "ELEVATION"}:
+                spec = coordinate_elevation_output_spec(
+                    context, resolved_annotation, output_keys[annotation.name], sizing,
+                    text_height, context.scene.camera,
+                )
+                if spec is None:
+                    skipped += 1
+                    continue
+                generate_grease_pencil_output(context.scene, spec)
+                generated += 1
+                continue
             spec_builder = {
                 "LINEAR": linear_dimension_output_spec,
                 "ANGLE": angle_dimension_output_spec,
                 "AREA": area_dimension_output_spec,
             }.get(annotation_kind)
-            spec = spec_builder(annotation, output_keys[annotation.name], sizing)
+            spec = spec_builder(resolved_annotation, output_keys[annotation.name], sizing)
             if spec is None:
                 skipped += 1
                 if annotation_kind == "AREA" and annotation.dimension_props.measurement_state == "NEEDS_REPAIR":
                     skipped_repair += 1
                 continue
-            text_height = output_text_height_for_annotation(context.scene, annotation, settings)
             if annotation_kind == "LINEAR":
                 label_layout = linear_dimension_label_layout(
                     context,
-                    annotation,
+                    resolved_annotation,
                     text_height,
                     sizing.line_width,
                     sizing.arrow_size,
@@ -284,11 +343,11 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
                 output_strokes = line_strokes + base_strokes + label_strokes
             elif annotation_kind == "ANGLE":
                 output_strokes = spec.strokes + angle_dimension_label_strokes(
-                    context, annotation, text_height, sizing.line_width, context.scene.camera
+                    context, resolved_annotation, text_height, sizing.line_width, context.scene.camera
                 )
             else:
                 output_strokes = spec.strokes + area_dimension_label_strokes(
-                    context, annotation, text_height, sizing.line_width, context.scene.camera
+                    context, resolved_annotation, text_height, sizing.line_width, context.scene.camera
                 )
             spec = replace(spec, strokes=output_strokes)
             generate_grease_pencil_output(context.scene, spec)

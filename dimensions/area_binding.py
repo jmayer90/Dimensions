@@ -1,6 +1,7 @@
 """Persistent face-set bindings and world-space area evaluation."""
 
 import bmesh
+import bpy
 from mathutils import Vector
 
 
@@ -44,8 +45,7 @@ def bind_area_faces(props, obj, faces):
         item.vertex_count = vertex_count
     props.measurement_state = "LIVE"
     result = evaluate_area_binding(props)
-    if result is None:
-        props.measurement_state = "NEEDS_REPAIR"
+    props.measurement_state = "NEEDS_REPAIR" if result is None else result.get("state", "LIVE")
     return result
 
 
@@ -83,8 +83,7 @@ def bind_area_face_indices(props, obj, face_indices):
         item.vertex_count = vertex_count
     props.measurement_state = "LIVE"
     result = evaluate_area_binding(props)
-    if result is None:
-        props.measurement_state = "NEEDS_REPAIR"
+    props.measurement_state = "NEEDS_REPAIR" if result is None else result.get("state", "LIVE")
     return result
 
 
@@ -116,10 +115,13 @@ def ensure_bmesh_face_ids(obj, face_indices):
         max((face[layer] for face in bm.faces), default=0) + 1,
     )
     values = []
+    counts = {}
+    for face in bm.faces:
+        counts[face[layer]] = counts.get(face[layer], 0) + 1
     for face_index in face_indices:
         face = bm.faces[face_index]
         value = face[layer]
-        if value <= 0:
+        if value <= 0 or counts.get(value, 0) > 1:
             value = next_id
             next_id += 1
             face[layer] = value
@@ -140,9 +142,12 @@ def ensure_mesh_face_ids(mesh, face_indices):
         max((item.value for item in attribute.data), default=0) + 1,
     )
     values = []
+    counts = {}
+    for item in attribute.data:
+        counts[item.value] = counts.get(item.value, 0) + 1
     for face_index in face_indices:
         value = attribute.data[face_index].value
-        if value <= 0:
+        if value <= 0 or counts.get(value, 0) > 1:
             value = next_id
             next_id += 1
             attribute.data[face_index].value = value
@@ -153,7 +158,12 @@ def ensure_mesh_face_ids(mesh, face_indices):
 
 
 def evaluate_area_binding(props):
-    """Return area, weighted center, normal, and count, or None for an invalid binding."""
+    """Resolve base identity, then use evaluated faces only when identity stays unique.
+
+    Modifiers are never matched by face index or proximity. If Blender does not
+    propagate each bound persistent face ID exactly once, the base result remains
+    visible as an explicit non-authoritative Fallback and output stays withheld.
+    """
     obj = props.area_source_object
     bindings = list(props.area_faces)
     if obj is None or obj.type != "MESH" or not bindings:
@@ -170,7 +180,50 @@ def evaluate_area_binding(props):
             return None
         resolved.append(face)
 
-    return _evaluate_faces(obj, resolved)
+    base_result = _evaluate_faces(obj, resolved)
+    if base_result is None:
+        return None
+    base_result.update({"state": "LIVE", "evaluation_mode": "BASE", "evaluation_reason": ""})
+
+    active_modifiers = tuple(
+        modifier for modifier in obj.modifiers
+        if modifier.show_viewport and (obj.mode != "EDIT" or modifier.show_in_editmode)
+    )
+    if not active_modifiers:
+        return base_result
+    if obj.mode == "EDIT":
+        return _base_fallback(base_result, "Edit Mode uses base faces while viewport modifiers are active")
+
+    try:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated_object = obj.evaluated_get(depsgraph)
+        evaluated_mesh = evaluated_object.data
+    except (AttributeError, ReferenceError, RuntimeError):
+        return _base_fallback(base_result, "Evaluated modifier geometry is unavailable")
+    if evaluated_object is obj or evaluated_mesh is obj.data:
+        return _base_fallback(base_result, "Evaluated modifier geometry is unavailable")
+
+    evaluated_by_id = _mesh_faces_by_id(evaluated_mesh)
+    evaluated_faces = []
+    for binding in bindings:
+        matches = evaluated_by_id.get(binding.face_id, ())
+        if len(matches) != 1:
+            return _base_fallback(base_result, "Modifiers did not preserve one unique face identity")
+        face = matches[0]
+        if len(face.verts) != binding.vertex_count:
+            return _base_fallback(base_result, "Modifiers changed a bound face's topology")
+        evaluated_faces.append(face)
+    result = _evaluate_faces(evaluated_object, evaluated_faces)
+    if result is None:
+        return _base_fallback(base_result, "Evaluated bound faces have no measurable area")
+    result.update({"state": "LIVE", "evaluation_mode": "EVALUATED", "evaluation_reason": ""})
+    return result
+
+
+def _base_fallback(base_result, reason):
+    result = dict(base_result)
+    result.update({"state": "FALLBACK", "evaluation_mode": "BASE_FALLBACK", "evaluation_reason": reason})
+    return result
 
 
 def _evaluate_faces(obj, faces):
@@ -215,7 +268,11 @@ def _faces_by_id(obj):
                 result.setdefault(value, []).append(face)
         return result
 
-    mesh = obj.data
+    return _mesh_faces_by_id(obj.data)
+
+
+def _mesh_faces_by_id(mesh):
+    result = {}
     attribute = mesh.attributes.get(FACE_ID_ATTRIBUTE)
     if attribute is None or attribute.data_type != "INT" or attribute.domain != "FACE":
         return result

@@ -1,7 +1,7 @@
 # UX-06 — Transient hover measurement with delta X/Y/Z
 
 **Milestone:** M2 Fluency
-**Status:** ⬜ Planned.
+**Status:** ✅ Complete in 0.4.3.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch.
@@ -36,15 +36,25 @@ It changes measuring from a decision into a reflex. Not in the 1.0 gate, but it 
 
 ## Acceptance criteria
 
-- [ ] A measure mode acquires two points and displays the result without creating any object.
-- [ ] Display shows total distance and ΔX, ΔY, ΔZ, formatted per scene units.
-- [ ] Snapping, highlighting, and axis constraints behave identically to the persistent measure tool.
-- [ ] After the second point, the tool chains from that point into the next measurement.
-- [ ] An explicit key saves the current measurement as a persistent measurement object.
-- [ ] A key copies the current value to the clipboard as text.
-- [ ] Exiting leaves no objects and no lingering viewport state.
-- [ ] The relationship to the existing **Measure** command is documented in README and `DESIGN.md`.
-- [ ] Transient state does not leak between viewports.
+- [x] A measure mode acquires two points and displays the result without creating any object.
+- [x] Display shows total distance and ΔX, ΔY, ΔZ, formatted per scene units.
+- [x] Snapping, highlighting, and axis constraints behave identically to the persistent measure tool.
+- [x] After the second point, the tool chains from that point into the next measurement.
+- [x] An explicit key saves the current measurement as a persistent measurement object.
+- [x] A key copies the current value to the clipboard as text.
+- [x] Exiting leaves no objects and no lingering viewport state.
+- [x] The relationship to the existing **Measure** command is documented in README and `DESIGN.md`.
+- [x] Transient state does not leak between viewports.
+
+## Delivered behavior
+
+`dimensions.measure` is now the primary transient tape measure. It reuses the shared snap and inference acquisition path, global/local axis handling, middle-mouse direction gesture, and typed scene-unit distance. The first accepted point begins the segment; accepting the second stores that result only in viewport-owned state and immediately makes it the next start. Until the cursor moves, the completed segment remains visible, so `P` can promote it and `C` can copy it reliably.
+
+The overlay uses a distinct green line and `TAPE` badge and displays `Distance`, `ΔX`, `ΔY`, and `ΔZ` through `format_length()`. `P` creates one persistent measurement through `create_measurement_object()` and its required native snap proxy; no object or proxy exists before that action. `Ctrl+C` writes the identical compact text to Blender's clipboard without intercepting typed `cm` input. Both are actions in the rebindable Dimensions modal keymap.
+
+`dimensions.measure_persistent` preserves the former direct save-on-confirm workflow under **Measure (Persistent)**. It remains available in Blender Search and ships as a disabled invocation entry users may bind. The sidebar's primary **Measure** button intentionally launches the transient workflow.
+
+Blender 5.2 background coverage verifies signed 3/−4/12 components and total 13, 0.1 scene-unit scale formatting to 300/−400/1200 mm and 1300 mm total, chaining, no-object-before-save, one persistent measurement on save, clipboard content, and viewport-scoped cleanup. No persisted property was added, so schema 6 remains unchanged for UX-06.
 
 ## Code map
 

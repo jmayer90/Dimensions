@@ -52,6 +52,10 @@ cd "$root"
 "$blender" --background --factory-startup --python tests/output_geometry_smoke.py
 "$blender" --background --factory-startup --python tests/output_smoke.py
 "$blender" --background --factory-startup --python tests/output_operator_smoke.py
+"$blender" --background --factory-startup --python tests/vector_export_smoke.py
+"$blender" --background --factory-startup --python tests/dimension_set_smoke.py
+"$blender" --background --factory-startup --python tests/circle_dimension_smoke.py
+"$blender" --background --factory-startup --python tests/guide_spacing_benchmark.py
 "$blender" --background --factory-startup --command extension validate dimensions
 "$root/scripts/build_extension.sh" --blender "$blender"
 

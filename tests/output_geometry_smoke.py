@@ -15,7 +15,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 import dimensions
 from dimensions.anchors import set_world_anchor
 from dimensions.area_binding import bind_area_face_indices
-from dimensions.collections import create_dimension_object
+from dimensions.collections import create_dimension_object, create_guide_point_object
 from dimensions.output_geometry import (
     TEXT_OUTPUT_SUPPORTED,
     WorldSizingPolicy,
@@ -27,6 +27,7 @@ from dimensions.output_geometry import (
     linear_dimension_label_layout,
     linear_dimension_label_strokes,
     linear_dimension_output_spec,
+    coordinate_elevation_output_spec,
 )
 
 
@@ -127,6 +128,55 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
             spec.strokes[0].points[1],
         )
 
+    def test_extension_treatment_and_independent_endpoint_variants_match_output_sizing(self):
+        dimension = self._linear_dimension()
+        props = dimension.dimension_props
+        props.arrow_size = 10.0
+        props.extension_gap = 2.0
+        props.extension_overshoot = 3.0
+        props.start_end_style = "DOT"
+        props.end_end_style = "NONE"
+        spec = linear_dimension_output_spec(
+            dimension, "presentation", WorldSizingPolicy(line_width=0.02, arrow_size=0.5),
+        )
+        # 0.05 world units per presentation pixel.
+        self.assertAlmostEqual(spec.strokes[1].points[0].y, 0.1)
+        self.assertAlmostEqual(spec.strokes[1].points[1].y, 1.15)
+        self.assertAlmostEqual(spec.strokes[2].points[0].y, 0.1)
+        self.assertAlmostEqual(spec.strokes[2].points[1].y, 1.15)
+        # Dimension + two extensions + three dot strokes; end NONE adds nothing.
+        self.assertEqual(len(spec.strokes), 6)
+
+        props.extension_gap = 0.0
+        props.extension_overshoot = 0.0
+        props.start_end_style = "FILLED"
+        filled = linear_dimension_output_spec(
+            dimension, "filled-start", WorldSizingPolicy(line_width=0.02, arrow_size=0.5),
+        )
+        self.assertEqual(len(filled.strokes), 7)
+        props.start_end_style = "OPEN"
+        opened = linear_dimension_output_spec(
+            dimension, "open-start", WorldSizingPolicy(line_width=0.02, arrow_size=0.5),
+        )
+        self.assertEqual(len(opened.strokes), 5)
+
+    def test_dual_units_and_label_modes_reach_generated_strokes(self):
+        dimension = self._linear_dimension()
+        props = dimension.dimension_props
+        props.unit_style = "MILLIMETERS"
+        props.precision = 0
+        props.secondary_unit_style = "INCH_DECIMAL"
+        props.secondary_precision = 2
+        props.dual_unit_arrangement = "STACKED"
+        props.label_orientation = "ALIGNED"
+        props.label_line_mode = "ABOVE"
+        label = _linear_dimension_label_text(bpy.context, props, 0.1)
+        self.assertEqual(label, '100 mm\n3.94"')
+        bpy.context.scene.dimensions_settings.text_placement = "INLINE"
+        layout = linear_dimension_label_layout(bpy.context, dimension, 0.2, 0.01, 0.2)
+        self.assertEqual(layout.dimension_line_strokes, ())
+        self.assertGreater(len(layout.strokes), 0)
+
     def test_invalid_sources_return_no_output_and_text_is_supported(self):
         dimension = self._linear_dimension()
         dimension.dimension_props.annotation_kind = "AREA"
@@ -212,6 +262,18 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
 
         self.assertEqual(tuple(spec.strokes[0].points[0]), (0.0, 3.0, 3.0))
         self.assertEqual(tuple(spec.strokes[0].points[1]), (4.0, 3.0, 3.0))
+
+    def test_annotation_object_rotation_and_scale_do_not_change_output(self):
+        dimension = self._linear_dimension()
+        sizing = WorldSizingPolicy(line_width=0.05, arrow_size=0.4)
+        original = linear_dimension_output_spec(dimension, "transform-original", sizing)
+        dimension.rotation_euler = (0.4, -0.2, 1.1)
+        dimension.scale = (5.0, 0.25, 3.0)
+        transformed = linear_dimension_output_spec(dimension, "transform-ignored", sizing)
+        self.assertEqual(
+            [tuple(tuple(point) for point in stroke.points) for stroke in transformed.strokes],
+            [tuple(tuple(point) for point in stroke.points) for stroke in original.strokes],
+        )
 
     def test_angle_output_emits_rays_arc_and_label_at_offset_position(self):
         dimension = self._angle_dimension()
@@ -310,6 +372,40 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
                 dimension, "invalid-area", WorldSizingPolicy(0.02, 0.2)
             )
         )
+
+    def test_coordinate_and_elevation_share_world_output_pipeline(self):
+        datum = create_guide_point_object(self.context, "DATUM Output")
+        self.created.append(datum)
+        datum.guide_props.is_datum = True
+        set_world_anchor(datum.guide_props.start, Vector((0.0, 0.0, 0.0)))
+        coordinate = create_dimension_object(self.context, "DIM Coordinate Output")
+        self.created.append(coordinate)
+        props = coordinate.dimension_props
+        props.annotation_kind = "COORDINATE"
+        props.datum_object = datum
+        set_world_anchor(props.start, Vector((2.0, 3.0, 4.0)))
+        set_world_anchor(props.end, Vector((3.0, 4.0, 4.0)))
+        coordinate_spec = coordinate_elevation_output_spec(
+            self.context, coordinate, "coordinate", WorldSizingPolicy(0.02, 0.2), 0.15,
+        )
+        self.assertIsNotNone(coordinate_spec)
+        self.assertGreater(len(coordinate_spec.strokes), 1)
+
+        props.coordinate_alignment = "ROW"
+        props.coordinate_alignment_offset = 8.0
+        aligned_spec = coordinate_elevation_output_spec(
+            self.context, coordinate, "coordinate-aligned", WorldSizingPolicy(0.02, 0.2), 0.15,
+        )
+        self.assertEqual(tuple(aligned_spec.strokes[0].points[1]), (2.0, 8.0, 0.0))
+
+        props.annotation_kind = "ELEVATION"
+        elevation_spec = coordinate_elevation_output_spec(
+            self.context, coordinate, "elevation", WorldSizingPolicy(0.02, 0.2), 0.15,
+        )
+        self.assertIsNotNone(elevation_spec)
+        self.assertEqual(len(elevation_spec.strokes[0].points), 2)
+        self.assertEqual(len(elevation_spec.strokes[1].points), 3)
+        self.assertEqual(len(elevation_spec.strokes[2].points), 2)
 
 
 def main():

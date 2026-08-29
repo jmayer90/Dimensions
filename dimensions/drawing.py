@@ -1,12 +1,12 @@
 import blf
 import bpy
 import gpu
-from math import degrees
+from math import atan2, cos, degrees, pi, sin, tau
 from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
-from mathutils import Vector
+from mathutils import Quaternion, Vector
 
-from .anchors import resolve_anchor
+from .anchors import dimension_source_is_missing, resolve_anchor
 from .area_binding import area_label_world, evaluate_area_binding
 from .angle_binding import resolve_angle_source
 from .constants import (
@@ -24,12 +24,20 @@ from .dimension_geometry import (
     get_offset_basis,
     sanitize_plane_normal,
 )
-from .properties import is_dimension_object, is_guide_object
+from .dimension_sets import dimension_set_state, dimension_set_world_geometry
+from .circle_binding import circle_geometry, circle_value
+from .coordinate_dimensions import coordinate_label, coordinate_values, elevation_value, signed_number
+from .properties import (
+    is_dimension_object,
+    is_guide_object,
+    is_read_only_dimensions_object,
+    resolve_dimension_style,
+)
 from .preferences import get_preferences
 from .collections import get_scene_collection
 from .snapping import construction_segment_world, find_nearest_guide_point, guide_is_visible, guide_segment_world
 from .scene_sync import register_scene_sync, unregister_scene_sync
-from .units import format_area, format_length, format_volume
+from .units import format_area, format_dual_length, format_length, format_volume
 from .volume import (
     VOLUME_APPROXIMATE,
     get_mesh_volume,
@@ -84,8 +92,8 @@ class SegmentBatcher:
         key = (tuple(round(float(channel), 6) for channel in color), round(float(line_width), 3))
         self._segments.setdefault(key, []).extend(segments)
 
-    def add_text(self, text, position, color, text_size=DEFAULT_TEXT_SIZE, align="CENTER"):
-        self._text_items.append((text, position, tuple(color), text_size, align))
+    def add_text(self, text, position, color, text_size=DEFAULT_TEXT_SIZE, align="CENTER", rotation=0.0):
+        self._text_items.append((text, position, tuple(color), text_size, align, rotation))
 
     @property
     def batch_count(self):
@@ -99,18 +107,21 @@ class SegmentBatcher:
             self._shader.uniform_float("color", color)
             batch.draw(self._shader)
         self._segments.clear()
-        for text, position, color, text_size, align in self._text_items:
+        for text, position, color, text_size, align, rotation in self._text_items:
             if align == "LEFT":
                 _draw_text_left(text, position, color, text_size)
             elif align == "RIGHT":
                 _draw_text_right(text, position, color, text_size)
             else:
-                _draw_text(text, position, color, text_size)
+                _draw_text(text, position, color, text_size, rotation)
         self._text_items.clear()
 
 
 def set_preview_state(preview_state):
     state = dict(preview_state)
+    from .snap_targets import snap_target_status
+
+    state.setdefault("snap_target_status", snap_target_status(bpy.context))
     state.setdefault("tool_label", {
         "ANGLE": "ANGLE",
         "AREA": "AREA",
@@ -122,18 +133,25 @@ def clear_preview_state():
     clear_state("DIMENSION")
 
 
-def set_measure_state(state):
+def set_measure_state(state, context=None):
     display_state = dict(state)
+    from .snap_targets import snap_target_status
+
+    context = context or bpy.context
+    display_state.setdefault("snap_target_status", snap_target_status(context))
     display_state.setdefault("tool_label", "MEASURE")
-    set_state("MEASURE", display_state)
+    set_state("MEASURE", display_state, context)
 
 
-def clear_measure_state():
-    clear_state("MEASURE")
+def clear_measure_state(context=None, key=None):
+    clear_state("MEASURE", context, key)
 
 
 def set_guide_preview_state(state):
     display_state = dict(state)
+    from .snap_targets import snap_target_status
+
+    display_state.setdefault("snap_target_status", snap_target_status(bpy.context))
     display_state.setdefault("tool_label", "GUIDE")
     set_state("GUIDE", display_state)
 
@@ -190,6 +208,12 @@ def build_dimension_geometry_for_object(context, dimension_object):
         return _build_area_geometry(context, props)
     if getattr(props, "annotation_kind", "LINEAR") == "ANGLE":
         return _build_angle_geometry(context, props)
+    if getattr(props, "annotation_kind", "LINEAR") == "DIMENSION_SET":
+        return _build_dimension_set_geometry(context, props)
+    if getattr(props, "annotation_kind", "LINEAR") == "CIRCLE":
+        return _build_circle_geometry(context, props)
+    if getattr(props, "annotation_kind", "LINEAR") in {"COORDINATE", "ELEVATION"}:
+        return _build_coordinate_elevation_geometry(context, props)
 
     start_world = resolve_anchor(props.start)
     end_world = resolve_anchor(props.end)
@@ -226,25 +250,136 @@ def build_dimension_geometry_for_object(context, dimension_object):
     screen_geometry["value"] = world_geometry["value"]
     screen_geometry["dimension_type"] = props.dimension_type
     screen_geometry["measurement_mode"] = props.measurement_mode
-    scene_settings = getattr(context.scene, "dimensions_settings", None)
-    screen_geometry["precision"] = (
-        scene_settings.precision if scene_settings is not None else DEFAULT_PRECISION
+    screen_geometry["measurement_state"] = (
+        "NEEDS_REPAIR" if dimension_source_is_missing(props) else props.measurement_state
     )
+    scene_settings = getattr(context.scene, "dimensions_settings", None)
     screen_geometry["text_placement"] = (
         scene_settings.text_placement if scene_settings is not None else "INLINE"
     )
-    screen_geometry["line_width"] = props.line_width
-    screen_geometry["text_size"] = props.text_size
-    screen_geometry["arrow_size"] = props.arrow_size
-    screen_geometry["arrow_end_style"] = getattr(props, "arrow_end_style", "ARROW")
     screen_geometry["custom_text"] = props.custom_text.strip()
     screen_geometry["custom_text_position"] = props.custom_text_position
-    screen_geometry["value_prefix"] = props.value_prefix
-    screen_geometry["value_suffix"] = props.value_suffix
-    screen_geometry["tolerance_mode"] = props.tolerance_mode
-    screen_geometry["tolerance_upper"] = props.tolerance_upper
-    screen_geometry["tolerance_lower"] = props.tolerance_lower
-    return screen_geometry
+    return _annotation_style(context, props, screen_geometry)
+
+
+def _build_dimension_set_geometry(context, props):
+    members = []
+    presentation_offset = Vector(props.presentation_offset)
+    for item in dimension_set_world_geometry(props):
+        world_geometry = dict(item)
+        if presentation_offset.length_squared > 1e-12:
+            for key in ("line_start_world", "line_end_world", "line_mid_world"):
+                world_geometry[key] = world_geometry[key] + presentation_offset
+        screen = _project_dimension_geometry(
+            context, item["start_world"], item["end_world"], world_geometry,
+        )
+        if screen is None:
+            continue
+        screen.update({
+            "value": item["value"],
+            "dimension_type": props.dimension_type,
+            "measurement_mode": "TRUE",
+            "measurement_state": item["state"],
+            "text_placement": "INLINE",
+            "custom_text": "",
+            "custom_text_position": "ABOVE",
+            "set_member_index": item["index"],
+        })
+        styled = _annotation_style(context, props, screen)
+        if props.set_kind == "BASELINE" and members:
+            first = members[0]
+            perpendicular = Vector((-styled["line_direction_screen"].y, styled["line_direction_screen"].x))
+            source_side = styled["line_mid_screen"] - (
+                styled["anchor_start_screen"] + styled["anchor_end_screen"]
+            ) * 0.5
+            if perpendicular.dot(source_side) < 0.0:
+                perpendicular.negate()
+            required_pitch = styled["text_size"] * 1.5
+            desired_mid = first["line_mid_screen"] + perpendicular * (item["index"] * required_pitch)
+            delta = desired_mid - styled["line_mid_screen"]
+            for key in ("line_start_screen", "line_end_screen", "line_mid_screen"):
+                styled[key] = styled[key] + delta
+        estimated_label_width = max(3.0, len(str(round(item["value"], styled["precision"])))) * styled["text_size"] * 0.58
+        if (screen["line_end_screen"] - screen["line_start_screen"]).length < estimated_label_width + styled["arrow_size"] * 2.0:
+            styled["text_placement"] = "OUTSIDE" if item["index"] % 2 == 0 else "OUTSIDE_START"
+        members.append(styled)
+    if not members:
+        return None
+    return {
+        "annotation_kind": "DIMENSION_SET",
+        "set_kind": props.set_kind,
+        "members": tuple(members),
+        "measurement_state": dimension_set_state(props),
+        "color": members[0]["color"],
+        "selected_color": members[0]["selected_color"],
+        "precision": members[0]["precision"],
+    }
+
+
+def _build_circle_geometry(context, props):
+    fit = circle_geometry(props)
+    if fit is None:
+        return None
+    direction = fit["axis_u"] * cos(props.circle_leader_angle) + fit["axis_v"] * sin(props.circle_leader_angle)
+    direction.normalize()
+    radius = fit["radius"]
+    edge = fit["center"] + direction * radius
+    distance = props.circle_label_distance if props.circle_label_distance > 1e-6 else radius * 1.35
+    label_world = fit["center"] + direction * distance + Vector(props.presentation_offset)
+    points_world = []
+    if props.circle_kind == "DIAMETER":
+        points_world = [fit["center"] - direction * radius, fit["center"] + direction * radius]
+    elif props.circle_kind == "ARC_LENGTH":
+        steps = max(12, int(48 * fit["sweep"] / tau))
+        for index in range(steps + 1):
+            angle = fit["sweep"] * index / steps
+            radial = fit["start_direction"].copy()
+            radial.rotate(Quaternion(fit["normal"], angle))
+            points_world.append(fit["center"] + radial * radius)
+    else:
+        points_world = [fit["center"], edge]
+    points = [_project_world_to_screen(context, point) for point in points_world]
+    edge_screen = _project_world_to_screen(context, edge)
+    label_screen = _project_world_to_screen(context, label_world)
+    if label_screen is None or edge_screen is None or any(point is None for point in points):
+        return None
+    return _annotation_style(context, props, {
+        "annotation_kind": "CIRCLE", "circle_kind": props.circle_kind,
+        "points": points, "edge_screen": edge_screen, "label_position": label_screen,
+        "line_mid_screen": label_screen, "value": circle_value(props, fit),
+        "measurement_state": fit["state"], "fit_error": fit["fit_error"],
+        "fit_warning": fit["fit_warning"],
+    })
+
+
+def _build_coordinate_elevation_geometry(context, props):
+    kind = props.annotation_kind
+    result = coordinate_values(props) if kind == "COORDINATE" else elevation_value(props)
+    if result is None:
+        return None
+    point = result["point"]
+    label_world = resolve_anchor(props.end) + Vector(props.presentation_offset)
+    if kind == "COORDINATE" and props.coordinate_alignment != "FREE":
+        origin = result["origin"]
+        x_axis, y_axis, _z_axis = result["axes"]
+        delta = point - origin
+        if props.coordinate_alignment == "ROW":
+            label_world = origin + x_axis * delta.dot(x_axis) + y_axis * props.coordinate_alignment_offset
+        else:
+            label_world = origin + x_axis * props.coordinate_alignment_offset + y_axis * delta.dot(y_axis)
+        label_world += Vector(props.presentation_offset)
+    start_screen = _project_world_to_screen(context, point)
+    end_screen = _project_world_to_screen(context, label_world)
+    if start_screen is None or end_screen is None:
+        return None
+    geometry = {
+        "annotation_kind": kind, "leader_start_screen": start_screen,
+        "leader_end_screen": end_screen, "label_position": end_screen,
+        "line_mid_screen": (start_screen + end_screen) * 0.5,
+        "measurement_state": result["state"],
+    }
+    geometry.update({"values": result["values"]} if kind == "COORDINATE" else {"value": result["value"]})
+    return _annotation_style(context, props, geometry)
 
 
 def get_cached_dimension_geometry(context, dimension_object):
@@ -272,12 +407,40 @@ def get_cached_dimension_geometry(context, dimension_object):
 
 def _annotation_style(context, props, geometry):
     settings = getattr(context.scene, "dimensions_settings", None)
-    geometry["precision"] = settings.precision if settings is not None else DEFAULT_PRECISION
-    geometry["line_width"] = props.line_width
-    geometry["text_size"] = props.text_size
+    style = resolve_dimension_style(settings, props) if settings is not None else props
+    geometry["precision"] = getattr(style, "precision", DEFAULT_PRECISION)
+    geometry["line_width"] = style.line_width
+    geometry["text_size"] = style.text_size
+    geometry["arrow_size"] = style.arrow_size
+    geometry["arrow_end_style"] = style.arrow_end_style
+    geometry["start_end_style"] = getattr(style, "start_end_style", "OPEN")
+    geometry["end_end_style"] = getattr(style, "end_end_style", "OPEN")
+    if getattr(style, "arrow_end_style", "ARROW") == "ARCHITECTURAL_TICK":
+        if geometry["start_end_style"] == "OPEN":
+            geometry["start_end_style"] = "ARCHITECTURAL_TICK"
+        if geometry["end_end_style"] == "OPEN":
+            geometry["end_end_style"] = "ARCHITECTURAL_TICK"
+    geometry["extension_gap"] = getattr(style, "extension_gap", 0.0)
+    geometry["extension_overshoot"] = getattr(style, "extension_overshoot", 0.0)
+    geometry["color"] = tuple(style.color)
+    geometry["selected_color"] = tuple(style.selected_color)
+    geometry["unit_style"] = getattr(style, "unit_style", "AUTO")
+    geometry["secondary_unit_style"] = getattr(style, "secondary_unit_style", "NONE")
+    geometry["secondary_precision"] = getattr(style, "secondary_precision", 2)
+    geometry["dual_unit_arrangement"] = getattr(style, "dual_unit_arrangement", "BRACKETS")
+    geometry["label_orientation"] = getattr(style, "label_orientation", "HORIZONTAL")
+    geometry["label_line_mode"] = getattr(style, "label_line_mode", "BROKEN")
     geometry["custom_text"] = props.custom_text.strip()
-    geometry["value_prefix"] = props.value_prefix
-    geometry["value_suffix"] = props.value_suffix
+    geometry["value_prefix"] = style.value_prefix
+    geometry["value_suffix"] = style.value_suffix
+    geometry["tolerance_mode"] = style.tolerance_mode
+    geometry["tolerance_upper"] = style.tolerance_upper
+    geometry["tolerance_lower"] = style.tolerance_lower
+    for name in (
+        "coordinate_components", "coordinate_show_plus", "coordinate_show_negative",
+        "elevation_precision", "elevation_show_plus", "elevation_prefix", "elevation_suffix",
+    ):
+        geometry[name] = getattr(props, name, None)
     return geometry
 
 
@@ -287,11 +450,8 @@ def _build_area_geometry(context, props):
         start_world = result["center"]
         value = result["area"]
         face_count = result["face_count"]
-        state = "LIVE"
-        props.area_value = value
-        props.area_face_count = face_count
-        if props.measurement_state != "LIVE":
-            props.measurement_state = "LIVE"
+        state = result.get("state", "LIVE")
+        evaluation_mode = result.get("evaluation_mode", "BASE")
     else:
         start_world = resolve_anchor(props.start)
         value = props.area_value
@@ -299,8 +459,7 @@ def _build_area_geometry(context, props):
         state = props.measurement_state
         if state != "CAPTURED" and len(props.area_faces) > 0:
             state = "NEEDS_REPAIR"
-            if props.measurement_state != state:
-                props.measurement_state = state
+        evaluation_mode = "CAPTURED" if state == "CAPTURED" else "UNAVAILABLE"
     fallback_end = resolve_anchor(props.end)
     end_world = area_label_world(props, start_world, fallback_end) + Vector(props.presentation_offset)
     start_screen = _project_world_to_screen(context, start_world)
@@ -314,6 +473,7 @@ def _build_area_geometry(context, props):
         "line_mid_screen": (start_screen + end_screen) * 0.5,
         "value": value,
         "measurement_state": state,
+        "area_evaluation_mode": evaluation_mode,
         "face_count": face_count,
     })
 
@@ -356,6 +516,7 @@ def _build_angle_geometry(context, props):
     arc_points = [_project_world_to_screen(context, point) for point in world_geometry["arc_points_world"]]
     if start_screen is None or center_screen is None or end_screen is None or label_position is None or any(point is None for point in arc_points):
         return None
+    state = "NEEDS_REPAIR" if dimension_source_is_missing(props) else props.measurement_state
     return _annotation_style(context, props, {
         "annotation_kind": "ANGLE",
         "center_screen": center_screen,
@@ -365,7 +526,7 @@ def _build_angle_geometry(context, props):
         "line_mid_screen": label_position,
         "label_position": label_position,
         "value": world_geometry["value"],
-        "measurement_state": props.measurement_state,
+        "measurement_state": state,
         "angle_mode": props.angle_mode,
         "connected": source.get("connected", True),
     })
@@ -405,9 +566,12 @@ def draw_dimensions():
             if geometry is None:
                 continue
 
-            color = props.selected_color if obj.select_get() else props.color
+            color = geometry["selected_color"] if obj.select_get() else geometry["color"]
             _collect_dimension_geometry(context, batcher, geometry, color, geometry["precision"])
         batcher.flush()
+
+        if preview_state is None or preview_state.get("state") != "HANDLE_DRAG":
+            _draw_selected_annotation_handles(context, shader)
 
         if preview_state is not None:
             _draw_preview(context, shader, preview_state)
@@ -422,6 +586,7 @@ def draw_dimensions():
             if interaction_state is not None:
                 _draw_interaction_status(interaction_state)
 
+        _draw_persistent_guide_points(context, shader)
         _draw_persistent_measurements(context)
 
         _draw_selected_object_overlay(context)
@@ -480,11 +645,106 @@ def _draw_construction_guides(context, shader):
     for obj in () if collection is None else collection.all_objects:
         if not guide_is_visible(context, obj):
             continue
+        if getattr(obj.guide_props, "kind", "GUIDE") == "PLANE":
+            from .guide_planes import active_plane_frame, resolve_guide_plane
+
+            frame = resolve_guide_plane(obj)
+            if frame is None:
+                origin = Vector(obj.guide_props.last_resolved_origin)
+                normal = Vector(obj.guide_props.last_resolved_direction)
+                frame = _fallback_plane_frame(origin, normal)
+                color = (1.0, 0.18, 0.12, 0.9)
+                width = max(1.0, settings.guide_line_width)
+            else:
+                active = (
+                    settings.active_plane_mode == "GUIDE"
+                    and settings.active_plane_object == obj
+                    and active_plane_frame(context.scene) is not None
+                )
+                color = (1.0, 0.72, 0.12, 0.95) if active else settings.guide_color
+                width = max(3.0, settings.guide_line_width * 2.0) if active else settings.guide_line_width
+            if frame is not None:
+                batcher.add_segments(
+                    _plane_grid_segments(frame, obj.guide_props.plane_extent), color, width,
+                )
+            continue
+        if getattr(obj.guide_props, "derivation_mode", "NONE") == "SPACING":
+            lines, segments = _spaced_guide_draw_segments(obj)
+            batcher.add_segments(segments, settings.guide_color, settings.guide_line_width)
+            if lines:
+                continue
         segment = guide_segment_world(obj)
         if segment is None:
+            if getattr(obj.guide_props, "derived", False) and obj.guide_props.derived_state != "LIVE":
+                origin = Vector(obj.guide_props.last_resolved_origin)
+                direction = Vector(obj.guide_props.last_resolved_direction)
+                if direction.length > 1e-6:
+                    direction.normalize()
+                    batcher.add_segments(
+                        _dashed_world_line(origin, direction),
+                        (1.0, 0.18, 0.12, 0.9),
+                        max(1.0, settings.guide_line_width),
+                    )
             continue
         batcher.add_segments(list(segment), settings.guide_color, settings.guide_line_width)
+    if settings.active_plane_mode not in {"NONE", "GUIDE"}:
+        from .guide_planes import active_plane_frame
+
+        frame = active_plane_frame(context.scene)
+        if frame is not None:
+            extent = max(float(getattr(context.region_data, "view_distance", 5.0)) * 0.4, 1.0)
+            batcher.add_segments(
+                _plane_grid_segments(frame, extent),
+                (1.0, 0.72, 0.12, 0.95),
+                max(3.0, settings.guide_line_width * 2.0),
+            )
     batcher.flush()
+
+
+def _spaced_guide_draw_segments(guide, extent=10000.0):
+    """Resolve one spaced set into the single line batch used by the draw path."""
+    from .derived_guides import spaced_guide_lines
+
+    lines = spaced_guide_lines(guide)
+    segments = []
+    for origin, direction in lines:
+        segments.extend((origin - direction * extent, origin + direction * extent))
+    return lines, segments
+
+
+def _fallback_plane_frame(origin, normal):
+    from .guide_planes import plane_frame
+
+    return plane_frame(origin, normal)
+
+
+def _plane_grid_segments(frame, extent, divisions=10):
+    """Return a bounded grid; extent is presentation and never changes definition."""
+    origin, axis_u, axis_v, _normal = frame
+    extent = max(float(extent), 0.01)
+    points = []
+    for index in range(-divisions, divisions + 1):
+        offset = extent * index / divisions
+        points.extend((
+            origin + axis_u * -extent + axis_v * offset,
+            origin + axis_u * extent + axis_v * offset,
+            origin + axis_v * -extent + axis_u * offset,
+            origin + axis_v * extent + axis_u * offset,
+        ))
+    return points
+
+
+def _dashed_world_line(origin, direction, extent=10000.0, dash=0.25, count=80):
+    """Bounded dashed fallback makes a broken derived guide visibly non-live."""
+    start = origin - direction * min(extent, dash * count)
+    return [
+        point
+        for index in range(count)
+        for point in (
+            start + direction * (index * dash * 2.0),
+            start + direction * (index * dash * 2.0 + dash),
+        )
+    ]
 
 
 def _draw_guide_preview_marker(shader, state):
@@ -501,16 +761,27 @@ def _draw_guide_preview_world(context, shader, state):
     settings = getattr(context.scene, "dimensions_settings", None)
     color = tuple(settings.guide_color) if settings is not None else (0.22, 0.70, 1.0, 0.7)
     width = settings.guide_line_width if settings is not None else 1.0
-    _draw_guide_preview_segment(shader, start, end, state.get("axis", "ALIGNED"), color, width)
+    from .guide_planes import active_plane_frame
+
+    frame = active_plane_frame(context.scene)
+    axis_directions = None if frame is None else {"X": frame[1], "Y": frame[2], "Z": frame[3]}
+    _draw_guide_preview_segment(
+        shader, start, end, state.get("axis", "ALIGNED"), color, width, axis_directions,
+    )
 
 
-def _draw_guide_preview_segment(shader, start, end, axis, color, line_width):
+def _draw_guide_preview_segment(shader, start, end, axis, color, line_width, axis_directions=None):
+    axis_directions = axis_directions or {
+        "X": Vector((1.0, 0.0, 0.0)),
+        "Y": Vector((0.0, 1.0, 0.0)),
+        "Z": Vector((0.0, 0.0, 1.0)),
+    }
     if axis == "X":
-        direction = Vector((1.0, 0.0, 0.0))
+        direction = axis_directions["X"]
     elif axis == "Y":
-        direction = Vector((0.0, 1.0, 0.0))
+        direction = axis_directions["Y"]
     elif axis == "Z":
-        direction = Vector((0.0, 0.0, 1.0))
+        direction = axis_directions["Z"]
     else:
         direction = end - start
         if direction.length < 1e-6:
@@ -539,10 +810,17 @@ def _draw_axis_gesture(context, shader, state):
     origin = Vector(origin)
     extent = max(float(context.region_data.view_distance) * 0.22, 0.1)
     active_axis = state.get("axis", "ALIGNED")
+    from .guide_planes import active_plane_frame
+
+    frame = active_plane_frame(context.scene)
+    directions = (
+        (Vector((1.0, 0.0, 0.0)), Vector((0.0, 1.0, 0.0)), Vector((0.0, 0.0, 1.0)))
+        if frame is None else (frame[1], frame[2], frame[3])
+    )
     axes = {
-        "X": (Vector((1.0, 0.0, 0.0)), (1.0, 0.18, 0.12, 0.95)),
-        "Y": (Vector((0.0, 1.0, 0.0)), (0.22, 1.0, 0.18, 0.95)),
-        "Z": (Vector((0.0, 0.0, 1.0)), (0.20, 0.48, 1.0, 0.95)),
+        "X": (directions[0], (1.0, 0.18, 0.12, 0.95)),
+        "Y": (directions[1], (0.22, 1.0, 0.18, 0.95)),
+        "Z": (directions[2], (0.20, 0.48, 1.0, 0.95)),
     }
     for axis, (direction, color) in axes.items():
         width = 5.0 if axis == active_axis else 2.0
@@ -573,6 +851,9 @@ def _draw_tool_snap_highlights(context, shader):
 
 
 def _draw_snap_highlight(context, shader, snap, color, show_object_context=False):
+    if snap.get("type") == "INFERENCE":
+        _draw_inference_indicator(shader, snap, color)
+        return
     geometry = _snap_highlight_geometry(
         context,
         snap,
@@ -650,6 +931,41 @@ def _draw_snap_highlight(context, shader, snap, color, show_object_context=False
         gpu.state.point_size_set(1.0)
 
 
+def _draw_inference_indicator(shader, snap, color):
+    """Draw compact, type-specific inference glyphs in the established snap colors."""
+    center = Vector(snap["screen_co"])
+    kind = snap.get("inference_type", "")
+    size = 8.0
+    if kind == "INTERSECTION":
+        points = [center + Vector((-size, -size)), center + Vector((size, size)),
+                  center + Vector((-size, size)), center + Vector((size, -size))]
+    elif kind == "PERPENDICULAR":
+        points = [center + Vector((-size, 0)), center,
+                  center, center + Vector((0, size)),
+                  center + Vector((-size * 0.45, size)), center + Vector((-size * 0.45, size * 0.55))]
+    elif kind == "ACTIVE_PLANE":
+        points = [center + Vector((0, size)), center + Vector((size, 0)),
+                  center + Vector((size, 0)), center + Vector((0, -size)),
+                  center + Vector((0, -size)), center + Vector((-size, 0)),
+                  center + Vector((-size, 0)), center + Vector((0, size))]
+    elif kind == "PARALLEL":
+        points = [center + Vector((-size, -3)), center + Vector((size, -3)),
+                  center + Vector((-size, 3)), center + Vector((size, 3))]
+    elif kind == "LOCAL_AXIS":
+        points = [center + Vector((-size, 0)), center + Vector((size, 0)),
+                  center + Vector((size - 4, -3)), center + Vector((size, 0)),
+                  center + Vector((size - 4, 3)), center + Vector((size, 0))]
+    else:  # Extension: dashed-looking collinear segments.
+        points = [center + Vector((-size, 0)), center + Vector((-2, 0)),
+                  center + Vector((2, 0)), center + Vector((size, 0))]
+    gpu.state.line_width_set(2.25)
+    batch = batch_for_shader(shader, "LINES", {"pos": points})
+    shader.bind()
+    shader.uniform_float("color", color)
+    batch.draw(shader)
+    _draw_marker(shader, center, color)
+
+
 def _snap_highlight_geometry(context, snap, include_object_context=True):
     """Resolve a snap target into world geometry for viewport highlighting."""
     if snap is None:
@@ -658,7 +974,11 @@ def _snap_highlight_geometry(context, snap, include_object_context=True):
     construction_object = snap.get("guide_object")
     if construction_object is not None:
         if snap_type == "GUIDE":
-            segment = guide_segment_world(construction_object)
+            reference_line = snap.get("reference_line")
+            segment = (
+                (reference_line[0] - reference_line[1] * 10000.0, reference_line[0] + reference_line[1] * 10000.0)
+                if reference_line is not None else guide_segment_world(construction_object)
+            )
             return None if segment is None else {"kind": "GUIDE", "points": list(segment)}
         if snap_type == "MEASUREMENT":
             segment = construction_segment_world(construction_object)
@@ -800,10 +1120,16 @@ def _draw_interaction_status(state):
     parts = [state.get("tool_label", "DIM")]
     axis = state.get("axis")
     if axis is not None:
-        parts.append("Auto" if axis == "ALIGNED" else axis)
+        parts.append("Auto" if axis == "ALIGNED" else (f"Local {axis[-1]}" if axis.startswith("LOCAL_") else axis))
     distance_text = state.get("distance_text", "").strip()
     if distance_text:
         parts.append(distance_text if state.get("distance_input_valid", True) else f"! {distance_text}")
+    snap_status = state.get("snap_target_status", "")
+    if snap_status:
+        parts.append(snap_status)
+    inference = state.get("inference_status", "")
+    if inference:
+        parts.append(inference)
     color = (
         (1.0, 0.22, 0.12, 1.0)
         if not state.get("distance_input_valid", True)
@@ -840,9 +1166,13 @@ def _draw_transient_measure(context, shader, state):
     perpendicular = Vector((-direction.y, direction.x))
     label_position = (start_screen + end_screen) * 0.5 + perpendicular * (text_size + 4.0)
     label = state.get("distance_text", "").strip()
-    if not label:
-        label = format_length(context, (end - start).length, precision)
-    _draw_text(label, label_position, color, text_size)
+    lines = state.get("measurement_lines")
+    if label:
+        lines = (label,)
+    elif not lines:
+        lines = (format_length(context, (end - start).length, precision),)
+    for index, line in enumerate(lines):
+        _draw_text(line, label_position + Vector((0.0, -index * (text_size + 3.0))), color, text_size)
 
 
 def _draw_persistent_measurements(context):
@@ -872,7 +1202,91 @@ def _draw_persistent_measurements(context):
         _draw_text(format_length(context, (end_world - start_world).length, precision), label_position, color, text_size)
 
 
+def guide_point_marker_segments(position, size=6.0):
+    """Return a constant-pixel square-and-cross marker for a guide point."""
+    position = Vector(position)
+    corners = (
+        position + Vector((-size, -size)), position + Vector((size, -size)),
+        position + Vector((size, size)), position + Vector((-size, size)),
+    )
+    points = []
+    for start, end in zip(corners, corners[1:] + corners[:1]):
+        points.extend((start, end))
+    arm = size * 0.55
+    points.extend((
+        position + Vector((-arm, 0.0)), position + Vector((arm, 0.0)),
+        position + Vector((0.0, -arm)), position + Vector((0.0, arm)),
+    ))
+    return points
+
+
+def _draw_persistent_guide_points(context, shader):
+    settings = getattr(context.scene, "dimensions_settings", None)
+    if settings is None or not settings.show_construction_guides:
+        return
+    collection = get_scene_collection(context.scene, "GUIDES")
+    batcher = SegmentBatcher(shader)
+    for obj in () if collection is None else collection.all_objects:
+        if (
+            not guide_is_visible(context, obj)
+            or getattr(obj.guide_props, "kind", "GUIDE") != "POINT"
+        ):
+            continue
+        world_co = resolve_anchor(obj.guide_props.start)
+        screen_co = None if world_co is None else _project_world_to_screen(context, world_co)
+        if screen_co is None:
+            continue
+        color = (0.95, 0.25, 1.0, 1.0) if obj.select_get() else tuple(settings.guide_color)
+        batcher.add_segments(guide_point_marker_segments(screen_co), color, max(1.0, settings.guide_line_width))
+    batcher.flush()
+
+
 def _collect_dimension_geometry(context, batcher, geometry, color, precision):
+    if geometry.get("annotation_kind") in {"COORDINATE", "ELEVATION"}:
+        start, end = geometry["leader_start_screen"], geometry["leader_end_screen"]
+        segments = [start, end]
+        if geometry["annotation_kind"] == "ELEVATION":
+            size = geometry.get("arrow_size", DEFAULT_ARROW_SIZE)
+            segments.extend((start + Vector((-size * 0.55, size * 0.45)), start, start + Vector((size * 0.55, size * 0.45)), start))
+            segments.extend((end + Vector((-size, 0.0)), end + Vector((size, 0.0))))
+            precision = geometry.get("elevation_precision")
+            if precision is None:
+                precision = 3
+            label = f"{geometry.get('elevation_prefix') or ''}{signed_number(geometry['value'], precision, bool(geometry.get('elevation_show_plus')))}{geometry.get('elevation_suffix') or ''}"
+        else:
+            label = coordinate_label(geometry, geometry["values"], lambda value: format_length(context, value, precision, geometry.get("unit_style")))
+        if geometry.get("measurement_state") == "NEEDS_REPAIR":
+            label += " [Needs Repair]"
+        batcher.add_segments(segments, color, geometry.get("line_width", DEFAULT_LINE_WIDTH))
+        batcher.add_text(label, end + Vector((6.0, 2.0)), color, geometry.get("text_size", DEFAULT_TEXT_SIZE), align="LEFT")
+        return
+    if geometry.get("annotation_kind") == "CIRCLE":
+        points = geometry["points"]
+        segments = []
+        for start, end in zip(points, points[1:]):
+            segments.extend((start, end))
+        if points and (points[-1] - geometry["label_position"]).length > 1.0:
+            segments.extend((geometry["edge_screen"], geometry["label_position"]))
+        batcher.add_segments(segments, color, geometry.get("line_width", DEFAULT_LINE_WIDTH))
+        symbol = {"RADIUS": "R", "DIAMETER": "⌀", "ARC_LENGTH": "⌒"}[geometry["circle_kind"]]
+        label = f"{geometry.get('value_prefix', '')}{symbol}{format_length(context, geometry['value'], precision, geometry.get('unit_style'))}{geometry.get('value_suffix', '')}"
+        if geometry.get("tolerance_mode") == "SYMMETRIC" and geometry.get("tolerance_upper", 0.0) > 0.0:
+            label += f" ±{format_length(context, geometry['tolerance_upper'], precision, geometry.get('unit_style'))}"
+        elif geometry.get("tolerance_mode") == "DEVIATION":
+            label += f" +{format_length(context, geometry.get('tolerance_upper', 0.0), precision, geometry.get('unit_style'))} / -{format_length(context, geometry.get('tolerance_lower', 0.0), precision, geometry.get('unit_style'))}"
+        state = geometry.get("measurement_state", "LIVE")
+        if state == "NEEDS_REPAIR":
+            label += "  [Needs Repair]"
+        elif state == "FALLBACK" and not geometry.get("fit_warning"):
+            label += "  [Fallback — Confirm Source]"
+        if geometry.get("fit_warning"):
+            label += f"  [Fit {geometry['fit_error'] * 100.0:.2f}%]"
+        batcher.add_text(label, geometry["label_position"], color, geometry.get("text_size", DEFAULT_TEXT_SIZE), align="LEFT")
+        return
+    if geometry.get("annotation_kind") == "DIMENSION_SET":
+        for member in geometry["members"]:
+            _collect_dimension_geometry(context, batcher, member, color, member["precision"])
+        return
     if geometry.get("annotation_kind") == "AREA":
         _collect_area_geometry(context, batcher, geometry, color, precision)
         return
@@ -880,30 +1294,35 @@ def _collect_dimension_geometry(context, batcher, geometry, color, precision):
         _collect_angle_geometry(batcher, geometry, color, precision)
         return
     label = _format_linear_dimension_label(context, geometry, precision)
+    placement = geometry.get("text_placement", "INLINE")
+    if placement == "INLINE":
+        placement = "ABOVE" if geometry.get("label_line_mode") == "ABOVE" else "INLINE"
     text_layout = _build_text_layout(
         label,
         geometry,
-        geometry.get("text_placement", "INLINE"),
+        placement,
         geometry.get("custom_text", ""),
         geometry.get("custom_text_position", "ABOVE"),
         geometry.get("text_size", DEFAULT_TEXT_SIZE),
         geometry.get("arrow_size", DEFAULT_ARROW_SIZE),
     )
-    line_segments = [
-        geometry["anchor_start_screen"],
-        geometry["line_start_screen"],
-        geometry["anchor_end_screen"],
-        geometry["line_end_screen"],
-    ]
+    line_segments = []
+    for anchor, line in (
+        (geometry["anchor_start_screen"], geometry["line_start_screen"]),
+        (geometry["anchor_end_screen"], geometry["line_end_screen"]),
+    ):
+        line_segments.extend(_extension_line_segment(
+            anchor, line, geometry.get("extension_gap", 0.0),
+            geometry.get("extension_overshoot", 0.0),
+        ))
     line_segments.extend(text_layout["line_segments"])
     arrow_size = geometry.get("arrow_size", DEFAULT_ARROW_SIZE)
-    arrow_end_style = geometry.get("arrow_end_style", "ARROW")
     line_segments.extend(
         _build_arrow_segments(
             geometry["line_start_screen"],
             geometry["line_direction_screen"],
             arrow_size,
-            arrow_end_style,
+            geometry.get("start_end_style", "OPEN"),
         )
     )
     line_segments.extend(
@@ -911,7 +1330,7 @@ def _collect_dimension_geometry(context, batcher, geometry, color, precision):
             geometry["line_end_screen"],
             -geometry["line_direction_screen"],
             arrow_size,
-            arrow_end_style,
+            geometry.get("end_end_style", "OPEN"),
         )
     )
 
@@ -919,7 +1338,15 @@ def _collect_dimension_geometry(context, batcher, geometry, color, precision):
 
     text_size = geometry.get("text_size", DEFAULT_TEXT_SIZE)
     for text, position in text_layout["text_items"]:
-        batcher.add_text(text, position, color, text_size)
+        batcher.add_text(text, position, color, text_size, rotation=text_layout["text_rotation"])
+
+
+def _extension_line_segment(anchor, line, gap, overshoot):
+    direction = Vector(line) - Vector(anchor)
+    if direction.length <= 1e-6:
+        return []
+    direction.normalize()
+    return [Vector(anchor) + direction * min(float(gap), (Vector(line) - Vector(anchor)).length), Vector(line) + direction * float(overshoot)]
 
 
 def _collect_area_geometry(context, batcher, geometry, color, precision):
@@ -929,9 +1356,18 @@ def _collect_area_geometry(context, batcher, geometry, color, precision):
     batcher.add_segments([start, end], color, line_width)
     batcher.add_segments(_marker_segments(start), color, line_width)
     state = geometry.get("measurement_state", "CAPTURED")
-    state_suffix = "" if state == "LIVE" else ("  [Captured]" if state == "CAPTURED" else "  [Needs Repair]")
+    state_suffix = {
+        "LIVE": "",
+        "CAPTURED": "  [Captured]",
+        "FALLBACK": (
+            "  [Fallback — Modifier Faces Unresolved]"
+            if geometry.get("area_evaluation_mode") == "BASE_FALLBACK"
+            else "  [Fallback — Confirm Source]"
+        ),
+        "NEEDS_REPAIR": "  [Needs Repair]",
+    }.get(state, "")
     face_suffix = f"  ({geometry.get('face_count', 0)} faces)" if geometry.get("face_count", 0) > 1 else ""
-    value = f"{geometry.get('value_prefix', '')}{format_area(context, geometry['value'], precision)}{geometry.get('value_suffix', '')}"
+    value = f"{geometry.get('value_prefix', '')}{format_area(context, geometry['value'], precision, geometry.get('unit_style'))}{geometry.get('value_suffix', '')}"
     label = f"Area {value}{face_suffix}{state_suffix}"
     custom_text = geometry.get("custom_text", "")
     if custom_text:
@@ -957,6 +1393,10 @@ def _collect_angle_geometry(batcher, geometry, color, precision):
         if geometry.get("invalid")
         else f"{geometry.get('value_prefix', '')}{degrees(geometry['value']):.{max(0, min(precision, 3))}f}\u00b0{geometry.get('value_suffix', '')}"
     )
+    if geometry.get("measurement_state") == "NEEDS_REPAIR" and not geometry.get("invalid"):
+        label += "  [Needs Repair]"
+    elif geometry.get("measurement_state") == "FALLBACK":
+        label += "  [Fallback — Confirm Source]"
     custom_text = geometry.get("custom_text", "")
     if custom_text:
         label = f"{custom_text}  {label}"
@@ -964,12 +1404,59 @@ def _collect_angle_geometry(batcher, geometry, color, precision):
 
 
 def _draw_preview(context, shader, preview_state):
+    for marker in preview_state.get("repair_markers", ()):
+        screen = _project_world_to_screen(context, marker["world_co"])
+        if screen is not None:
+            color = (0.25, 1.0, 0.35, 1.0) if marker.get("candidate") else (1.0, 0.18, 0.12, 1.0)
+            _draw_marker(shader, screen, color)
     hover_screen = preview_state.get("hover_screen")
     if hover_screen is not None:
         _draw_marker(shader, hover_screen, _snap_marker_color(preview_state))
 
     start_world = preview_state.get("start_world")
     end_world = preview_state.get("end_world")
+    if preview_state.get("annotation_kind") == "CIRCLE":
+        center_world = Vector(preview_state.get("center_world"))
+        edge_world = Vector(preview_state.get("edge_world"))
+        radius = preview_state.get("radius", 0.0)
+        direction = (edge_world - center_world).normalized()
+        circle_kind = preview_state.get("circle_kind", "RADIUS")
+        if circle_kind == "DIAMETER":
+            points_world = (center_world - direction * radius, center_world + direction * radius)
+        elif circle_kind == "ARC_LENGTH":
+            start_direction = Vector(preview_state.get("start_direction_world"))
+            normal = Vector(preview_state.get("normal_world"))
+            sweep = preview_state.get("sweep", tau)
+            steps = max(12, int(48 * sweep / tau))
+            arc_points = []
+            for index in range(steps + 1):
+                radial = start_direction.copy()
+                radial.rotate(Quaternion(normal, sweep * index / steps))
+                arc_points.append(center_world + radial * radius)
+            points_world = tuple(arc_points)
+        else:
+            points_world = (center_world, edge_world)
+        points_screen = tuple(_project_world_to_screen(context, point) for point in points_world)
+        edge_screen = _project_world_to_screen(context, edge_world)
+        label_screen = _project_world_to_screen(context, preview_state.get("label_world"))
+        if edge_screen is None or label_screen is None or any(point is None for point in points_screen):
+            return
+        preview_batcher = SegmentBatcher(shader)
+        segments = []
+        for first, second in zip(points_screen, points_screen[1:]):
+            segments.extend((first, second))
+        segments.extend((edge_screen, label_screen))
+        preview_batcher.add_segments(
+            segments,
+            (1.0, 0.48, 0.20, 1.0), DEFAULT_LINE_WIDTH,
+        )
+        symbol = {"RADIUS": "R", "DIAMETER": "⌀", "ARC_LENGTH": "⌒"}.get(circle_kind, "R")
+        label = f"{symbol}{format_length(context, preview_state.get('value', 0.0), DEFAULT_PRECISION)}"
+        preview_batcher.add_text(
+            label, label_screen, (1.0, 0.48, 0.20, 1.0), DEFAULT_TEXT_SIZE, align="LEFT",
+        )
+        preview_batcher.flush()
+        return
     if preview_state.get("annotation_kind") == "AREA":
         if start_world is None or end_world is None:
             return
@@ -1181,6 +1668,90 @@ def find_dimension_hit(context, mouse_x, mouse_y, threshold=None):
     return None if best is None else best[1]
 
 
+def selected_annotation_handles(context):
+    """Return constant-pixel handle locations for the active selected annotation."""
+    obj = getattr(context.view_layer.objects, "active", None)
+    if (
+        not is_dimension_object(obj)
+        or not obj.select_get()
+        or is_read_only_dimensions_object(obj)
+        or not obj.dimension_props.visible
+        or not _object_visible_in_viewport(context, obj)
+    ):
+        return ()
+    geometry = get_cached_dimension_geometry(context, obj)
+    if geometry is None:
+        return ()
+    kind = obj.dimension_props.annotation_kind
+    if kind == "ANGLE":
+        points = geometry.get("arc_points", ())
+        if not points:
+            return ()
+        return ({"object": obj, "kind": "ANGLE_RADIUS", "screen_co": Vector(points[len(points) // 2])},)
+    if kind == "AREA":
+        if evaluate_area_binding(obj.dimension_props) is None:
+            return ()
+        position = geometry.get("leader_end_screen")
+        return () if position is None else (
+            {"object": obj, "kind": "AREA_LABEL", "screen_co": Vector(position)},
+        )
+    if kind == "CIRCLE":
+        position = geometry.get("label_position")
+        return () if position is None else (
+            {"object": obj, "kind": "CIRCLE_LABEL", "screen_co": Vector(position)},
+        )
+    position = geometry.get("line_mid_screen")
+    return () if position is None else (
+        {"object": obj, "kind": "LINEAR_OFFSET", "screen_co": Vector(position)},
+    )
+
+
+def find_annotation_handle_hit(context, mouse_x, mouse_y, threshold=11.0):
+    mouse = Vector((mouse_x, mouse_y))
+    best = None
+    for handle in selected_annotation_handles(context):
+        distance = (mouse - handle["screen_co"]).length
+        if distance <= threshold and (best is None or distance < best[0]):
+            best = (distance, handle)
+    return None if best is None else best[1]
+
+
+def _draw_selected_annotation_handles(context, shader):
+    for handle in selected_annotation_handles(context):
+        points = _annotation_handle_segments(handle["kind"], handle["screen_co"])
+        batch = batch_for_shader(shader, "LINES", {"pos": points})
+        shader.bind()
+        shader.uniform_float("color", (0.95, 0.25, 1.0, 1.0))
+        batch.draw(shader)
+
+
+def _annotation_handle_segments(kind, position, size=7.0):
+    """Build screen-pixel handle linework independent of view/world scale."""
+    position = Vector(position)
+    if kind == "ANGLE_RADIUS":
+        points = []
+        ring = [
+            position + Vector((cos(index * tau / 12.0) * size, sin(index * tau / 12.0) * size))
+            for index in range(12)
+        ]
+        for start, end in zip(ring, ring[1:] + ring[:1]):
+            points.extend((start, end))
+        return points
+    if kind in {"AREA_LABEL", "CIRCLE_LABEL"}:
+        return [
+            position + Vector((-size, -size)), position + Vector((size, -size)),
+            position + Vector((size, -size)), position + Vector((size, size)),
+            position + Vector((size, size)), position + Vector((-size, size)),
+            position + Vector((-size, size)), position + Vector((-size, -size)),
+        ]
+    return [
+        position + Vector((0.0, size)), position + Vector((size, 0.0)),
+        position + Vector((size, 0.0)), position + Vector((0.0, -size)),
+        position + Vector((0.0, -size)), position + Vector((-size, 0.0)),
+        position + Vector((-size, 0.0)), position + Vector((0.0, size)),
+    ]
+
+
 def find_guide_hit(context, mouse_x, mouse_y, threshold=None):
     if threshold is None:
         threshold = get_preferences(context).selection_pixel_threshold
@@ -1224,7 +1795,7 @@ def _project_dimension_geometry(context, anchor_start_world, anchor_end_world, w
     }
 
 
-def _build_arrow_segments(point, direction, arrow_scale=DEFAULT_ARROW_SIZE, style="ARROW"):
+def _build_arrow_segments(point, direction, arrow_scale=DEFAULT_ARROW_SIZE, style="OPEN"):
     """Build screen-space endpoint presentation without changing dimension geometry."""
     if style == "ARCHITECTURAL_TICK":
         tick_direction = (direction + Vector((-direction.y, direction.x))).normalized()
@@ -1233,15 +1804,29 @@ def _build_arrow_segments(point, direction, arrow_scale=DEFAULT_ARROW_SIZE, styl
             point - tick_direction * tick_half_length,
             point + tick_direction * tick_half_length,
         ]
+    if style == "NONE":
+        return []
     perpendicular = Vector((-direction.y, direction.x))
     left = point + (direction * arrow_scale) + (perpendicular * arrow_scale * 0.45)
     right = point + (direction * arrow_scale) - (perpendicular * arrow_scale * 0.45)
-    return [
+    open_segments = [
         point,
         left,
         point,
         right,
     ]
+    if style == "FILLED":
+        # Close and hatch the triangle so it reads as filled in the line overlay.
+        return open_segments + [left, right, point + direction * arrow_scale * 0.5 - perpendicular * arrow_scale * 0.22, point + direction * arrow_scale * 0.5 + perpendicular * arrow_scale * 0.22]
+    if style == "DOT":
+        points = []
+        radius = arrow_scale * 0.38
+        ring = [point + Vector((cos(index * tau / 12.0), sin(index * tau / 12.0))) * radius for index in range(12)]
+        for start, end in zip(ring, ring[1:] + ring[:1]):
+            points.extend((start, end))
+        points.extend((point - perpendicular * radius, point + perpendicular * radius, point - direction * radius, point + direction * radius))
+        return points
+    return open_segments
 
 
 def _build_text_layout(
@@ -1264,6 +1849,7 @@ def _build_text_layout(
         custom_text_position,
         round(float(text_size), 3),
         round(float(arrow_size), 3),
+        geometry.get("label_orientation", "HORIZONTAL"),
         _rounded_point(line_start),
         _rounded_point(line_end),
         _rounded_point(line_mid),
@@ -1322,7 +1908,9 @@ def _build_text_layout(
             block_center = line_end + line_direction * (
                 arrow_size + 6.0 + text_half_extent_along_line
             )
-            line_segments = full_line
+            # Tight-space routing is deterministic: always use the end side.
+            leader_end = block_center - line_direction * (text_half_extent_along_line + 3.0)
+            line_segments = full_line + [line_end, leader_end]
         else:
             block_center = line_mid
             line_segments = [
@@ -1333,16 +1921,27 @@ def _build_text_layout(
             ]
 
     text_items = []
-    current_y = block_center.y + (block_height * 0.5)
+    current_offset = block_height * 0.5
+    aligned = geometry.get("label_orientation", "HORIZONTAL") == "ALIGNED"
+    stack_direction = Vector((-line_direction.y, line_direction.x)) if aligned else Vector((0.0, 1.0))
+    if stack_direction.y < 0.0:
+        stack_direction.negate()
     for text, _width, height in text_metrics:
-        text_position = Vector((block_center.x, current_y - (height * 0.5)))
-        text_items.append((text, text_position))
-        current_y -= height + line_spacing
+        current_offset -= height * 0.5
+        text_items.append((text, block_center + stack_direction * current_offset))
+        current_offset -= height * 0.5 + line_spacing
+
+    text_rotation = atan2(line_direction.y, line_direction.x) if aligned else 0.0
+    if text_rotation > pi * 0.5:
+        text_rotation -= pi
+    elif text_rotation < -pi * 0.5:
+        text_rotation += pi
 
     layout = {
         "line_segments": line_segments,
         "text_items": text_items,
         "text_position": block_center,
+        "text_rotation": text_rotation,
     }
     # Keys include screen positions, so an orbit produces a fresh key per frame.
     # Cap the cache rather than letting a long drag grow it without bound.
@@ -1404,18 +2003,30 @@ def _snap_marker_color(state):
     return (1.0, 0.48, 0.20, 1.0)
 
 
-def _draw_text(text, position, color, text_size=DEFAULT_TEXT_SIZE):
+def _draw_text(text, position, color, text_size=DEFAULT_TEXT_SIZE, rotation=0.0):
     font_id = 0
     blf.size(font_id, text_size)
     text_width, text_height = blf.dimensions(font_id, text)
     blf.color(font_id, *color)
-    blf.position(
-        font_id,
-        position.x - (text_width * 0.5),
-        position.y - (text_height * 0.5),
-        0,
-    )
-    blf.draw(font_id, text)
+    if rotation:
+        blf.enable(font_id, blf.ROTATION)
+        blf.rotation(font_id, rotation)
+    try:
+        if rotation:
+            offset_x = cos(rotation) * text_width * 0.5 - sin(rotation) * text_height * 0.5
+            offset_y = sin(rotation) * text_width * 0.5 + cos(rotation) * text_height * 0.5
+        else:
+            offset_x, offset_y = text_width * 0.5, text_height * 0.5
+        blf.position(
+            font_id,
+            position.x - offset_x,
+            position.y - offset_y,
+            0,
+        )
+        blf.draw(font_id, text)
+    finally:
+        if rotation:
+            blf.disable(font_id, blf.ROTATION)
 
 
 def _draw_text_left(text, position, color, text_size=DEFAULT_TEXT_SIZE):
@@ -1444,8 +2055,10 @@ def _project_world_to_screen(context, world_co):
 
 
 def _geometry_hit_distance(context, geometry, precision, mouse):
+    if geometry.get("annotation_kind") in {"COORDINATE", "ELEVATION"}:
+        return _point_to_segment_distance(mouse, geometry["leader_start_screen"], geometry["leader_end_screen"])
     if geometry.get("annotation_kind") == "AREA":
-        label = f"Area {format_area(context, geometry['value'], precision)}"
+        label = f"Area {format_area(context, geometry['value'], precision, geometry.get('unit_style'))}"
         return min(
             _point_to_segment_distance(mouse, geometry["leader_start_screen"], geometry["leader_end_screen"]),
             _point_to_label_distance(label, geometry["leader_end_screen"] + Vector((6.0, 2.0)), mouse, geometry.get("text_size", DEFAULT_TEXT_SIZE)),
@@ -1497,15 +2110,24 @@ def _geometry_hit_distance(context, geometry, precision, mouse):
 
 
 def _format_linear_dimension_label(context, geometry, precision):
-    value = format_length(context, geometry["value"], precision)
+    value = format_dual_length(
+        context, geometry["value"], precision, geometry.get("unit_style"),
+        geometry.get("secondary_unit_style", "NONE"),
+        geometry.get("secondary_precision", 2),
+        geometry.get("dual_unit_arrangement", "BRACKETS"),
+    )
     label = f"{geometry.get('value_prefix', '')}{value}{geometry.get('value_suffix', '')}"
     tolerance_mode = geometry.get("tolerance_mode", "NONE")
     upper = geometry.get("tolerance_upper", 0.0)
     lower = geometry.get("tolerance_lower", 0.0)
     if tolerance_mode == "SYMMETRIC" and upper > 0.0:
-        label += f" \u00b1{format_length(context, upper, precision)}"
+        label += f" \u00b1{format_length(context, upper, precision, geometry.get('unit_style'))}"
     elif tolerance_mode == "DEVIATION" and (upper > 0.0 or lower > 0.0):
-        label += f" +{format_length(context, upper, precision)} / -{format_length(context, lower, precision)}"
+        label += f" +{format_length(context, upper, precision, geometry.get('unit_style'))} / -{format_length(context, lower, precision, geometry.get('unit_style'))}"
+    if geometry.get("measurement_state") == "NEEDS_REPAIR":
+        label += "  [Needs Repair]"
+    elif geometry.get("measurement_state") == "FALLBACK":
+        label += "  [Fallback — Confirm Source]"
     return label
 
 

@@ -22,7 +22,10 @@ _INVOCATION_OPERATORS = (
     "dimensions.create_angle",
     "dimensions.create_area",
     "dimensions.measure",
+    "dimensions.measure_persistent",
     "dimensions.create_guide",
+    "dimensions.create_guide_point",
+    "dimensions.create_derived_guide",
 )
 
 _MODAL_BINDINGS = (
@@ -32,6 +35,11 @@ _MODAL_BINDINGS = (
     ("CONSTRAIN_Z", "Z"),
     ("CONFIRM", "RET"),
     ("CONFIRM", "NUMPAD_ENTER"),
+    ("CYCLE_SNAP_TARGETS", "S"),
+    ("TOGGLE_INFERENCE_LOCK", "L"),
+    ("FLIP_OFFSET", "F"),
+    ("SAVE_TRANSIENT_MEASURE", "P"),
+    ("COPY_TRANSIENT_MEASURE", "C", {"ctrl": True}),
     ("STEP_BACK", "BACK_SPACE"),
     ("CANCEL", "ESC"),
     ("CANCEL_IMMEDIATE", "RIGHTMOUSE"),
@@ -71,8 +79,12 @@ def register_keymaps():
         _keymap_items.append((keymap, item))
 
     modal_keymap = keyconfig.keymaps.new(name=MODAL_KEYMAP_NAME, space_type="EMPTY")
-    for action, event_type in _MODAL_BINDINGS:
-        item = modal_keymap.keymap_items.new("dimensions.modal_action", event_type, "PRESS")
+    for binding in _MODAL_BINDINGS:
+        action, event_type = binding[:2]
+        modifiers = binding[2] if len(binding) > 2 else {}
+        item = modal_keymap.keymap_items.new(
+            "dimensions.modal_action", event_type, "PRESS", **modifiers
+        )
         item.properties.action = action
         _modal_keymap_items.append((modal_keymap, item))
 
@@ -141,6 +153,9 @@ def modal_action_from_event(event):
             configured_item.active
             and configured_item.type == event.type
             and configured_item.value == event.value
+            and bool(configured_item.shift) == bool(getattr(event, "shift", False))
+            and bool(configured_item.ctrl) == bool(getattr(event, "ctrl", False))
+            and bool(configured_item.alt) == bool(getattr(event, "alt", False))
         ):
             return configured_item.properties.action
     return None

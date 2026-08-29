@@ -2,7 +2,11 @@ import bpy
 
 from .. import messages
 from ..anchors import set_anchor_from_snap
-from ..collections import create_guide_object, remove_measurement_snap_proxies
+from ..collections import (
+    create_guide_object,
+    remove_guide_point_snap_proxies,
+    remove_measurement_snap_proxies,
+)
 from ..drawing import clear_guide_preview_state, set_guide_preview_state
 from ..interaction import (
     axis_from_event,
@@ -17,7 +21,10 @@ from ..interaction import (
     session_context_changed,
     update_distance_text,
 )
+from ..properties import is_read_only_dimensions_object
 from ..snapping import copy_snap, find_nearest_snap_point
+from ..snap_targets import handle_snap_target_event
+from ..inference import InferenceSession, cycle_local_axis, handle_inference_event, inference_status
 from ..units import parse_distance_input
 
 
@@ -37,6 +44,8 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         self.distance_text = ""
         self.distance_input_valid = True
         self.axis_gesture_active = False
+        self.inference_axis = self.axis
+        self.inference_session = InferenceSession()
         self.state = "PICK_START"
         remember_session_context(self, context)
         self._update_preview(context)
@@ -50,6 +59,12 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         if self.continuous_placement and session_context_changed(self, context):
             clear_guide_preview_state()
             return {"CANCELLED"}
+        if handle_snap_target_event(context, event):
+            self._update_preview(context)
+            return {"RUNNING_MODAL"}
+        if handle_inference_event(self.inference_session, event):
+            self._update_preview(context)
+            return {"RUNNING_MODAL"}
 
         if event.type == "MIDDLEMOUSE" and self.state == "PICK_END":
             if event.value == "PRESS":
@@ -64,7 +79,8 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
 
         axis = axis_from_event(event)
         if axis is not None:
-            self.axis = axis
+            self.inference_axis = cycle_local_axis(self.inference_axis, axis, context)
+            self.axis = "ALIGNED" if self.inference_axis.startswith("LOCAL_") else self.inference_axis
             self._update_preview(context)
             self.report(messages.INFO, messages.guide_direction(self.axis.title()))
             return {"RUNNING_MODAL"}
@@ -86,6 +102,9 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
                 event.mouse_region_y,
                 include_free=True,
                 plane_point=plane_point,
+                inference_session=self.inference_session,
+                inference_origin=plane_point,
+                inference_axis=self.inference_axis,
             )
             self._update_preview(context)
             return {"RUNNING_MODAL"}
@@ -99,6 +118,9 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
                     event.mouse_region_y,
                     include_free=True,
                     plane_point=plane_point,
+                    inference_session=self.inference_session,
+                    inference_origin=plane_point,
+                    inference_axis=self.inference_axis,
                 )
             if self.hover_snap is None:
                 return {"RUNNING_MODAL"}
@@ -164,7 +186,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             return None
         snap = self._copy_snap(self.hover_snap)
         raw_delta = snap["world_co"] - self.start_snap["world_co"]
-        direction = constrained_delta(raw_delta, self.axis)
+        direction = constrained_delta(raw_delta, self.axis, context)
         if direction.length < 1e-8:
             return None
         if self.distance_text.strip():
@@ -192,6 +214,8 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         self.distance_text = ""
         self.distance_input_valid = True
         self.axis_gesture_active = False
+        self.inference_axis = self.axis
+        self.inference_session.clear()
 
     def _after_commit(self, context):
         if not self.continuous_placement:
@@ -213,6 +237,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         )
         if axis is not None:
             self.axis = axis
+            self.inference_axis = axis
 
     def _create(self, context, end_snap):
         obj = create_guide_object(context)
@@ -228,13 +253,16 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
 
     def _update_preview(self, context=None):
         state = {
-            "axis": self.axis,
+            "axis": self.inference_axis,
             "state": self.state,
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
             "axis_gesture_active": self.axis_gesture_active,
             "continuous_placement": self.continuous_placement,
         }
+        status = inference_status(self.inference_session)
+        if status:
+            state["inference_status"] = status
         if self.hover_snap is not None:
             state["hover_screen"] = self.hover_snap["screen_co"]
             state["hover_type"] = self.hover_snap.get("type", "WORLD")
@@ -266,9 +294,16 @@ class CADDIM_OT_ClearGuides(bpy.types.Operator):
             obj for obj in context.scene.objects
             if hasattr(obj, "guide_props")
             and obj.guide_props.enabled
-            and getattr(obj.guide_props, "kind", "GUIDE") == "GUIDE"
+            and getattr(obj.guide_props, "kind", "GUIDE") in {"GUIDE", "POINT", "PLANE"}
+            and not is_read_only_dimensions_object(obj)
         ]
+        settings = context.scene.dimensions_settings
+        if settings.active_plane_mode == "GUIDE" and settings.active_plane_object in guide_objects:
+            settings.active_plane_mode = "NONE"
+            settings.active_plane_object = None
         for obj in guide_objects:
+            if getattr(obj.guide_props, "kind", "GUIDE") == "POINT":
+                remove_guide_point_snap_proxies(obj)
             bpy.data.objects.remove(obj, do_unlink=True)
         self.report(messages.INFO, messages.cleared_guides(len(guide_objects)))
         return {"FINISHED"}
@@ -286,6 +321,7 @@ class CADDIM_OT_ClearMeasurements(bpy.types.Operator):
             if hasattr(obj, "guide_props")
             and obj.guide_props.enabled
             and getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT"
+            and not is_read_only_dimensions_object(obj)
         ]
         for obj in measurement_objects:
             remove_measurement_snap_proxies(obj)

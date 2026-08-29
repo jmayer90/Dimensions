@@ -1,7 +1,7 @@
 # OUT-03 — Named, reusable annotation styles
 
 **Milestone:** M4 Output
-**Status:** ⏭ Next — follows the completed `OUT-04` output coverage.
+**Status:** ✅ Complete — delivered in 0.4.2; `UX-02` supplies filtered-set assignment and the schema-v2 fixture verifies migration.
 **Effort:** M
 **Depends on:** FND-02
 **Version impact:** Patch, provided existing per-annotation properties keep working.
@@ -38,19 +38,19 @@ Not a 1.0 gate item, but it is the difference between output that looks made and
 
 ## Acceptance criteria
 
-- [ ] Named styles can be created, duplicated, renamed, and deleted.
-- [ ] Annotations reference a style, and resolution is annotation override → style → scene default, per property.
-- [ ] The UI distinguishes inherited from overridden values on each property.
-- [ ] An action clears an annotation's overrides so it fully inherits its style.
-- [ ] Changing a style updates every inheriting annotation immediately in all viewports.
-- [ ] Styles can be assigned to a selection, and to a filtered set via `UX-02`.
-- [ ] "Select all annotations using this style" works.
-- [ ] Deleting a style reassigns its users to the default; no dangling references.
-- [ ] Existing annotations upgrade with unchanged appearance.
-- [ ] The schema change ships with an `FND-02` migration step and a fixture test.
-- [ ] Existing `style.py` operators keep working or have documented replacements.
-- [ ] Style resolution does not regress the `FND-03` draw budget — resolve once per annotation per invalidation, not per property per frame.
-- [ ] README and `DESIGN.md` document the three-level model.
+- [x] Named styles can be created, duplicated, renamed, and deleted.
+- [x] Annotations reference a style, and resolution is annotation override → style → scene default, per property.
+- [x] The UI distinguishes inherited from overridden values on each property.
+- [x] An action clears an annotation's overrides so it fully inherits its style.
+- [x] Changing a style updates every inheriting annotation immediately in all viewports.
+- [x] Styles can be assigned to a selection, and to a filtered set via `UX-02`.
+- [x] "Select all annotations using this style" works.
+- [x] Deleting a style reassigns its users to the default; no dangling references.
+- [x] Existing annotations upgrade with unchanged appearance.
+- [x] The schema change ships with an `FND-02` migration step and a fixture test.
+- [x] Existing `style.py` operators keep working or have documented replacements.
+- [x] Style resolution does not regress the `FND-03` draw budget — resolve once per annotation per invalidation, not per property per frame.
+- [x] README and `DESIGN.md` document the three-level model.
 
 ## Code map
 
@@ -66,6 +66,7 @@ Not a 1.0 gate item, but it is the difference between output that looks made and
 - A test that changing a style updates inheriting annotations and leaves overriding ones alone.
 - A test that deleting a style leaves no dangling references.
 - A migration test using an `FND-02` fixture asserting appearance is byte-identical before and after upgrade.
+- `scripts/create_schema_v2_fixture.py` reproducibly creates the 0.4.0/schema-v2 fixture with the retained release archive; the lifecycle suite verifies its source schema and post-migration presentation.
 - A draw-cost check confirming resolution is not per-frame.
 
 ## Out of scope

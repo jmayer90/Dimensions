@@ -1,7 +1,7 @@
 # DIM-04 — Drafting presentation controls: ticks, arrows, units, and alignment
 
 **Milestone:** M5 Documentation-grade
-**Status:** 🟨 Partial — architectural ticks shipped in 0.3.2 and Outside Start placement in 0.4.1; remaining controls follow `OUT-03`.
+**Status:** ✅ Complete in 0.4.3 — architectural ticks shipped in 0.3.2, Outside Start in 0.4.1, and the remaining style-owned controls in 0.4.3.
 **Effort:** M
 **Depends on:** OUT-03
 **Version impact:** Patch. Additive.
@@ -40,20 +40,22 @@ Largely additive property work plus drawing changes. The main risk is property s
 
 **Tight-space handling.** Detect that the label does not fit between extension lines and move it outside with a leader. Needs a documented rule for which side, and must be consistent so a row of dimensions does not alternate arbitrarily.
 
+The delivered rule is deliberately stable: automatic tight-space placement always uses the dimension's end side, with a leader from that endpoint toward the label. Manual Outside Start and Outside End remain available for deliberate exceptions.
+
 ## Acceptance criteria
 
-- [ ] Extension line gap and overshoot are configurable and render correctly in the viewport and through `OUT-01`.
-- [ ] Remaining arrow variants — filled triangle, open triangle, dot, and none — are available and independently settable per end. Architectural Tick is already available at both ends as a global or local style.
-- [ ] Dual unit display works with a configurable arrangement template.
-- [ ] Secondary unit precision is independently configurable.
-- [ ] Label alignment modes — aligned, horizontal, above, broken — all render correctly.
-- [ ] A label too large for its dimension moves outside with a leader, following a documented and consistent side rule.
-- [ ] All new properties are style properties per `OUT-03`, not per-annotation-only.
-- [ ] Existing annotations keep their current appearance after upgrade.
-- [ ] Every new property generates correctly through `OUT-01`.
-- [ ] Schema changes go through the `FND-02` migration framework.
-- [ ] Adding these does not regress the `FND-03` draw budget.
-- [ ] README and `DESIGN.md` document the presentation controls.
+- [x] Extension line gap and overshoot are configurable and render correctly in the viewport and through `OUT-01`.
+- [x] Remaining arrow variants — filled triangle, open triangle, dot, and none — are available and independently settable per end. Architectural Tick is already available at both ends as a global or local style.
+- [x] Dual unit display works with a configurable arrangement template.
+- [x] Secondary unit precision is independently configurable.
+- [x] Label alignment modes — aligned, horizontal, above, broken — all render correctly.
+- [x] A label too large for its dimension moves outside with a leader, following a documented and consistent side rule.
+- [x] All new properties are style properties per `OUT-03`, not per-annotation-only.
+- [x] Existing annotations keep their current appearance after upgrade.
+- [x] Every new property generates correctly through `OUT-01`.
+- [x] Schema changes go through the `FND-02` migration framework.
+- [x] Adding these does not regress the `FND-03` draw budget.
+- [x] README and `DESIGN.md` document the presentation controls.
 
 ## Code map
 

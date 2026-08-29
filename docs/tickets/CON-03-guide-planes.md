@@ -1,10 +1,10 @@
 # CON-03 — Guide planes and an active construction plane
 
 **Milestone:** M3 Construction
-**Status:** ⛔ Blocked — waiting on `CON-02`.
+**Status:** ✅ Complete in 0.5.0.
 **Effort:** L
 **Depends on:** CON-02
-**Version impact:** Patch to add planes. Minor trigger 2 if the active plane changes how existing axis constraints resolve.
+**Version impact:** Minor trigger 2: the delivered active plane deliberately resolves X/Y/Z in plane space.
 
 ## Problem
 
@@ -43,7 +43,7 @@ One plane at a time is designated active. When one is active:
 - Typed distances are measured in plane space.
 - The viewport shows unambiguously which plane is active — this must be impossible to miss, or users will be confused by input landing somewhere unexpected.
 
-Setting the active plane should be quick: pick a guide plane, pick a face, or use the world planes. A clear "no active plane" state must always be one action away.
+Setting the active plane should be quick: pick a guide plane, pick a face, use the current view plane, or use the world XY/XZ/YZ planes. A clear "no active plane" state must always be one action away. View-plane activation captures a deliberate plane frame; ordinary viewport navigation must not silently rotate an already active construction plane.
 
 **Interaction-contract impact.** Redefining what `X`, `Y`, and `Z` mean while a plane is active is a change to a documented contract. Decide deliberately: either the axis keys resolve in plane space when a plane is active, or plane-space axes get separate bindings. The first is more useful and matches CAD convention; the second is less surprising. Recommend the first with a loud active-plane indicator, and record the decision and the version trigger in `DESIGN.md`.
 
@@ -51,23 +51,24 @@ Setting the active plane should be quick: pick a guide plane, pick a face, or us
 
 **Part 1**
 
-- [ ] Guide planes are persistent objects in the scene-owned `Construction Guides` collection.
-- [ ] Definable by three points, point plus normal, an existing face, or offset from another plane.
-- [ ] Definitions resolve from sources and update when sources move, like `CON-02` guides.
-- [ ] Displayed as a bounded grid with a user-controlled extent that is presentation only.
-- [ ] A point can be constrained to lie on a plane during acquisition.
-- [ ] Planes appear in the `UX-05` snap toggles and the `UX-02` manager.
-- [ ] Lost sources produce a visible repair state.
+- [x] Guide planes are persistent objects in the scene-owned `Construction Guides` collection.
+- [x] Definable by three points, point plus normal, an existing face, or offset from another plane.
+- [x] Definitions resolve from sources and update when sources move, like `CON-02` guides.
+- [x] Displayed as a bounded grid with a user-controlled extent that is presentation only.
+- [x] A point can be constrained to lie on a plane during acquisition.
+- [x] Planes appear in the `UX-05` snap toggles and the `UX-02` manager.
+- [x] Lost sources produce a visible repair state.
 
 **Part 2**
 
-- [ ] One plane can be set active, and cleared, in a single action.
-- [ ] The active plane is unmistakably indicated in the viewport.
-- [ ] Axis constraints resolve in plane space per the documented decision.
-- [ ] Unsnapped point placement lands on the active plane.
-- [ ] Typed distances measure in plane space.
-- [ ] `DESIGN.md` interaction contract documents the behavior, the decision, and its version trigger.
-- [ ] README documents construction planes.
+- [x] One plane can be set active, and cleared, in a single action.
+- [x] The active plane can be defined from a saved plane, selected face, current view, or world XY/XZ/YZ preset.
+- [x] The active plane is unmistakably indicated in the viewport.
+- [x] Axis constraints resolve in plane space per the documented decision.
+- [x] Unsnapped point placement lands on the active plane.
+- [x] Typed distances measure in plane space.
+- [x] `DESIGN.md` interaction contract documents the behavior, the decision, and its version trigger.
+- [x] README documents construction planes.
 
 ## Code map
 
@@ -84,8 +85,11 @@ Setting the active plane should be quick: pick a guide plane, pick a face, or us
 - Plane definition tests for each method, including degenerate cases: three collinear points, a zero-length normal.
 - Tests that a point constrained to a plane lies on it within tolerance.
 - Tests that axis constraints resolve correctly in plane space, including a plane at an arbitrary orientation.
+- A test that a captured view plane remains stable through later viewport navigation.
 - A test that clearing the active plane restores world-space behavior exactly.
 - Derived-plane update and repair-state tests, as in `CON-02`.
+
+Blender 5.1.2 coverage exercises all four saved definitions, arbitrary plane-space axes across every shared acquisition path, free-point projection, exact clear-to-world restoration, source transforms, degenerate and lost sources, square-grid snap bounds, presentation-only extent, save/reload of the active plane, idempotent schema migration, and released schema-v2 lifecycle defaults. The full smoke, modal, and lifecycle suites pass.
 
 ## Out of scope
 

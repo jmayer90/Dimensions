@@ -6,7 +6,7 @@ labels as world-space strokes for the Grease Pencil backend.
 """
 
 from dataclasses import dataclass
-from math import degrees
+from math import cos, degrees, sin, tau
 
 from mathutils import Vector
 
@@ -14,12 +14,51 @@ from .anchors import resolve_anchor
 from .angle_binding import resolve_angle_source
 from .area_binding import area_label_world, evaluate_area_binding
 from .dimension_geometry import get_angle_world_geometry, get_dimension_world_geometry
+from .dimension_sets import baseline_spacing, dimension_set_state, dimension_set_world_geometry
+from .circle_binding import circle_geometry, circle_value
+from .coordinate_dimensions import coordinate_label, coordinate_values, elevation_value, signed_number
 from .grease_pencil_output import GreasePencilOutputSpec, OutputStroke
 from .stroke_font import text_block_dimensions, text_strokes
-from .units import format_area, format_length
+from .units import format_area, format_dual_length, format_length
 
 
 TEXT_OUTPUT_SUPPORTED = True
+
+
+def coordinate_elevation_output_spec(context, dimension_object, source_key, sizing, text_height, camera=None):
+    """Generate render/vector strokes for coordinate and elevation annotations."""
+    props = getattr(dimension_object, "dimension_props", None)
+    if props is None or props.annotation_kind not in {"COORDINATE", "ELEVATION"}:
+        return None
+    kind = props.annotation_kind
+    result = coordinate_values(props) if kind == "COORDINATE" else elevation_value(props)
+    if result is None or result["state"] != "LIVE":
+        return None
+    point = result["point"]
+    label = resolve_anchor(props.end) + Vector(props.presentation_offset)
+    if kind == "COORDINATE" and props.coordinate_alignment != "FREE":
+        origin = result["origin"]
+        x_axis, y_axis, _z_axis = result["axes"]
+        delta = point - origin
+        label = (
+            origin + x_axis * delta.dot(x_axis) + y_axis * props.coordinate_alignment_offset
+            if props.coordinate_alignment == "ROW"
+            else origin + x_axis * props.coordinate_alignment_offset + y_axis * delta.dot(y_axis)
+        ) + Vector(props.presentation_offset)
+    color = tuple(float(channel) for channel in props.color)
+    strokes = [OutputStroke((point, label), color, sizing.line_width)]
+    if kind == "ELEVATION":
+        x_axis, y_axis = _camera_axes(camera, (1, 0, 0), (0, 0, 1))
+        size = sizing.arrow_size
+        strokes.extend((
+            OutputStroke((point + x_axis * -size * 0.55 + y_axis * size * 0.45, point, point + x_axis * size * 0.55 + y_axis * size * 0.45), color, sizing.line_width),
+            OutputStroke((label - x_axis * size, label + x_axis * size), color, sizing.line_width),
+        ))
+        text = f"{props.elevation_prefix}{signed_number(result['value'], props.elevation_precision, props.elevation_show_plus)}{props.elevation_suffix}"
+    else:
+        text = coordinate_label(props, result["values"], lambda value: format_length(context, value, props.precision, props.unit_style))
+    strokes.extend(_text_strokes_at(text, label, text_height, sizing.line_width, color, camera))
+    return GreasePencilOutputSpec(source_key=source_key, strokes=tuple(strokes), name=dimension_object.name)
 
 
 @dataclass(frozen=True)
@@ -104,7 +143,35 @@ def _architectural_tick_stroke(point, direction, perpendicular, color, sizing):
 def _endpoint_strokes(point, direction, perpendicular, style, color, sizing):
     if style == "ARCHITECTURAL_TICK":
         return (_architectural_tick_stroke(point, direction, perpendicular, color, sizing),)
-    return _open_arrow_strokes(point, direction, perpendicular, color, sizing)
+    if style == "NONE":
+        return ()
+    if style == "DOT":
+        radius = sizing.arrow_size * 0.38
+        points = tuple(
+            point + (direction * cos(index * tau / 12.0) + perpendicular * sin(index * tau / 12.0)) * radius
+            for index in range(13)
+        )
+        return (
+            OutputStroke(points, color, sizing.line_width),
+            OutputStroke((point - direction * radius, point + direction * radius), color, sizing.line_width),
+            OutputStroke((point - perpendicular * radius, point + perpendicular * radius), color, sizing.line_width),
+        )
+    strokes = _open_arrow_strokes(point, direction, perpendicular, color, sizing)
+    if style == "FILLED":
+        left = strokes[0].points[-1]
+        right = strokes[1].points[-1]
+        return strokes + (
+            OutputStroke((left, right), color, sizing.line_width),
+            OutputStroke((point + direction * sizing.arrow_size * 0.5 - perpendicular * sizing.arrow_size * 0.22, point + direction * sizing.arrow_size * 0.5 + perpendicular * sizing.arrow_size * 0.22), color, sizing.line_width),
+        )
+    return strokes
+
+
+def _resolved_endpoint_style(props, property_name):
+    style = getattr(props, property_name, "OPEN")
+    if style == "OPEN" and getattr(props, "arrow_end_style", "ARROW") == "ARCHITECTURAL_TICK":
+        return "ARCHITECTURAL_TICK"
+    return style
 
 
 def linear_dimension_output_spec(dimension_object, source_key, sizing):
@@ -150,18 +217,30 @@ def linear_dimension_output_spec(dimension_object, source_key, sizing):
     line_direction = (line_end - line_start).normalized()
     perpendicular = geometry["offset_direction_world"].normalized()
     color = tuple(float(channel) for channel in props.color)
-    arrow_style = getattr(props, "arrow_end_style", "ARROW")
+    pixel_to_world = sizing.arrow_size / max(float(getattr(props, "arrow_size", 10.0)), 1e-6)
+    gap = float(getattr(props, "extension_gap", 0.0)) * pixel_to_world
+    overshoot = float(getattr(props, "extension_overshoot", 0.0)) * pixel_to_world
+    start_extension = line_start - start_world
+    end_extension = line_end - end_world
+    if start_extension.length <= 1e-6:
+        start_extension = perpendicular
+    else:
+        start_extension.normalize()
+    if end_extension.length <= 1e-6:
+        end_extension = perpendicular
+    else:
+        end_extension.normalize()
     strokes = [
         OutputStroke((line_start, line_end), color, sizing.line_width),
-        OutputStroke((start_world, line_start), color, sizing.line_width),
-        OutputStroke((end_world, line_end), color, sizing.line_width),
+        OutputStroke((start_world + start_extension * min(gap, (line_start - start_world).length), line_start + start_extension * overshoot), color, sizing.line_width),
+        OutputStroke((end_world + end_extension * min(gap, (line_end - end_world).length), line_end + end_extension * overshoot), color, sizing.line_width),
     ]
     strokes.extend(
         _endpoint_strokes(
             line_start,
             line_direction,
             perpendicular,
-            arrow_style,
+            _resolved_endpoint_style(props, "start_end_style"),
             color,
             sizing,
         )
@@ -171,7 +250,7 @@ def linear_dimension_output_spec(dimension_object, source_key, sizing):
             line_end,
             -line_direction,
             perpendicular,
-            arrow_style,
+            _resolved_endpoint_style(props, "end_end_style"),
             color,
             sizing,
         )
@@ -181,6 +260,108 @@ def linear_dimension_output_spec(dimension_object, source_key, sizing):
         strokes=tuple(strokes),
         name=getattr(dimension_object, "name", "Dimensions Output"),
     )
+
+
+def dimension_set_output_spec(context, dimension_object, source_key, sizing, text_height, camera=None):
+    """Build one output artifact containing every member of a persistent set."""
+    if not isinstance(sizing, WorldSizingPolicy):
+        raise TypeError("sizing must be a WorldSizingPolicy")
+    props = getattr(dimension_object, "dimension_props", None)
+    if props is None or getattr(props, "annotation_kind", "LINEAR") != "DIMENSION_SET":
+        return None
+    if dimension_set_state(props) != "LIVE":
+        return None
+    color = tuple(float(channel) for channel in props.color)
+    strokes = []
+    for item in dimension_set_world_geometry(props):
+        line_start = Vector(item["line_start_world"]) + Vector(props.presentation_offset)
+        line_end = Vector(item["line_end_world"]) + Vector(props.presentation_offset)
+        direction = (line_end - line_start).normalized()
+        perpendicular = Vector(item["offset_direction_world"]).normalized()
+        if props.set_kind == "BASELINE":
+            current_offset = float(item["offset_distance"])
+            required_offset = float(props.offset_distance) + item["index"] * max(
+                baseline_spacing(props), text_height * 1.5,
+            )
+            adjustment = perpendicular * (required_offset - current_offset)
+            line_start += adjustment
+            line_end += adjustment
+        pixel_to_world = sizing.arrow_size / max(float(getattr(props, "arrow_size", 10.0)), 1e-6)
+        gap = float(getattr(props, "extension_gap", 0.0)) * pixel_to_world
+        overshoot = float(getattr(props, "extension_overshoot", 0.0)) * pixel_to_world
+        first_extension = line_start - Vector(item["start_world"])
+        second_extension = line_end - Vector(item["end_world"])
+        first_length, second_length = first_extension.length, second_extension.length
+        first_extension = first_extension.normalized() if first_length > 1e-6 else perpendicular
+        second_extension = second_extension.normalized() if second_length > 1e-6 else perpendicular
+        strokes.extend((
+            OutputStroke((line_start, line_end), color, sizing.line_width),
+            OutputStroke((Vector(item["start_world"]) + first_extension * min(gap, first_length), line_start + first_extension * overshoot), color, sizing.line_width),
+            OutputStroke((Vector(item["end_world"]) + second_extension * min(gap, second_length), line_end + second_extension * overshoot), color, sizing.line_width),
+        ))
+        strokes.extend(_endpoint_strokes(line_start, direction, perpendicular, _resolved_endpoint_style(props, "start_end_style"), color, sizing))
+        strokes.extend(_endpoint_strokes(line_end, -direction, perpendicular, _resolved_endpoint_style(props, "end_end_style"), color, sizing))
+        label = f"{props.value_prefix}{format_dual_length(context, item['value'], props.precision, props.unit_style, getattr(props, 'secondary_unit_style', 'NONE'), getattr(props, 'secondary_precision', 2), getattr(props, 'dual_unit_arrangement', 'BRACKETS'))}{props.value_suffix}"
+        width, _height = text_block_dimensions(label, text_height)
+        if (line_end - line_start).length < width + sizing.arrow_size * 2.0:
+            center = line_end + direction * (sizing.arrow_size + width * 0.6)
+            strokes.append(OutputStroke((line_end, center - direction * width * 0.5), color, sizing.line_width))
+        else:
+            center = (line_start + line_end) * 0.5 + perpendicular * (text_height * 0.8)
+        label_camera = None if getattr(props, "label_orientation", "HORIZONTAL") == "ALIGNED" else camera
+        strokes.extend(_text_strokes_at(
+            label, center, text_height, sizing.line_width, color, label_camera,
+            fallback_x=direction, fallback_y=perpendicular,
+        ))
+    if not strokes:
+        return None
+    return GreasePencilOutputSpec(
+        source_key=source_key,
+        strokes=tuple(strokes),
+        name=getattr(dimension_object, "name", "Dimension Set Output"),
+    )
+
+
+def circle_dimension_output_spec(context, dimension_object, source_key, sizing, text_height, camera=None):
+    props = getattr(dimension_object, "dimension_props", None)
+    if props is None or getattr(props, "annotation_kind", "LINEAR") != "CIRCLE":
+        return None
+    fit = circle_geometry(props)
+    if fit is None or fit["state"] not in {"LIVE", "CAPTURED"}:
+        return None
+    color = tuple(float(channel) for channel in props.color)
+    direction = fit["axis_u"] * cos(props.circle_leader_angle) + fit["axis_v"] * sin(props.circle_leader_angle)
+    direction.normalize()
+    center = fit["center"]
+    radius = fit["radius"]
+    edge = center + direction * radius
+    distance = props.circle_label_distance if props.circle_label_distance > 1e-6 else radius * 1.35
+    label_position = center + direction * distance + Vector(props.presentation_offset)
+    strokes = []
+    if props.circle_kind == "DIAMETER":
+        strokes.append(OutputStroke((center - direction * radius, center + direction * radius), color, sizing.line_width))
+    elif props.circle_kind == "ARC_LENGTH":
+        points = []
+        steps = max(12, int(48 * fit["sweep"] / tau))
+        tangent = fit["normal"].cross(fit["start_direction"])
+        for index in range(steps + 1):
+            angle = fit["sweep"] * index / steps
+            points.append(center + (fit["start_direction"] * cos(angle) + tangent * sin(angle)) * radius)
+        strokes.append(OutputStroke(tuple(points), color, sizing.line_width))
+    else:
+        strokes.append(OutputStroke((center, edge), color, sizing.line_width))
+    strokes.append(OutputStroke((edge, label_position), color, sizing.line_width))
+    symbol = {"RADIUS": "R", "DIAMETER": "⌀", "ARC_LENGTH": "⌒"}[props.circle_kind]
+    label = f"{props.value_prefix}{symbol}{format_length(context, circle_value(props, fit), props.precision, props.unit_style)}{props.value_suffix}"
+    if props.tolerance_mode == "SYMMETRIC" and props.tolerance_upper > 0.0:
+        label += f" ±{format_length(context, props.tolerance_upper, props.precision, props.unit_style)}"
+    elif props.tolerance_mode == "DEVIATION":
+        label += f" +{format_length(context, props.tolerance_upper, props.precision, props.unit_style)} / -{format_length(context, props.tolerance_lower, props.precision, props.unit_style)}"
+    strokes.extend(_text_strokes_at(
+        label, label_position, text_height, sizing.line_width, color, camera,
+        fallback_x=direction, fallback_y=fit["normal"].cross(direction),
+    ))
+    return GreasePencilOutputSpec(source_key=source_key, strokes=tuple(strokes), name=dimension_object.name)
 
 
 def angle_dimension_output_spec(dimension_object, source_key, sizing):
@@ -238,10 +419,12 @@ def area_dimension_output_spec(dimension_object, source_key, sizing):
         props is None
         or not getattr(props, "enabled", False)
         or getattr(props, "annotation_kind", "LINEAR") != "AREA"
-        or props.measurement_state == "NEEDS_REPAIR"
+        or props.measurement_state not in {"LIVE", "CAPTURED"}
     ):
         return None
     result = evaluate_area_binding(props) if props.measurement_state != "CAPTURED" else None
+    if result is not None and result.get("state", "LIVE") != "LIVE":
+        return None
     if result is None:
         if props.measurement_state != "CAPTURED":
             return None
@@ -286,7 +469,7 @@ def area_dimension_output_spec(dimension_object, source_key, sizing):
 
 
 def _angle_dimension_label_text(context, props, value):
-    precision = min(max(int(getattr(context.scene.dimensions_settings, "precision", 3)), 0), 3)
+    precision = min(max(int(getattr(props, "precision", 3)), 0), 3)
     label = f"{props.value_prefix}{degrees(value):.{precision}f}\N{DEGREE SIGN}{props.value_suffix}"
     custom_text = props.custom_text.strip()
     if custom_text:
@@ -325,8 +508,8 @@ def angle_dimension_label_strokes(context, dimension_object, text_height, line_w
 
 
 def _area_dimension_label_text(context, props, value, face_count, state):
-    precision = getattr(context.scene.dimensions_settings, "precision", 3)
-    label = f"Area {props.value_prefix}{format_area(context, value, precision)}{props.value_suffix}"
+    precision = getattr(props, "precision", 3)
+    label = f"Area {props.value_prefix}{format_area(context, value, precision, getattr(props, 'unit_style', None))}{props.value_suffix}"
     if face_count > 1:
         label += f" ({face_count} faces)"
     if state == "CAPTURED":
@@ -342,10 +525,12 @@ def area_dimension_label_strokes(context, dimension_object, text_height, line_wi
     if (
         props is None
         or getattr(props, "annotation_kind", "LINEAR") != "AREA"
-        or props.measurement_state == "NEEDS_REPAIR"
+        or props.measurement_state not in {"LIVE", "CAPTURED"}
     ):
         return ()
     result = evaluate_area_binding(props) if props.measurement_state != "CAPTURED" else None
+    if result is not None and result.get("state", "LIVE") != "LIVE":
+        return ()
     if result is None:
         if props.measurement_state != "CAPTURED":
             return ()
@@ -375,18 +560,23 @@ def area_dimension_label_strokes(context, dimension_object, text_height, line_wi
 
 
 def _linear_dimension_label_text(context, props, value):
-    scene_settings = getattr(context.scene, "dimensions_settings", None)
-    precision = getattr(scene_settings, "precision", 3)
-    value_text = format_length(context, value, precision)
+    precision = getattr(props, "precision", 3)
+    unit_style = getattr(props, "unit_style", None)
+    value_text = format_dual_length(
+        context, value, precision, unit_style,
+        getattr(props, "secondary_unit_style", "NONE"),
+        getattr(props, "secondary_precision", 2),
+        getattr(props, "dual_unit_arrangement", "BRACKETS"),
+    )
     label = f"{props.value_prefix}{value_text}{props.value_suffix}"
     if props.tolerance_mode == "SYMMETRIC" and props.tolerance_upper > 0.0:
-        label += f" ±{format_length(context, props.tolerance_upper, precision)}"
+        label += f" ±{format_length(context, props.tolerance_upper, precision, unit_style)}"
     elif props.tolerance_mode == "DEVIATION" and (
         props.tolerance_upper > 0.0 or props.tolerance_lower > 0.0
     ):
         label += (
-            f" +{format_length(context, props.tolerance_upper, precision)}"
-            f" / -{format_length(context, props.tolerance_lower, precision)}"
+            f" +{format_length(context, props.tolerance_upper, precision, unit_style)}"
+            f" / -{format_length(context, props.tolerance_lower, precision, unit_style)}"
         )
     custom_text = props.custom_text.strip()
     if custom_text:
@@ -450,6 +640,9 @@ def linear_dimension_label_layout(
     line_mid = (line_start + line_end) * 0.5
     line_direction = (line_end - line_start).normalized()
     x_axis, y_axis = _label_axes(geometry, camera)
+    if getattr(props, "label_orientation", "HORIZONTAL") == "ALIGNED":
+        x_axis = line_direction
+        y_axis = Vector(geometry["offset_direction_world"]).normalized()
     projected = Vector((line_direction.dot(x_axis), line_direction.dot(y_axis)))
     projection_scale = projected.length
     if projection_scale <= 1e-6:
@@ -477,6 +670,8 @@ def linear_dimension_label_layout(
     )
     margin = text_height * (5.0 / 14.0)
     placement = getattr(context.scene.dimensions_settings, "text_placement", "INLINE")
+    if placement == "INLINE":
+        placement = "ABOVE" if getattr(props, "label_line_mode", "BROKEN") == "ABOVE" else "INLINE"
     dimension_line_strokes = ()
     if placement == "ABOVE":
         center = line_mid + screen_perpendicular * (half_across + margin)
@@ -489,6 +684,12 @@ def linear_dimension_label_layout(
         line_length = (line_end - line_start).length
         if line_length < (gap_half_length * 2.0) + (arrow_size * 2.0):
             center = line_end + screen_direction * (arrow_size + margin + half_along)
+            leader_end = center - screen_direction * (half_along + margin * 0.5)
+            color = tuple(float(channel) for channel in props.color)
+            dimension_line_strokes = (
+                OutputStroke((line_start, line_end), color, line_width),
+                OutputStroke((line_end, leader_end), color, line_width),
+            )
         else:
             center = line_mid
             color = tuple(float(channel) for channel in props.color)

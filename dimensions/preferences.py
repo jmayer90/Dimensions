@@ -33,6 +33,13 @@ DEFAULT_PREFERENCES = SimpleNamespace(
     empty_display_size=DEFAULT_EMPTY_DISPLAY_SIZE,
     continuous_placement=True,
     default_axis_mode="ALIGNED",
+    **{f"snap_{identifier}": True for identifier in (
+        "vertex", "edge", "midpoint", "face_center", "face_point", "guide",
+        "measurement_endpoint", "measurement_midpoint", "measurement_segment",
+    )},
+    **{f"inference_{identifier}": True for identifier in (
+        "parallel", "perpendicular", "extension", "intersection", "local_axis", "active_plane",
+    )},
 )
 
 
@@ -110,6 +117,29 @@ class DIMENSIONS_AddonPreferences(bpy.types.AddonPreferences):
         ),
         default="ALIGNED",
     )
+    snap_vertex: bpy.props.BoolProperty(name="Vertex", default=True, update=_tag_redraw)
+    snap_edge: bpy.props.BoolProperty(name="Edge", default=True, update=_tag_redraw)
+    snap_midpoint: bpy.props.BoolProperty(name="Midpoint", default=True, update=_tag_redraw)
+    snap_face_center: bpy.props.BoolProperty(name="Face Center", default=True, update=_tag_redraw)
+    snap_face_point: bpy.props.BoolProperty(name="Face Point", default=True, update=_tag_redraw)
+    snap_guide: bpy.props.BoolProperty(name="Guide", default=True, update=_tag_redraw)
+    snap_guide_point: bpy.props.BoolProperty(name="Guide Point", default=True, update=_tag_redraw)
+    snap_guide_plane: bpy.props.BoolProperty(name="Guide Plane", default=True, update=_tag_redraw)
+    snap_measurement_endpoint: bpy.props.BoolProperty(
+        name="Measurement Endpoint", default=True, update=_tag_redraw
+    )
+    snap_measurement_midpoint: bpy.props.BoolProperty(
+        name="Measurement Midpoint", default=True, update=_tag_redraw
+    )
+    snap_measurement_segment: bpy.props.BoolProperty(
+        name="Measurement Segment", default=True, update=_tag_redraw
+    )
+    inference_parallel: bpy.props.BoolProperty(name="Parallel", default=True, update=_tag_redraw)
+    inference_perpendicular: bpy.props.BoolProperty(name="Perpendicular", default=True, update=_tag_redraw)
+    inference_extension: bpy.props.BoolProperty(name="Extension", default=True, update=_tag_redraw)
+    inference_intersection: bpy.props.BoolProperty(name="Intersection", default=True, update=_tag_redraw)
+    inference_local_axis: bpy.props.BoolProperty(name="Local Axis", default=True, update=_tag_redraw)
+    inference_active_plane: bpy.props.BoolProperty(name="Active Plane", default=True, update=_tag_redraw)
 
     def draw(self, _context):
         layout = self.layout
@@ -122,6 +152,14 @@ class DIMENSIONS_AddonPreferences(bpy.types.AddonPreferences):
         snapping = layout.box()
         snapping.label(text="Snapping")
         snapping.prop(self, "snap_pixel_threshold")
+        from .snap_targets import draw_snap_target_row
+
+        draw_snap_target_row(snapping, self)
+        inference = layout.box()
+        inference.label(text="Drafting Inference")
+        from .inference import draw_inference_preferences
+
+        draw_inference_preferences(inference, self)
         defaults = layout.box()
         defaults.label(text="Defaults for New Annotations")
         for name in ("line_width", "text_size", "arrow_size", "default_precision", "default_offset_distance", "empty_display_size"):

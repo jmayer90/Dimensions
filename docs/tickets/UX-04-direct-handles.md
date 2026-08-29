@@ -1,7 +1,7 @@
 # UX-04 — Direct viewport handles for placement, radius, and offset
 
 **Milestone:** M2 Fluency
-**Status:** ⬜ Planned.
+**Status:** ✅ Complete in 0.4.3.
 **Effort:** M
 **Depends on:** FND-01
 **Version impact:** Patch.
@@ -41,16 +41,16 @@ Placement is iterative. Nobody gets a label position right the first time, and t
 
 ## Acceptance criteria
 
-- [ ] Handles are drawn only for selected annotations.
-- [ ] Angle radius, area label position, and linear offset each have a draggable handle.
-- [ ] Dragging a handle supports axis constraints, typed numeric entry, `Esc` cancel, and click or `Enter` confirm, identical to the creation stages.
-- [ ] Handle drags are a single undo step, and cancelling restores the prior value exactly.
-- [ ] Handles are visually distinct from snap indicators and from the annotation geometry.
-- [ ] Handle hit testing takes priority over annotation selection at the same cursor position.
-- [ ] Existing **Move Label** and radius property editing continue to work and share the handle's implementation rather than duplicating it.
-- [ ] Handles scale sensibly with zoom — a constant pixel size, not world size.
-- [ ] Handles do not appear for annotations from a linked library (see `FND-07`).
-- [ ] `DESIGN.md` interaction contract covers handle manipulation.
+- [x] Handles are drawn only for selected annotations.
+- [x] Angle radius, area label position, and linear offset each have a draggable handle.
+- [x] Dragging a handle supports axis constraints, typed numeric entry, `Esc` cancel, and click or `Enter` confirm, identical to the creation stages.
+- [x] Handle drags are a single undo step, and cancelling restores the prior value exactly.
+- [x] Handles are visually distinct from snap indicators and from the annotation geometry.
+- [x] Handle hit testing takes priority over annotation selection at the same cursor position.
+- [x] Existing **Move Label** and radius property editing continue to work and share the handle's implementation rather than duplicating it.
+- [x] Handles scale sensibly with zoom — a constant pixel size, not world size.
+- [x] Handles do not appear for annotations from a linked library (see `FND-07`).
+- [x] `DESIGN.md` interaction contract covers handle manipulation.
 
 ## Code map
 
@@ -72,7 +72,7 @@ Placement is iterative. Nobody gets a label position right the first time, and t
 
 - Rotation and scale handles for annotation placement. `DESIGN.md` P0 calls for deliberate rotation and scale semantics for the canonical-frame model; that decision precedes handles for it and is its own ticket.
 - Handles for editing anchors — that is rebinding, covered by `UX-07`.
-- Gizmo API adoption. Blender's gizmo system is an option worth evaluating over custom drawing; if chosen, note the decision in `DESIGN.md`.
+- Gizmo API adoption. UX-04 deliberately uses custom overlay handles so its hit priority and modal behavior share the established selection and per-viewport interaction paths; the decision is recorded in `DESIGN.md`.
 
 ## Invariants
 

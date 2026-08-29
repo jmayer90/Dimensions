@@ -13,7 +13,9 @@ from ..interaction import (
     remember_session_context,
     session_context_changed,
 )
-from ..properties import is_dimension_object
+from ..manipulation import angle_radius_from_world
+from ..properties import is_dimension_object, is_read_only_dimensions_object
+from ..snap_targets import handle_snap_target_event
 from ..snapping import copy_snap, find_nearest_snap_point, has_view3d_window_region
 
 
@@ -114,6 +116,9 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
         if self.continuous_placement and session_context_changed(self, context):
             clear_preview_state()
             return {"CANCELLED"}
+        if handle_snap_target_event(context, event):
+            self._update_preview()
+            return {"RUNNING_MODAL"}
         if event.type == "MOUSEMOVE":
             if self.state in {"PICK_EDGE_A", "PICK_EDGE_B"}:
                 snap = find_nearest_snap_point(
@@ -134,7 +139,7 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
                     plane_point=source["center"] if source else None,
                 )
                 if source is not None and self.hover_snap is not None:
-                    self.radius = max(0.001, (self.hover_snap["world_co"] - source["center"]).length)
+                    self.radius = angle_radius_from_world(source["center"], self.hover_snap["world_co"])
             self._update_preview()
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
@@ -266,7 +271,12 @@ class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         obj = context.view_layer.objects.active
-        return bool(context.mode == "OBJECT" and is_dimension_object(obj) and obj.dimension_props.annotation_kind == "ANGLE")
+        return bool(
+            context.mode == "OBJECT"
+            and is_dimension_object(obj)
+            and not is_read_only_dimensions_object(obj)
+            and obj.dimension_props.annotation_kind == "ANGLE"
+        )
 
     def invoke(self, context, _event):
         self.annotation_name = context.view_layer.objects.active.name
@@ -279,6 +289,14 @@ class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
         if annotation is None or not has_view3d_window_region(context):
             clear_preview_state()
             return {"CANCELLED"}
+        if handle_snap_target_event(context, event):
+            set_preview_state({
+                "state": f"REPLACE_EDGE_{self.edge_slot}",
+                "hover_screen": None if self.hover_snap is None else self.hover_snap["screen_co"],
+                "hover_type": "EDGE",
+                "hover_label": f"Replacement Edge {self.edge_slot}",
+            })
+            return {"RUNNING_MODAL"}
         if event.type == "MOUSEMOVE":
             snap = find_nearest_snap_point(
                 context,

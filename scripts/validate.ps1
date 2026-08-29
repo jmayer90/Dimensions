@@ -37,6 +37,18 @@ try {
     & $Blender --background --factory-startup --python tests\output_operator_smoke.py
     if ($LASTEXITCODE -ne 0) { throw "Output operator smoke tests failed" }
 
+    & $Blender --background --factory-startup --python tests\vector_export_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "Vector export smoke tests failed" }
+
+    & $Blender --background --factory-startup --python tests\dimension_set_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "Dimension set smoke tests failed" }
+
+    & $Blender --background --factory-startup --python tests\circle_dimension_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "Circle dimension smoke tests failed" }
+
+    & $Blender --background --factory-startup --python tests\guide_spacing_benchmark.py
+    if ($LASTEXITCODE -ne 0) { throw "Repeated-spacing performance benchmark failed" }
+
     & $Blender --background --factory-startup --command extension validate dimensions
     if ($LASTEXITCODE -ne 0) { throw "Extension manifest validation failed" }
 

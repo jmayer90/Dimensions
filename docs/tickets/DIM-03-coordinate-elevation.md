@@ -1,7 +1,7 @@
 # DIM-03 — Coordinate and elevation dimensions
 
 **Milestone:** M5 Documentation-grade
-**Status:** ⬜ Planned.
+**Status:** ✅ Complete in 0.5.0.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.
@@ -45,21 +45,21 @@ Coordinate with `CON-01`: a guide point and a datum are similar objects. Decide 
 
 ## Acceptance criteria
 
-- [ ] A datum is a first-class object with position and orientation, anchorable to geometry.
-- [ ] Moving a datum updates every annotation referencing it.
-- [ ] Multiple datums can coexist; each annotation names the one it uses.
-- [ ] Coordinate dimensions bind one point and report position relative to a datum.
-- [ ] Component selection — X, Y, X and Y, or XYZ — works.
-- [ ] Coordinate labels can be aligned as a set for readability.
-- [ ] Sign convention and negative display are configurable.
-- [ ] Elevation dimensions bind one point and report height above a datum along a configurable up-axis.
-- [ ] The conventional level symbol is drawn.
-- [ ] Absolute and relative elevation modes both work.
-- [ ] Elevation value formatting is configurable independently of linear formatting.
-- [ ] Both types use existing anchors and enter repair states per `UX-07`.
-- [ ] Both generate correctly through `OUT-01` if it has landed.
-- [ ] Schema changes go through the `FND-02` migration framework.
-- [ ] README and `DESIGN.md` document datums and both annotation types.
+- [x] A datum is a first-class object with position and orientation, anchorable to geometry.
+- [x] Moving a datum updates every annotation referencing it.
+- [x] Multiple datums can coexist; each annotation names the one it uses.
+- [x] Coordinate dimensions bind one point and report position relative to a datum.
+- [x] Component selection — X, Y, X and Y, or XYZ — works.
+- [x] Coordinate labels can be aligned as a set for readability.
+- [x] Sign convention and negative display are configurable.
+- [x] Elevation dimensions bind one point and report height above a datum along a configurable up-axis.
+- [x] The conventional level symbol is drawn.
+- [x] Absolute and relative elevation modes both work.
+- [x] Elevation value formatting is configurable independently of linear formatting.
+- [x] Both types use existing anchors and enter repair states per `UX-07`.
+- [x] Both generate correctly through `OUT-01` if it has landed.
+- [x] Schema changes go through the `FND-02` migration framework.
+- [x] README and `DESIGN.md` document datums and both annotation types.
 
 ## Code map
 
@@ -79,6 +79,12 @@ Coordinate with `CON-01`: a guide point and a datum are similar objects. Decide 
 - Label alignment tests on a set of coordinate dimensions.
 - Elevation tests for absolute and relative modes, including points below datum with correct sign.
 - Formatting tests for the elevation convention, including zero and negative values.
+
+Blender 5.1.2 validation covers every component mode, world and oriented-datum axes,
+datum motion and repair propagation, relative-state precedence, row alignment,
+zero-decimal formatting, generated output structure, and save/reload of datum,
+coordinate, and relative-elevation bindings. The full smoke, lifecycle, and output
+geometry suites pass.
 
 ## Out of scope
 

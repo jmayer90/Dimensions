@@ -43,14 +43,14 @@ Delivery status is summarized here and maintained in detail in the [work-ticket 
 
 | Milestone | Delivery status | Content | Likely version impact |
 | --- | --- | --- | --- |
-| **M1 — Foundation** | 🟨 Partial | Implementation shipped in 0.3.0; `FND-07` foreground append/link and two-window QA remains. | **`0.3.0`** — trips triggers 1 and 2. |
-| **M2 — Fluency** | 🟨 Partial | `UX-01` and `UX-08` complete; `FND-11` is next; remaining `UX-*` planned. | Patches on the `0.3.x`/`0.4.x` lines unless a ticket trips trigger 2. |
-| **M3 — Construction** | ⬜ Planned | `CON-*`. Guide points, offset and angular guides, guide planes, spacing. | Patches. New surfaces that reuse the existing contract. |
-| **M4 — Output** | 🟨 Partial | `OUT-01` complete in 0.4.0; angle/area `OUT-04` complete in 0.4.1; `OUT-03` and vector export remain. | **`0.4.0`** tripped trigger 3; follow-ups are patches unless scope changes. |
-| **M5 — Documentation-grade** | 🟨 Partial | Architectural ticks and manual Outside Start/End placement complete; remaining `DIM-04` and `DIM-01` through `DIM-03` planned. | Patches, mostly additive. |
+| **M1 — Foundation** | ✅ Complete | Core implementation shipped in 0.3.0; the expanded `FND-07` lifecycle matrix and two-window foreground QA completed in 0.4.2. | **`0.3.0`** — trips triggers 1 and 2. |
+| **M2 — Fluency** | 🟨 Partial | `FND-11`, `UX-01` through `UX-04`, and `UX-06` through `UX-08` complete; `UX-05` awaits final QA. | Patches on the `0.3.x`/`0.4.x` lines unless a ticket trips trigger 2. |
+| **M3 — Construction** | ✅ Complete | `CON-01` and `CON-02` delivered in 0.4.3; validated guide planes, active-plane input, angular guides, and repeated spacing complete in 0.5.0. | `CON-03` deliberately remaps X/Y/Z while active, triggering 0.5.0 under rule 2; other construction work is additive. |
+| **M4 — Output** | ✅ Complete | `OUT-01` complete in 0.4.0; angle/area `OUT-04` complete in 0.4.1; styles and scale-correct SVG/PDF complete in 0.4.2. | **`0.4.0`** tripped trigger 3; follow-ups are patches unless scope changes. |
+| **M5 — Documentation-grade** | ✅ Complete | `DIM-01`, `DIM-02`, and `DIM-04` delivered in 0.4.3; coordinate and elevation validation completed in 0.5.0. | Additive dimension types remain patches when they reuse existing contracts. |
 | **M6 — 1.0 gate** | ⬜ Planned | Hardening, migration fixtures, compatibility promise. | **`1.0.0`**. |
 
-Milestone numbers group related work and version impact; they are not a strict delivery queue. M1 gates everything else, because building on an unversioned schema and an unsound selection architecture just increases what has to be unwound later. Early user feedback moved `UX-01` and `UX-08` into 0.3.1, architectural ticks into 0.3.2, the first renderable linear output surface into 0.4.0, and angle/area output coverage into 0.4.1. The 0.4.0 release also advances the saved-data schema additively from v1 to v2; existing values are preserved. Other M2 and M3 work can proceed in parallel on the 0.4.x line.
+Milestone numbers group related work and version impact; they are not a strict delivery queue. M1 gates everything else, because building on an unversioned schema and an unsound selection architecture just increases what has to be unwound later. Early user feedback moved `UX-01` and `UX-08` into 0.3.1, architectural ticks into 0.3.2, the first renderable linear output surface into 0.4.0, angle/area output coverage into 0.4.1, and `UX-02`, `UX-03`, `UX-07`, `OUT-02`, plus `OUT-03` into 0.4.2; `UX-04`, `UX-06`, `DIM-01`, `DIM-04`, `CON-01`, and `CON-02` follow in 0.4.3. The 0.4.0 release advanced the saved-data schema additively from v1 to v2; unreleased v3 through v6 preserve snap, style, repair, and vector settings, v7 adds persistent dimension-set members, v8 adds Guide Point defaults, v9 adds appearance-preserving drafting style fields, v10 adds circular-dimension bindings, v11 adds derived-guide relationships, v12 adds datum/coordinate/elevation storage, v13 adds saved/active construction planes, and v14 adds angular and repeated-spacing guide definitions. The released schema-v2 fixture covers the complete sequential path. Because an active plane changes the documented meaning of X/Y/Z, its first release moves to the next 0.x minor line; other roadmap work can proceed additively.
 
 ## The 1.0 gate
 
@@ -60,19 +60,19 @@ Every item must be true before 1.0. Checked items are already satisfied in the c
 
 - [x] Property groups carry a schema version and a migration dispatcher runs on load — `FND-02`.
 - [x] Migration is covered by fixture `.blend` files saved by each earlier released schema — `FND-02`, `FND-06`.
-- [ ] Every persistent object type survives save/reload, undo/redo, append, and link — `FND-07`.
+- [x] Every persistent object type survives save/reload, undo/redo, append, and link; two-window scene ownership is foreground-verified — `FND-07`.
 
 **Architecture**
 
 - [x] Selection uses a `WorkSpaceTool` or registered keymap, not a self-restarting background modal — `FND-01`.
 - [x] Draw cost scales with annotation count, not scene object count, and meets a documented budget — `FND-03`.
-- [ ] Snap acquisition meets a documented budget on a dense reference scene — `FND-08`.
+- [x] Snap acquisition meets the documented dense-scene budgets — `FND-08`; `FND-11` records the passing 1M-vertex cache-build and reprojection evidence.
 
 **User control**
 
 - [x] Add-on preferences expose thresholds, sizes, and defaults — `FND-04`.
 - [x] Keymaps are registered and user-customizable — `FND-05`.
-- [ ] Annotations can be managed in bulk: list, search, isolate, repair, restyle — `UX-02`.
+- [x] Annotations can be managed in bulk: list, search, isolate, repair, restyle — `UX-02`.
 
 **Capability**
 

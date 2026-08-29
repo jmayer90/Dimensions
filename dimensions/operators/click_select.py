@@ -1,6 +1,6 @@
 import bpy
 
-from ..drawing import find_dimension_hit, find_guide_hit
+from ..drawing import find_annotation_handle_hit, find_dimension_hit, find_guide_hit
 
 
 class DIMENSIONS_OT_ClickSelect(bpy.types.Operator):
@@ -15,6 +15,17 @@ class DIMENSIONS_OT_ClickSelect(bpy.types.Operator):
         return context.area is not None and context.area.type == "VIEW_3D" and context.mode == "OBJECT"
 
     def invoke(self, context, event):
+        handle = find_annotation_handle_hit(
+            context, event.mouse_region_x, event.mouse_region_y,
+        )
+        if handle is not None:
+            result = bpy.ops.dimensions.drag_annotation_handle(
+                "INVOKE_DEFAULT",
+                object_name=handle["object"].name,
+                handle_kind=handle["kind"],
+            )
+            # The drag operator owns the only undo transaction.
+            return {"CANCELLED"} if result == {"RUNNING_MODAL"} else result
         hit_object = find_dimension_hit(context, event.mouse_region_x, event.mouse_region_y)
         if hit_object is None:
             hit_object = find_guide_hit(context, event.mouse_region_x, event.mouse_region_y)

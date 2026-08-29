@@ -1,7 +1,7 @@
 # CON-04 — Angular guides and repeated spacing
 
 **Milestone:** M3 Construction
-**Status:** ⛔ Blocked — waiting on `CON-02`.
+**Status:** ✅ Complete in 0.5.0.
 **Effort:** M
 **Depends on:** CON-02
 **Version impact:** Patch. Additive.
@@ -46,27 +46,27 @@ Provide an explicit "bake to individual guides" action for when a user wants to 
 
 **Angular guides**
 
-- [ ] A guide can be created at a typed angle from an edge or another guide, about a chosen pivot point.
-- [ ] Angle entry accepts degrees, and radians when the scene unit rotation is radians.
-- [ ] Live preview shows the resulting guide and the angle before commit; a key flips direction.
-- [ ] Angular guides store their source relationship and update when the source moves.
-- [ ] A lost source produces a visible repair state.
+- [x] A guide can be created at a typed angle from an edge or another guide, about a chosen pivot point.
+- [x] Angle entry accepts degrees, and radians when the scene unit rotation is radians.
+- [x] Live preview shows the resulting guide and the angle before commit; `F` flips direction.
+- [x] Angular guides store their source relationship and update when the source moves.
+- [x] A lost source produces a visible repair state.
 
 **Repeated spacing**
 
-- [ ] A spaced set is created from an origin, direction, interval, and count or extent.
-- [ ] "Distribute evenly between two references" is supported.
-- [ ] Interval and count are editable after creation, updating the whole set.
-- [ ] Every generated line is an individual snap target.
-- [ ] A "bake to individual guides" action produces separate guide objects at the same positions.
-- [ ] A spaced set displays as one manager entry (`UX-02`), not as N entries.
-- [ ] Creation and each subsequent edit are single undo steps.
+- [x] A spaced set is created from an origin, direction, interval, and count or extent.
+- [x] "Distribute evenly between two references" is supported through the source origin and anchored end reference.
+- [x] Interval and count are editable after creation, updating the whole set.
+- [x] Every generated line is an individual snap target.
+- [x] A "bake to individual guides" action produces separate guide objects at the same positions.
+- [x] A spaced set displays as one manager entry (`UX-02`), not as N entries.
+- [x] Creation and each subsequent edit are single undo steps.
 
 **Both**
 
-- [ ] Schema changes go through the `FND-02` migration framework.
-- [ ] Spaced sets with a large count do not regress the `FND-03` draw budget or the `FND-08` snap budget; measure with 200 generated lines.
-- [ ] README and `DESIGN.md` document both features.
+- [x] Schema changes go through the `FND-02` migration framework.
+- [x] Spaced sets with a large count do not regress the `FND-03` draw budget or the `FND-08` snap budget; measure with 200 generated lines.
+- [x] README and `DESIGN.md` document both features.
 
 ## Code map
 
@@ -87,6 +87,11 @@ Provide an explicit "bake to individual guides" action for when a user wants to 
 - A test that bake produces guides at positions identical to the generated ones.
 - A test that every generated line is returned as a snap candidate.
 - Performance measurement with 200 generated lines against the `FND-03` and `FND-08` budgets.
+
+On Blender 5.1.2, the deterministic 200-line benchmark measures 0.125 ms for
+production draw preparation and 2.287 ms for a public guide-snap query, below
+the respective 33.333 ms and 8 ms budgets. The benchmark is part of both release
+validation scripts.
 
 ## Out of scope
 

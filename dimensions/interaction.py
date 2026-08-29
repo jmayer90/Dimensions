@@ -44,7 +44,11 @@ def session_context_changed(operator, context):
 
 
 def axis_label(axis):
-    return "Auto" if axis == "ALIGNED" else axis
+    if axis == "ALIGNED":
+        return "Auto"
+    if isinstance(axis, str) and axis.startswith("LOCAL_"):
+        return f"Local {axis[-1]}"
+    return axis
 
 
 def push_undo_step(message):
@@ -112,14 +116,29 @@ def update_distance_text(current_text, event):
     return current_text + character, True
 
 
-def constrained_delta(raw_delta, axis):
-    if axis == "X":
-        return Vector((raw_delta.x, 0.0, 0.0))
-    if axis == "Y":
-        return Vector((0.0, raw_delta.y, 0.0))
-    if axis == "Z":
-        return Vector((0.0, 0.0, raw_delta.z))
+def constrained_delta(raw_delta, axis, context=None):
+    direction = axis_world_direction(context, axis)
+    if direction is not None:
+        raw_delta = Vector(raw_delta)
+        return direction * raw_delta.dot(direction)
     return raw_delta.copy()
+
+
+def axis_world_direction(context, axis):
+    """Return the shared X/Y/Z direction in world or active-plane space."""
+    if axis not in {"X", "Y", "Z"}:
+        return None
+    from .guide_planes import active_plane_frame
+
+    scene = None if context is None else getattr(context, "scene", None)
+    frame = active_plane_frame(scene)
+    if frame is not None:
+        return {"X": frame[1], "Y": frame[2], "Z": frame[3]}[axis].copy()
+    return {
+        "X": Vector((1.0, 0.0, 0.0)),
+        "Y": Vector((0.0, 1.0, 0.0)),
+        "Z": Vector((0.0, 0.0, 1.0)),
+    }[axis]
 
 
 def nearest_axis_from_screen_vectors(mouse_delta, axis_vectors):
@@ -148,12 +167,9 @@ def axis_from_mouse_direction(context, origin_world, mouse_x, mouse_y):
     if origin_screen is None:
         return None
     scale = max(float(context.region_data.view_distance) * 0.25, 0.1)
+    directions = {axis: axis_world_direction(context, axis) for axis in ("X", "Y", "Z")}
     axis_vectors = {}
-    for axis, direction in {
-        "X": Vector((1.0, 0.0, 0.0)),
-        "Y": Vector((0.0, 1.0, 0.0)),
-        "Z": Vector((0.0, 0.0, 1.0)),
-    }.items():
+    for axis, direction in directions.items():
         projected = location_3d_to_region_2d(
             context.region,
             context.region_data,

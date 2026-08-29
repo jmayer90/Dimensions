@@ -1,14 +1,14 @@
 # FND-07 — Lifecycle hardening: undo, append, link, multi-scene
 
 **Milestone:** M1 Foundation
-**Status:** 🟨 Partial — background hardening shipped in 0.3.0; append/link and two-window foreground QA remain.
+**Status:** ✅ Complete — the background lifecycle matrix and two-window foreground isolation are verified on Blender 5.2.
 **Effort:** M
 **Depends on:** FND-02
 **Version impact:** Patch.
 
 ## Problem
 
-`DESIGN.md` lists proxy lifecycle as known risk 5: background save/reload passes, but "foreground, append/link, and undo/redo behavior still need release QA." That QA has not happened, and the paths involved are where Blender add-ons most often lose user data.
+`DESIGN.md` previously listed proxy lifecycle as known risk 5: background save/reload passed, but foreground, append/link, and undo/redo behavior still needed release QA. Blender 5.2 background coverage now exercises the persistent-data matrix, and a foreground two-window check verifies scene isolation.
 
 Specific exposures:
 
@@ -42,15 +42,15 @@ Specific work likely needed:
 
 ## Acceptance criteria
 
-- [ ] The full object-type × operation matrix is documented in `DESIGN.md` with the expected result for every cell.
-- [ ] Every cell either behaves as documented or has a filed follow-up ticket referenced from the matrix.
-- [ ] Undo and redo restore annotations, anchors, mesh attributes, and proxies consistently, with caches cleared.
-- [ ] No cache keyed on an object pointer or index survives an undo.
-- [ ] Annotations from a linked library are never written to; the UI presents them as read-only.
-- [ ] Deleting a source object leaves affected annotations in a visible repair state, never a silently wrong value.
-- [ ] Duplicating an annotation produces documented, deliberate behavior.
-- [ ] Two scenes with annotations in two windows each show and sync correctly with no cross-scene leakage.
-- [ ] `DESIGN.md` known risk 5 is replaced with results.
+- [x] The full object-type × operation matrix is documented in `DESIGN.md` with the expected result for every cell.
+- [x] Every cell either behaves as documented or has a filed follow-up ticket referenced from the matrix.
+- [x] Undo and redo restore annotations, anchors, mesh attributes, and proxies consistently, with caches cleared.
+- [x] No cache keyed on an object pointer or index survives an undo.
+- [x] Annotations from a linked library are never written to; the UI presents them as read-only.
+- [x] Deleting a source object leaves affected annotations in a visible repair state, never a silently wrong value.
+- [x] Duplicating an annotation produces documented, deliberate behavior.
+- [x] Two scenes with annotations in two windows each show and sync correctly with no cross-scene leakage.
+- [x] `DESIGN.md` known risk 5 is replaced with results.
 
 ## Code map
 
@@ -64,14 +64,15 @@ Specific work likely needed:
 
 ## Verification
 
-- One test per matrix cell that can run headless, in `blender_lifecycle.py` restructured per `FND-06`.
-- Undo/redo tests that assert cache state, not just object existence.
-- An append test using a fixture `.blend` from `tests/fixtures/` (created in `FND-02`).
-- Foreground checks for the two-window, two-scene cases, with results recorded in the PR.
+- Blender 5.2 background: `tests/blender_lifecycle.py` passes 18 tests, including real undo/redo and undo past creation; restoration of annotation objects, persistent mesh IDs, and native measurement proxies; invalidation of projected-snap, volume, drawing, and viewport caches; source/annotation deletion; duplicate semantics; append/link through a temporary library; an actual library override; linked-area drawing without RNA writes; and scheduled synchronization across two populated scenes.
+- Appended current-version objects entering an unstamped destination cause that scene to receive the current schema stamp on first sync. Linked and overridden annotation objects are skipped by synchronization and exposed as read-only in the UI and editing operators.
+- Blender 5.2 foreground: `bpy.ops.wm.window_new_main()` created a second main window for a temporary second scene. Each temporary scene contained one world-anchored dimension with a distinct value (2.0 and 3.0). Each window context resolved its assigned scene; the Annotation Manager registry and scene-owned `Dimensions` collection contained only that scene's object; the other scene's object was absent; and geometry evaluation returned the expected value in both contexts. Cleanup closed the temporary window, restored the original `Scene`, and removed all temporary data.
+- This foreground check is recorded evidence rather than an automated test: Blender background mode cannot exercise multiple application windows reliably.
+- Run: `/app/blender/blender --background --factory-startup --python tests/blender_lifecycle.py`.
 
 ## Out of scope
 
-- Guided repair UI — `UX-07`. This ticket ensures the repair *state* is reached correctly; presenting a fix is separate.
+- Guided repair UI — delivered in `UX-07`; this ticket remains responsible for reaching the repair state correctly.
 - New annotation types.
 
 ## Invariants

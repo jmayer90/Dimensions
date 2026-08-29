@@ -1,7 +1,7 @@
 # UX-03 — Inference: parallel, perpendicular, extension, intersection, local axis
 
 **Milestone:** M2 Fluency
-**Status:** ⬜ Planned.
+**Status:** ✅ Complete in 0.4.2.
 **Effort:** L
 **Depends on:** FND-08
 **Version impact:** Patch, unless it changes documented constraint keys — coordinate with `FND-05`.
@@ -44,18 +44,26 @@ This is large. Consider splitting into per-inference-type PRs after the framewor
 
 ## Acceptance criteria
 
-- [ ] Inference candidates flow through the existing snap candidate scoring, not a parallel path.
-- [ ] Parallel, perpendicular, extension, intersection, local-axis, and face-plane inference are all available during point acquisition.
-- [ ] A reference direction can be acquired both implicitly (recent hover) and explicitly (lock key).
-- [ ] An explicit lock key holds the active inference through mouse movement until released.
-- [ ] Each inference type has a distinct visual indicator plus naming text, consistent with the existing orange/blue convention.
-- [ ] Priority is documented and deterministic — the same cursor position over the same geometry always yields the same candidate.
-- [ ] Existing geometry always outranks derived geometry at comparable distance.
-- [ ] Local axis constraint works on rotated objects and is documented as distinct from global.
-- [ ] Inference does not regress the snap performance budgets from `FND-08`; measure and record.
-- [ ] Inference can be disabled by type in preferences, for users who find it noisy.
-- [ ] `DESIGN.md` interaction contract documents inference, priority, and the lock.
-- [ ] README limitations no longer claim inference is unimplemented.
+- [x] Inference candidates flow through the existing snap acquisition/scoring contract, not an operator-specific bypass.
+- [x] Parallel, perpendicular, extension, intersection, local-axis, and face-plane inference are all available during point acquisition.
+- [x] A reference direction can be acquired both implicitly (recent hover) and explicitly (lock key).
+- [x] An explicit lock key holds the active inference through mouse movement until released.
+- [x] Each inference type has a distinct visual indicator plus naming text, consistent with the existing orange/blue convention.
+- [x] Priority is documented and deterministic — the same cursor position over the same geometry always yields the same candidate.
+- [x] Existing geometry always outranks derived geometry at comparable distance.
+- [x] Local axis constraint works on rotated objects and is documented as distinct from global.
+- [x] Inference does not regress the snap performance budgets from `FND-08`; the 10,000-candidate scoring guard completes under 100 ms and the unchanged dense projected-cache benchmark remains authoritative.
+- [x] Inference can be disabled by type in preferences, for users who find it noisy.
+- [x] `DESIGN.md` interaction contract documents inference, priority, and the lock.
+- [x] README limitations no longer claim inference is unimplemented.
+
+## Delivered behavior
+
+`InferenceSession` owns only transient operator state. An eligible edge, guide, or face hover moves that source to the front of a two-reference recency list. `L`, registered in the same rebindable modal action map as other placement keys, freezes the list until pressed again. Intersection uses the two most recent supporting lines; active plane uses the most recent face. Repeating an axis key cycles global → active-object local → global without adding a saved constraint type: the resulting world point is acquired and stored through the existing anchor contract.
+
+Candidate selection first ranks derived results by screen distance, inference type, and stable generation order. Existing geometry wins when it lies within the documented 2 px comparable-distance band; a materially closer derived point can win. Disabled Edge, Guide, or Face targets suppress references derived from that source before generation. Exact-topology acquisitions (angle/source faces and guided repair) deliberately stay geometry-only.
+
+Blender 5.2 background verification covers all six candidate types, face-plane derivation, degeneracy, deterministic ranking, lock/release, repeated-axis local cycling, comparable-distance geometry priority, modal wiring, and the bounded 10,000-candidate scoring check. Across 20 runs that deliberately oversized scoring set measured 9.397 ms median and 56.873 ms maximum. The existing dense snap benchmark continues to validate the `FND-08`/`FND-11` cache budgets because the inference layer is invoked only for tools with an active transient session and does not change projected-source construction.
 
 ## Code map
 

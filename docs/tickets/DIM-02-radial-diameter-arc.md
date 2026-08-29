@@ -1,7 +1,7 @@
 # DIM-02 — Radial, diameter, and arc-length dimensions
 
 **Milestone:** M5 Documentation-grade
-**Status:** ⬜ Planned.
+**Status:** ✅ Complete.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.
@@ -41,23 +41,24 @@ Share one binding and fit implementation across all three; they differ in presen
 
 ## Acceptance criteria
 
-- [ ] Radial, diameter, and arc-length dimensions can be created from a selected edge loop, face set, or vertex set.
-- [ ] A least-squares circle fit computes center, radius, and plane from the selection.
-- [ ] Inscribed, circumscribed, and fitted measurement modes are available; fitted is the default.
-- [ ] Fit error is computed, and a selection that is not acceptably circular enters a visible warning state rather than reporting a plausible wrong radius.
-- [ ] Bindings use persistent IDs with Live/Captured/Needs Repair states, consistent with `area_binding.py`.
-- [ ] Values update live as bound geometry changes.
-- [ ] Labels use `R`, `⌀`, and arc-length conventions, and respect prefix, suffix, and tolerance properties.
-- [ ] Placement follows a documented drafting convention, with leader direction user-adjustable.
-- [ ] Label placement is user-controllable, consistent with area label placement.
-- [ ] Works in Object and Mesh Edit Mode, consistent with the other tools.
-- [ ] Generates correctly through `OUT-01` if it has landed.
-- [ ] Schema changes go through the `FND-02` migration framework.
-- [ ] README and `DESIGN.md` document the types, the fit method, and the fit-quality warning.
+- [x] Radial, diameter, and arc-length dimensions can be created from a selected edge loop, face set, or vertex set.
+- [x] A least-squares circle fit computes center, radius, and plane from the selection.
+- [x] Inscribed, circumscribed, and fitted measurement modes are available; fitted is the default.
+- [x] Fit error is computed, and a selection that is not acceptably circular enters a visible warning state rather than reporting a plausible wrong radius.
+- [x] Bindings use persistent IDs with Live/Captured/Needs Repair states, consistent with `area_binding.py`.
+- [x] Values update live as bound geometry changes.
+- [x] Labels use `R`, `⌀`, and arc-length conventions, and respect prefix, suffix, and tolerance properties.
+- [x] Placement follows a documented drafting convention, with leader direction user-adjustable.
+- [x] Label placement is user-controllable, consistent with area label placement.
+- [x] Full circumference is available for closed circular sources, distinct from open-arc length.
+- [x] Works in Object and Mesh Edit Mode, consistent with the other tools.
+- [x] Generates correctly through `OUT-01` if it has landed.
+- [x] Schema changes go through the `FND-02` migration framework.
+- [x] README and `DESIGN.md` document the mesh types, fit method, and fit-quality warning.
 
 ## Code map
 
-- `dimensions/circle_binding.py` — new; fitting and binding, modeled on `area_binding.py`.
+- `dimensions/circle_binding.py` — fitting and binding, modeled on `area_binding.py`.
 - `dimensions/area_binding.py` — the binding pattern to follow.
 - `dimensions/properties.py` — annotation kind enum and new properties.
 - `dimensions/operators/` — creation operators.

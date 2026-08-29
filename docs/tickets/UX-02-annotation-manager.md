@@ -1,7 +1,7 @@
 # UX-02 — Annotation manager: list, search, isolate, repair, restyle
 
 **Milestone:** M2 Fluency
-**Status:** ⬜ Planned.
+**Status:** ✅ Complete — delivered in 0.4.2 with filtered named-style assignment completing `OUT-03`.
 **Effort:** L
 **Depends on:** —
 **Version impact:** Patch.
@@ -38,22 +38,22 @@ Per row: an icon for annotation kind, the name, the current value, and a state i
 
 **Isolate.** Hide every annotation except the selection, with a clear way back. Store what was hidden so exiting isolate restores prior visibility rather than showing everything.
 
-**Repair entry point.** Rows in a repair state get an action that hands off to `UX-07`. Until that lands, the action can select the annotation and its source object, which is already useful.
+**Repair entry point.** Rows in a repair or fallback state hand off to the delivered `UX-07` workflow, selecting available sources and previewing the last-known and suggested positions.
 
 ## Acceptance criteria
 
-- [ ] A `UIList` panel lists every annotation and guide in the scene, grouped or filterable by kind.
-- [ ] Each row shows kind, name, current value, and state, with repair states visually distinct.
-- [ ] Search by name filters the list.
-- [ ] Filter toggles exist for kind, state, and "references the active object."
-- [ ] Clicking a row selects the annotation; viewport selection highlights the row.
-- [ ] Per-row select, rename, visibility toggle, delete, and jump-to all work.
-- [ ] Bulk show, hide, isolate, delete, apply style, and reset style operate on the filtered or selected set.
-- [ ] Isolate restores prior visibility on exit, not blanket visibility.
-- [ ] The list stays correct as annotations are created, deleted, or renamed, including from outside the panel.
-- [ ] Every bulk operation is a single undo step.
-- [ ] Performance is acceptable with 500 annotations — the list must not rebuild per redraw.
-- [ ] README limitations no longer claim there is no annotation manager.
+- [x] A `UIList` panel lists every annotation and guide in the scene, grouped or filterable by kind.
+- [x] Each row shows kind, name, current value, and state, with repair states visually distinct.
+- [x] Search by name filters the list.
+- [x] Filter toggles exist for kind, state, and "references the active object."
+- [x] Clicking a row selects the annotation; viewport selection highlights the row.
+- [x] Per-row select, rename, visibility toggle, delete, and jump-to all work.
+- [x] Bulk show, hide, isolate, delete, apply style, and reset style operate on the filtered or selected set.
+- [x] Isolate restores prior visibility on exit, not blanket visibility.
+- [x] The list stays correct as annotations are created, deleted, or renamed, including from outside the panel.
+- [x] Every bulk operation is a single undo step.
+- [x] Performance is acceptable with 500 annotations — the list must not rebuild per redraw.
+- [x] README limitations no longer claim there is no annotation manager.
 
 ## Code map
 
@@ -72,7 +72,7 @@ Per row: an icon for annotation kind, the name, the current value, and a state i
 
 ## Out of scope
 
-- Guided repair workflow — `UX-07`. This ticket surfaces repair state and provides the entry point.
+- Candidate selection and source rebinding are owned by the delivered `UX-07`; this ticket owns manager state and its entry point.
 - Named style presets — `OUT-03`. Bulk style here means applying the existing global style.
 - A dedicated editor type. A sidebar panel is the right scope.
 

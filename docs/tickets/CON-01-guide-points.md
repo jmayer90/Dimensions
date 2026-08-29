@@ -1,7 +1,7 @@
 # CON-01 — Guide points
 
 **Milestone:** M3 Construction
-**Status:** ⬜ Planned.
+**Status:** ✅ Complete in 0.4.3.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.
@@ -37,18 +37,18 @@ Not in the 1.0 gate, but M3 as a whole is what backs the claim that the tool sup
 
 ## Acceptance criteria
 
-- [ ] A guide point is a persistent object in the scene-owned `Construction Guides` collection.
-- [ ] Guide points support vertex, surface, and world anchors via the existing `anchors.py` model.
-- [ ] An anchored guide point follows its source through object transforms and mesh edits.
-- [ ] Guide points can be created at a snapped position, at a typed distance along an edge or from an existing point, and at the midpoint or centroid of a selection.
-- [ ] Guide points are snap targets for every acquisition tool and appear as their own type in the `UX-05` toggles.
-- [ ] Guide points have a distinct, constant-pixel-size viewport marker.
-- [ ] Guide points can be selected, named, hidden, and deleted individually, and appear in the `UX-02` manager.
-- [ ] **Clear All Guides** handles guide points, or a separate clear action exists — decide and document.
-- [ ] Guide points survive save/reload and undo/redo per the `FND-07` matrix.
-- [ ] Creating one is a single undo step.
-- [ ] Schema changes go through the `FND-02` migration framework.
-- [ ] README and `DESIGN.md` document the new construction primitive.
+- [x] A guide point is a persistent object in the scene-owned `Construction Guides` collection.
+- [x] Guide points support vertex, surface, and world anchors via the existing `anchors.py` model.
+- [x] An anchored guide point follows its source through object transforms and mesh edits.
+- [x] Guide points can be created at a snapped position, at a typed distance along an edge or from an existing point, and at the midpoint or centroid of a selection.
+- [x] Guide points are snap targets for every acquisition tool and appear as their own type in the `UX-05` toggles.
+- [x] Guide points have a distinct, constant-pixel-size viewport marker.
+- [x] Guide points can be selected, named, hidden, and deleted individually, and appear in the `UX-02` manager.
+- [x] **Clear All Guides** handles guide points, as documented in the README.
+- [x] Guide points survive save/reload and undo/redo per the `FND-07` matrix.
+- [x] Creating one is a single undo step.
+- [x] Schema changes go through the `FND-02` migration framework.
+- [x] README and `DESIGN.md` document the new construction primitive.
 
 ## Code map
 
@@ -66,6 +66,8 @@ Not in the 1.0 gate, but M3 as a whole is what backs the claim that the tool sup
 - Tests for each creation path, including typed-distance-along-edge with axis constraint.
 - A test that guide points are returned as snap candidates and respect the `UX-05` toggle.
 - Save/reload and undo/redo tests per the `FND-07` matrix.
+
+Delivered verification covers vertex transform/mesh-edit following, surface and world anchors, direct/typed-axis/selection-centroid creation, dedicated target filtering, fixed-pixel marker geometry, native proxy isolation, and save/reload against Blender 5.2. The released schema-v2 fixture is migrated through the idempotent v7 → v8 step and checked for both new defaults.
 
 ## Out of scope
 

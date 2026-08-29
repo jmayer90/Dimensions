@@ -30,8 +30,13 @@ from dimensions.projected_snap import (
     get_projected_snap_timings,
     nearest_visible_projected_vertex,
 )
+from dimensions.snapping import find_nearest_mesh_snap_point
 
 from support import make_context
+
+
+VERY_DENSE_BUILD_BUDGET_MS = 100.0
+VERY_DENSE_REPROJECT_BUDGET_MS = 50.0
 
 
 def make_reference_scene(vertex_count=100_000, objects=1):
@@ -93,11 +98,25 @@ def run_case(label, vertex_count, objects, query_count=50):
         )
     query_ms = ((time.perf_counter() - query_started) / query_count) * 1000.0
 
+    disabled_started = time.perf_counter()
+    for index in range(query_count):
+        find_nearest_mesh_snap_point(
+            context,
+            100.0 + (index % 10),
+            100.0 + (index % 7),
+            DEFAULT_SNAP_PIXEL_THRESHOLD,
+            enabled_targets=frozenset(),
+        )
+    disabled_query_ms = ((time.perf_counter() - disabled_started) / query_count) * 1000.0
+
     print(
         f"{label:<38} vertices={vertex_count:<9} objects={objects:<4} "
-        f"build={build_ms:9.3f} ms  reproject={reproject_ms:8.3f} ms  query={query_ms:7.3f} ms"
+        f"build={build_ms:9.3f} ms  reproject={reproject_ms:8.3f} ms  "
+        f"query={query_ms:7.3f} ms  disabled={disabled_query_ms:7.3f} ms"
     )
-    return build_ms, reproject_ms, query_ms
+    if disabled_query_ms >= query_ms:
+        raise AssertionError("disabled snap targets did not reduce query time")
+    return build_ms, reproject_ms, query_ms, disabled_query_ms
 
 
 def main():
@@ -108,7 +127,19 @@ def main():
     run_case("sparse (10k vertices)", 10_000, 1)
     run_case("dense single object (100k vertices)", 100_000, 1)
     run_case("dense many objects (100k vertices)", 100_000, 50)
-    run_case("very dense (1M vertices)", 1_000_000, 10)
+    build_ms, reproject_ms, _query_ms, _disabled_ms = run_case(
+        "very dense (1M vertices)", 1_000_000, 10
+    )
+    if build_ms >= VERY_DENSE_BUILD_BUDGET_MS:
+        raise AssertionError(
+            f"1M-vertex cache build {build_ms:.3f} ms exceeds "
+            f"{VERY_DENSE_BUILD_BUDGET_MS:.0f} ms budget"
+        )
+    if reproject_ms >= VERY_DENSE_REPROJECT_BUDGET_MS:
+        raise AssertionError(
+            f"1M-vertex reprojection {reproject_ms:.3f} ms exceeds "
+            f"{VERY_DENSE_REPROJECT_BUDGET_MS:.0f} ms budget"
+        )
 
 
 if __name__ == "__main__":

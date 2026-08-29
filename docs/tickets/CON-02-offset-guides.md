@@ -1,7 +1,7 @@
 # CON-02 — Offset and parallel guides at a typed distance
 
 **Milestone:** M3 Construction
-**Status:** ⛔ Blocked — waiting on `CON-01`.
+**Status:** ✅ Complete in 0.4.3.
 **Effort:** M
 **Depends on:** CON-01
 **Version impact:** Patch. Additive.
@@ -39,18 +39,18 @@ Provide "detach" to convert a derived guide into a fixed one, for cases where th
 
 ## Acceptance criteria
 
-- [ ] A guide can be created parallel to an edge, to another guide, or offset from a face plane, at a typed distance.
-- [ ] A centreline guide can be created midway between two parallel sources.
-- [ ] Offset guides store their source relationship and update when the source moves.
-- [ ] Offset side is chosen by mouse position with a live preview, and an explicit key flips it.
-- [ ] Typed distance uses the standard numeric entry, accepting the same unit expressions as every other tool.
-- [ ] A "detach" action converts a derived guide to a fixed one.
-- [ ] A lost source puts the guide into a visible repair state, consistent with `UX-07`.
-- [ ] Offset guides are snap targets like any other guide.
-- [ ] Chained derivation works — an offset from an offset resolves correctly — and cycles are detected and refused rather than looping.
-- [ ] Creation is a single undo step.
-- [ ] Schema changes go through the `FND-02` migration framework.
-- [ ] README and `DESIGN.md` document derived guides and the source relationship.
+- [x] A guide can be created parallel to an edge, to another guide, or offset from a face plane, at a typed distance.
+- [x] A centreline guide can be created midway between two parallel sources.
+- [x] Offset guides store their source relationship and update when the source moves.
+- [x] Offset side is chosen by mouse position with a live preview, and rebindable `F` flips it.
+- [x] Typed distance uses the standard numeric entry, accepting the same unit expressions as every other tool.
+- [x] A "detach" action converts a derived guide to a fixed one.
+- [x] A lost source puts the guide into a visible repair state, consistent with `UX-07`.
+- [x] Offset guides are snap targets like any other guide.
+- [x] Chained derivation works — an offset from an offset resolves correctly — and cycles are detected and refused rather than looping.
+- [x] Creation is a single undo step.
+- [x] Schema changes go through the `FND-02` migration framework.
+- [x] README and `DESIGN.md` document derived guides and the source relationship.
 
 ## Code map
 
@@ -70,6 +70,8 @@ Provide "detach" to convert a derived guide into a fixed one, for cases where th
 - A cycle-detection test asserting refusal rather than infinite recursion or a hang.
 - A test that detach produces a fixed guide with the same position.
 - A test that a deleted source produces a repair state, not a wrong position.
+
+Delivered Blender 5.2 coverage exercises edge and face offsets through source transforms, guide centerlines, chained derivation, explicit cycle detection, typed-unit parsing, rebindable side flip, detach equivalence, deleted-source Needs Repair state, save/reload relationship persistence, and released schema-v2 migration through v11.
 
 ## Out of scope
 

@@ -1,7 +1,7 @@
 # UX-07 — Guided repair for broken anchors and area bindings
 
 **Milestone:** M2 Fluency
-**Status:** ⛔ Blocked — waiting on `UX-02`.
+**Status:** ✅ Complete — delivered in 0.4.2 with truthful fallback state and explicit linear, angle, and area repair.
 **Effort:** M
 **Depends on:** UX-02
 **Version impact:** Patch.
@@ -18,7 +18,7 @@ What is missing is the fix. A user faced with a broken annotation can:
 
 None of these tell the user *what* broke, *where* it was, or offer the likely fix. On a scene with many annotations they will not even find the broken ones without `UX-02`.
 
-There is a related honesty problem in the anchor path. `DESIGN.md` known risk 2 and the README both note that a removed or duplicated point ID resolves to the closest stored position **without showing a detached state**. So a linear dimension can silently display a plausible wrong number. The area path handles this correctly with an explicit state; the anchor path does not.
+Before this ticket, a removed or duplicated point ID resolved to the closest stored position **without showing a detached state**. A linear dimension could therefore display a plausible wrong number while the area path already used an explicit repair state.
 
 ## Why it matters for 1.0
 
@@ -43,18 +43,18 @@ Preserve current behavior for the value itself. Changing what the fallback *comp
 
 ## Acceptance criteria
 
-- [ ] Anchors carry an explicit resolution status: by ID, by fallback, or unresolvable.
-- [ ] Fallback-resolved and unresolvable anchors are visually distinct in the viewport and in the manager list.
-- [ ] The computed value for a fallback-resolved anchor is unchanged from today — only its presentation changes.
-- [ ] A repair workflow exists for linear anchors and area face bindings.
-- [ ] Repair explains what broke and on which object.
-- [ ] Repair highlights the last known position and can frame the view on it.
-- [ ] Repair suggests a most-likely candidate with a preview and a one-action accept.
-- [ ] Manual picking is available and uses the standard acquisition path.
-- [ ] "Convert to world point" is available for anchors whose source is gone.
-- [ ] Bulk repair handles multiple annotations broken by the same cause.
-- [ ] Every repair is a single undo step and never silently changes an annotation that was not broken.
-- [ ] `DESIGN.md` known risk 2 is updated; README limitations no longer say breakage is invisible.
+- [x] Anchors carry an explicit resolution status: by ID, by fallback, or unresolvable.
+- [x] Fallback-resolved and unresolvable anchors are visually distinct in the viewport and in the manager list.
+- [x] The computed value for a fallback-resolved anchor is unchanged from today — only its presentation changes.
+- [x] A repair workflow exists for linear anchors and area face bindings.
+- [x] Repair explains what broke and on which object.
+- [x] Repair highlights the last known position and can frame the view on it.
+- [x] Repair suggests a most-likely candidate with a preview and a one-action accept.
+- [x] Manual picking is available and uses the standard acquisition path.
+- [x] "Convert to world point" is available for anchors whose source is gone.
+- [x] Bulk repair handles multiple annotations broken by the same cause.
+- [x] Every repair is a single undo step and never silently changes an annotation that was not broken.
+- [x] `DESIGN.md` duplicated-ID risk is updated; README limitations no longer say breakage is invisible.
 
 ## Code map
 
@@ -77,7 +77,7 @@ Preserve current behavior for the value itself. Changing what the fallback *comp
 
 - Changing the fallback resolution algorithm. Surface it now; changing it is separate and would be a minor trigger.
 - Automatic repair without user confirmation. The whole point is that guessing silently is the current problem.
-- Repair for angle sources — same pattern, file as a follow-up once linear and area are proven.
+- A separate angle-specific guessing algorithm. Angle point and two-edge anchors use the same explicit picker/candidate path as linear anchors.
 
 ## Invariants
 

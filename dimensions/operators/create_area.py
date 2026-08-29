@@ -12,6 +12,7 @@ from ..constants import DEFAULT_OFFSET_DISTANCE
 from ..drawing import clear_preview_state, set_preview_state
 from ..interaction import (
     axis_from_event,
+    axis_world_direction,
     continuous_placement_enabled,
     push_undo_step,
     remember_session_context,
@@ -19,8 +20,10 @@ from ..interaction import (
     session_context_changed,
     update_distance_text,
 )
+from ..manipulation import apply_area_label_position
 from ..preferences import get_preferences
-from ..properties import is_dimension_object
+from ..properties import is_dimension_object, is_read_only_dimensions_object
+from ..snap_targets import handle_snap_target_event
 from ..snapping import copy_snap, find_nearest_snap_point, get_mouse_ray, has_view3d_window_region, raycast_from_mouse
 from ..units import parse_distance_input
 
@@ -33,7 +36,7 @@ _AXIS_DIRECTIONS = {
 
 
 def _axis_mouse_world(context, center, axis, mouse_x, mouse_y):
-    direction = _AXIS_DIRECTIONS.get(axis)
+    direction = axis_world_direction(context, axis)
     if direction is None:
         return None
     ray_origin, ray_direction = get_mouse_ray(context, mouse_x, mouse_y)
@@ -53,11 +56,11 @@ def _default_area_direction(normal):
     return direction.normalized() if direction.length > 1e-6 else Vector((1.0, 0.0, 0.0))
 
 
-def _constrained_label_world(center, normal, raw_world, axis, typed_distance=None):
+def _constrained_label_world(center, normal, raw_world, axis, typed_distance=None, context=None):
     center = Vector(center)
     raw_delta = Vector(raw_world) - center
     if axis in _AXIS_DIRECTIONS:
-        direction = _AXIS_DIRECTIONS[axis]
+        direction = axis_world_direction(context, axis)
         signed_distance = raw_delta.dot(direction)
         if typed_distance is not None:
             signed_distance = (-1.0 if signed_distance < 0.0 else 1.0) * typed_distance
@@ -127,6 +130,9 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         if self.continuous_placement and session_context_changed(self, context):
             clear_preview_state()
             return {"CANCELLED"}
+        if handle_snap_target_event(context, event):
+            self._update_preview()
+            return {"RUNNING_MODAL"}
         axis = axis_from_event(event)
         if axis is not None and self.state in {"PICK_FACE", "PLACE_LABEL"}:
             self.placement_axis = axis
@@ -275,16 +281,9 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         props.area_value = result["area"]
         props.area_face_count = result["face_count"]
         props.dimension_type = self.placement_axis
-        label_delta = self.label_snap["world_co"] - result["center"]
-        props.offset_distance = label_delta.length
-        self.offset_distance = label_delta.length
-        props.area_label_direction = tuple(label_delta.normalized()) if label_delta.length > 1e-6 else (1.0, 0.0, 0.0)
-        props.area_placement_locked = True
-        props.presentation_offset = (0.0, 0.0, 0.0)
-        props.placement_initialized = False
         set_object_anchor(props.start, self.source_object, result["center"])
-        set_object_anchor(props.end, self.source_object, self.label_snap["world_co"])
-        annotation.location = self.label_snap["world_co"]
+        apply_area_label_position(annotation, result, self.label_snap["world_co"], self.placement_axis)
+        self.offset_distance = props.offset_distance
         if context.mode == "OBJECT":
             for selected in context.selected_objects:
                 selected.select_set(False)
@@ -347,15 +346,16 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
             self.typed_distance = None
             self.distance_input_valid = False
 
-    def _update_effective_label(self, _context):
+    def _update_effective_label(self, context):
         if self.area_result is None:
             return
         if self.hover_snap is None:
             if self.typed_distance is None:
                 return
-            direction = _AXIS_DIRECTIONS.get(
-                self.placement_axis,
-                _default_area_direction(self.area_result["normal"]),
+            direction = (
+                axis_world_direction(context, self.placement_axis)
+                if self.placement_axis in _AXIS_DIRECTIONS
+                else _default_area_direction(self.area_result["normal"])
             )
             self.hover_snap = {
                 "type": "WORLD",
@@ -369,6 +369,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
             self.hover_snap["world_co"],
             self.placement_axis,
             self.typed_distance,
+            context,
         )
         self.label_snap = copy_snap(self.hover_snap)
         self.label_snap["world_co"] = world
@@ -384,7 +385,12 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         obj = context.view_layer.objects.active
-        return bool(context.mode == "OBJECT" and is_dimension_object(obj) and obj.dimension_props.annotation_kind == "AREA")
+        return bool(
+            context.mode == "OBJECT"
+            and is_dimension_object(obj)
+            and not is_read_only_dimensions_object(obj)
+            and obj.dimension_props.annotation_kind == "AREA"
+        )
 
     def invoke(self, context, _event):
         self.annotation_name = context.view_layer.objects.active.name
@@ -404,6 +410,9 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
         if annotation is None or not has_view3d_window_region(context):
             clear_preview_state()
             return {"CANCELLED"}
+        if handle_snap_target_event(context, event):
+            self._update_preview(context)
+            return {"RUNNING_MODAL"}
         result = evaluate_area_binding(annotation.dimension_props)
         if result is None:
             self.report(messages.WARNING, messages.AREA_SOURCE_INVALID)
@@ -412,7 +421,7 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
         axis = axis_from_event(event)
         if axis is not None:
             self.placement_axis = axis
-            self._update_effective_snap(result)
+            self._update_effective_snap(result, context)
             self._update_preview(context)
             return {"RUNNING_MODAL"}
         new_text, handled = update_distance_text(self.distance_text, event)
@@ -428,7 +437,7 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
             else:
                 self.typed_distance = None
                 self.distance_input_valid = True
-            self._update_effective_snap(result)
+            self._update_effective_snap(result, context)
             self._update_preview(context)
             return {"RUNNING_MODAL"}
         if event.type == "MOUSEMOVE":
@@ -455,23 +464,16 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
                     plane_point=result["center"],
                     plane_normal=result["normal"],
                 )
-            self._update_effective_snap(result)
+            self._update_effective_snap(result, context)
             self._update_preview(context)
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "PRESS" and self.hover_snap is not None:
             if self.distance_text and not self.distance_input_valid:
                 self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
                 return {"RUNNING_MODAL"}
-            props = annotation.dimension_props
-            set_object_anchor(props.end, props.area_source_object, self.hover_snap["world_co"])
-            props.dimension_type = self.placement_axis
-            label_delta = self.hover_snap["world_co"] - result["center"]
-            props.offset_distance = label_delta.length
-            props.area_label_direction = tuple(label_delta.normalized()) if label_delta.length > 1e-6 else (1.0, 0.0, 0.0)
-            props.area_placement_locked = True
-            props.presentation_offset = (0.0, 0.0, 0.0)
-            props.placement_initialized = False
-            annotation.location = self.hover_snap["world_co"]
+            apply_area_label_position(
+                annotation, result, self.hover_snap["world_co"], self.placement_axis,
+            )
             clear_preview_state()
             return {"FINISHED"}
         if event.type in {"RIGHTMOUSE", "ESC"} and event.value == "PRESS":
@@ -503,13 +505,14 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
             "hover_screen": None if self.hover_snap is None else self.hover_snap["screen_co"],
         })
 
-    def _update_effective_snap(self, result):
+    def _update_effective_snap(self, result, context):
         if self.raw_snap is None:
             if self.typed_distance is None:
                 return
-            direction = _AXIS_DIRECTIONS.get(
-                self.placement_axis,
-                _default_area_direction(result["normal"]),
+            direction = (
+                axis_world_direction(context, self.placement_axis)
+                if self.placement_axis in _AXIS_DIRECTIONS
+                else _default_area_direction(result["normal"])
             )
             self.raw_snap = {
                 "type": "WORLD",
@@ -524,4 +527,5 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
             self.raw_snap["world_co"],
             self.placement_axis,
             self.typed_distance,
+            context,
         )

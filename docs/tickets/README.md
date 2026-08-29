@@ -33,11 +33,11 @@ Acceptance checkboxes inside a ticket define its intended scope; they are not ma
 
 | Milestone | Status | Delivered | Remaining |
 | --- | --- | --- | --- |
-| M1 — Foundation | 🟨 Partial | `FND-01` through `FND-06` and `FND-08` through `FND-10` in 0.3.0 | `FND-07` foreground QA remains; `FND-11` is an M2 performance follow-up. |
-| M2 — Fluency | 🟨 Partial | `UX-01`, `UX-08` in 0.3.1 | `FND-11` is next; `UX-02` through `UX-07` remain. |
-| M3 — Construction | ⬜ Planned | — | `CON-01` through `CON-04`. |
-| M4 — Output | 🟨 Partial | `OUT-01` in 0.4.0; angle/area `OUT-04` in 0.4.1 | `OUT-03` is next; `OUT-02` follows. |
-| M5 — Documentation-grade | 🟨 Partial | Architectural ticks in 0.3.2; Outside Start placement in 0.4.1 | Remaining `DIM-04` plus `DIM-01` through `DIM-03`. |
+| M1 — Foundation | ✅ Complete | `FND-01` through `FND-10`; expanded `FND-07` background matrix and two-window foreground QA completed in 0.4.2 | — |
+| M2 — Fluency | 🟨 Partial | `UX-01`, `UX-08` in 0.3.1; `FND-11`, `UX-02`, `UX-03`, `UX-07` in 0.4.2; `UX-04`, `UX-06` in 0.4.3 | Final `UX-05` QA. |
+| M3 — Construction | ✅ Complete | `CON-01`, `CON-02` in 0.4.3; validated `CON-03` and `CON-04` in 0.5.0 | — |
+| M4 — Output | ✅ Complete | `OUT-01` in 0.4.0; angle/area `OUT-04` in 0.4.1; `OUT-02` and `OUT-03` in 0.4.2 | — |
+| M5 — Documentation-grade | ✅ Complete | Architectural ticks in 0.3.2; Outside Start placement in 0.4.1; `DIM-01`, `DIM-02`, `DIM-04` in 0.4.3; validated `DIM-03` in 0.5.0 | — |
 
 ## Index
 
@@ -53,12 +53,12 @@ Invisible to users, blocking for everything else. Build here before building on 
 | [FND-04](FND-04-addon-preferences.md) | Add-on preferences | ✅ Complete | 0.3.0 | M | — |
 | [FND-05](FND-05-keymaps.md) | Registered, customizable keymaps | ✅ Complete | 0.3.0 | M | FND-01, FND-04 |
 | [FND-06](FND-06-modal-testing.md) | Make modal operators testable, then test them | ✅ Complete | 0.3.0 | L | — |
-| [FND-07](FND-07-lifecycle-hardening.md) | Lifecycle hardening: undo, append, link, multi-scene | 🟨 Partial | Background path in 0.3.0 | M | FND-02 |
+| [FND-07](FND-07-lifecycle-hardening.md) | Lifecycle hardening: undo, append, link, multi-scene | ✅ Complete | Background path in 0.3.0; expanded matrix and foreground QA in 0.4.2 | M | FND-02 |
 | [FND-08](FND-08-snap-performance.md) | Snap performance budgets on dense scenes | ✅ Complete | 0.3.0 | M | — |
 | [FND-09](FND-09-posix-scripts.md) | Cross-platform build and validate scripts | ✅ Complete | 0.3.0 | S | — |
 | [FND-10](FND-10-error-reporting.md) | Consistent, actionable error reporting | ✅ Complete | 0.3.0 | S | — |
 
-M1 implementation is delivered, but `FND-07` remains partial until append/link and two-window foreground QA are recorded. [FND-11](FND-11-snap-cache-build-cost.md) was filed out of `FND-08`: query and draw budgets are met and measured, but building the projected snap cache on a 1M-vertex scene misses its budget. It carries into M2 rather than blocking the shipped foundation, because scenes at or below 100k vertices are within budget today.
+M1 is complete. `FND-07` covers append, link, library overrides, actual undo/redo, deletion, duplication, and two-scene synchronization in Blender 5.2 background tests, plus foreground isolation across two main windows. [FND-11](FND-11-snap-cache-build-cost.md), carried from `FND-08`, now meets its build, reprojection, and query budgets through bulk arrays and compact viewport indexing.
 
 ### M2 — Fluency
 
@@ -66,50 +66,50 @@ The difference between a tool that works and one people keep using.
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [FND-11](FND-11-snap-cache-build-cost.md) | Bring projected snap-cache build within budget | ⏭ Next | — | M | FND-08 |
+| [FND-11](FND-11-snap-cache-build-cost.md) | Bring projected snap-cache build within budget | ✅ Complete | 0.4.2 | M | FND-08 |
 | [UX-01](UX-01-continuous-placement.md) | Continuous placement with a persistent Auto/X/Y/Z session mode | ✅ Complete | 0.3.1 | M | — |
-| [UX-02](UX-02-annotation-manager.md) | Annotation manager: list, search, isolate, repair, restyle | ⬜ Planned | — | L | — |
-| [UX-03](UX-03-inference-engine.md) | Inference: parallel, perpendicular, extension, intersection, local axis | ⬜ Planned | — | L | FND-08 |
-| [UX-04](UX-04-direct-handles.md) | Direct viewport handles for placement, radius, and offset | ⬜ Planned | — | M | FND-01 |
-| [UX-05](UX-05-snap-control.md) | User control over which snap targets are active | ⬜ Planned | — | S | FND-04 |
-| [UX-06](UX-06-hover-measurement.md) | Transient hover measurement with delta X/Y/Z | ⬜ Planned | — | M | — |
-| [UX-07](UX-07-guided-repair.md) | Guided repair for broken anchors and area bindings | ⛔ Blocked | — | M | UX-02 |
+| [UX-02](UX-02-annotation-manager.md) | Annotation manager: list, search, isolate, repair, restyle | ✅ Complete | 0.4.2 | L | — |
+| [UX-03](UX-03-inference-engine.md) | Inference: parallel, perpendicular, extension, intersection, local axis | ✅ Complete | 0.4.2 | L | FND-08 |
+| [UX-04](UX-04-direct-handles.md) | Direct viewport handles for placement, radius, and offset | ✅ Complete | 0.4.3 | M | FND-01 |
+| [UX-05](UX-05-snap-control.md) | User control over which snap targets are active | 🟨 Partial | 0.4.2 | S | FND-04 |
+| [UX-06](UX-06-hover-measurement.md) | Transient hover measurement with delta X/Y/Z | ✅ Complete | 0.4.3 | M | — |
+| [UX-07](UX-07-guided-repair.md) | Guided repair for broken anchors and area bindings | ✅ Complete | 0.4.2 | M | UX-02 |
 | [UX-08](UX-08-stable-overlay-sizing.md) | Verify and enforce stable screen-space label sizing | ✅ Complete | 0.3.1 | S | — |
 
 ### M3 — Construction
 
 Snapping lines and points as a first-class way to build dimensionally, not just to annotate.
 
-| ID | Title | Status | Effort | Depends on |
-| --- | --- | --- | --- | --- |
-| [CON-01](CON-01-guide-points.md) | Guide points | ⬜ Planned | M | — |
-| [CON-02](CON-02-offset-guides.md) | Offset and parallel guides at a typed distance | ⛔ Blocked | M | CON-01 |
-| [CON-03](CON-03-guide-planes.md) | Guide planes and an active construction plane | ⛔ Blocked | L | CON-02 |
-| [CON-04](CON-04-angular-guides-spacing.md) | Angular guides and repeated spacing | ⛔ Blocked | M | CON-02 |
+| ID | Title | Status | Delivered | Effort | Depends on |
+| --- | --- | --- | --- | --- | --- |
+| [CON-01](CON-01-guide-points.md) | Guide points | ✅ Complete | 0.4.3 | M | — |
+| [CON-02](CON-02-offset-guides.md) | Offset and parallel guides at a typed distance | ✅ Complete | 0.4.3 | M | CON-01 |
+| [CON-03](CON-03-guide-planes.md) | Guide planes and an active construction plane | ✅ Complete | 0.5.0 | L | CON-02 |
+| [CON-04](CON-04-angular-guides-spacing.md) | Angular guides and repeated spacing | ✅ Complete | 0.5.0 | M | CON-02 |
 
 ### M4 — Output
 
-Milestone numbers group related work; they are not a strict delivery queue. The focused `UX-01` and `UX-08` work shipped in 0.3.1, architectural ticks in 0.3.2, linear Grease Pencil generation in 0.4.0, and angle/area generation in 0.4.1. `OUT-02` and `OUT-03` retain their existing scopes and dependencies.
+Milestone numbers group related work; they are not a strict delivery queue. The focused `UX-01` and `UX-08` work shipped in 0.3.1, architectural ticks in 0.3.2, linear Grease Pencil generation in 0.4.0, angle/area generation in 0.4.1, named styles plus scale-correct SVG/PDF export in 0.4.2, and direct presentation handles, transient tape measurement, guide points, and chain/baseline sets in 0.4.3.
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | [OUT-01](OUT-01-grease-pencil-output.md) | Render path via generated Grease Pencil | ✅ Complete | 0.4.0 | L | FND-03 |
-| [OUT-02](OUT-02-vector-export.md) | SVG and PDF vector export | ⬜ Planned | — | L | OUT-01 |
-| [OUT-03](OUT-03-styles.md) | Named, reusable annotation styles | ⏭ Next | — | M | FND-02 |
+| [OUT-02](OUT-02-vector-export.md) | SVG and PDF vector export | ✅ Complete | 0.4.2 | L | OUT-01 |
+| [OUT-03](OUT-03-styles.md) | Named, reusable annotation styles | ✅ Complete | 0.4.2 | M | FND-02 |
 | [OUT-04](OUT-04-angle-area-output.md) | Extend generated output to angle and area annotations | ✅ Complete | 0.4.1 | M | OUT-01 |
 
 ### M5 — Documentation-grade dimensions
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [DIM-01](DIM-01-chain-baseline.md) | Chain and baseline dimensions | ⬜ Planned | — | M | UX-01 |
-| [DIM-02](DIM-02-radial-diameter-arc.md) | Radial, diameter, and arc-length dimensions | ⬜ Planned | — | M | — |
-| [DIM-03](DIM-03-coordinate-elevation.md) | Coordinate and elevation dimensions | ⬜ Planned | — | M | — |
-| [DIM-04](DIM-04-presentation-controls.md) | Drafting presentation controls: ticks, arrows, units, and alignment | 🟨 Partial | Ticks in 0.3.2; Outside Start in 0.4.1 | M | OUT-03 for remaining work |
+| [DIM-01](DIM-01-chain-baseline.md) | Chain and baseline dimensions | ✅ Complete | 0.4.3 | M | UX-01 |
+| [DIM-02](DIM-02-radial-diameter-arc.md) | Radial, diameter, and arc-length dimensions | ✅ Complete | 0.4.3 | M | — |
+| [DIM-03](DIM-03-coordinate-elevation.md) | Coordinate and elevation dimensions | ✅ Complete | 0.5.0 | M | — |
+| [DIM-04](DIM-04-presentation-controls.md) | Drafting presentation controls: ticks, arrows, units, and alignment | ✅ Complete | 0.4.3 | M | OUT-03 |
 
 ## Suggested order
 
-The M1 implementation, `UX-01`, `UX-08`, the architectural-tick slice, `OUT-01`, and angle/area `OUT-04` are delivered; `FND-07` still carries foreground QA. Next, complete reusable styles in `OUT-03` and the `FND-11` performance follow-up. `OUT-03` then unlocks the broader remaining `DIM-04` presentation work. Other M2 and M3 tickets can proceed alongside those workstreams.
+M1, M3, M4, M5, `FND-11`, `UX-01` through `UX-04`, and `UX-06` through `UX-08` are delivered. Final `UX-05` foreground disable/re-enable QA remains, alongside the release-QA items recorded in `DESIGN.md`.
 
 ## Effort key
 

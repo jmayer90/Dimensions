@@ -1,7 +1,7 @@
 # DIM-01 — Chain and baseline dimensions
 
 **Milestone:** M5 Documentation-grade
-**Status:** ⬜ Planned.
+**Status:** ✅ Complete — persistent chain and baseline sets delivered and verified on Blender 5.2.
 **Effort:** M
 **Depends on:** UX-01
 **Version impact:** Patch. Additive.
@@ -40,29 +40,28 @@ This is the same definition-versus-instance decision as `CON-04`'s spaced guides
 
 ## Acceptance criteria
 
-- [ ] A chain dimension set can be created by picking a datum then successive points, committing each segment as it is placed.
-- [ ] A baseline dimension set can be created by picking a datum then successive points, each stacking one offset further out.
-- [ ] Set members share direction and dimension line, and stay aligned when source geometry moves.
-- [ ] Baseline offset spacing derives from text size by default and never overlaps labels at default settings; it is user-adjustable.
-- [ ] Inserting a point mid-chain renumbers and reflows subsequent members.
-- [ ] Deleting a member closes the chain correctly.
-- [ ] Changing the shared offset moves every member.
-- [ ] A set appears as one entry in the `UX-02` manager, expandable to members.
-- [ ] Short segments do not produce overlapping labels, or the limitation is documented.
-- [ ] Members use existing anchor types and enter repair states individually per `UX-07`.
-- [ ] Each creation step is a single undo step.
-- [ ] Sets generate correctly through `OUT-01` if it has landed.
-- [ ] Schema changes go through the `FND-02` migration framework.
-- [ ] README and `DESIGN.md` document both types.
+- [x] A chain dimension set can be created by picking a datum then successive points, committing each segment as it is placed.
+- [x] A baseline dimension set can be created by picking a datum then successive points, each stacking one offset further out.
+- [x] Set members share direction and dimension line, and stay aligned when source geometry moves.
+- [x] Baseline offset spacing derives from text size by default and never overlaps labels at default settings; it is user-adjustable.
+- [x] Inserting a point mid-chain renumbers and reflows subsequent members.
+- [x] Deleting a member closes the chain correctly.
+- [x] Changing the shared offset moves every member.
+- [x] A set appears as one entry in the `UX-02` manager, expandable to members.
+- [x] Short segments do not produce overlapping labels, or the limitation is documented.
+- [x] Members use existing anchor types and enter repair states individually per `UX-07`.
+- [x] Each creation step is a single undo step.
+- [x] Sets generate correctly through `OUT-01` if it has landed.
+- [x] Schema changes go through the `FND-02` migration framework.
+- [x] README and `DESIGN.md` document both types.
 
 ## Code map
 
-- `dimensions/properties.py` — set property group and member storage.
-- `dimensions/operators/create_dimension.py` — creation flow to extend.
-- `dimensions/dimension_geometry.py` — shared dimension line and stacked offset geometry.
-- `dimensions/drawing.py` — set rendering and label collision handling.
-- `dimensions/interaction.py` — continuous placement from `UX-01`.
-- `dimensions/ui.py` — set editing.
+- `dimensions/properties.py` — set kind, ordered member anchors, shared offset, spacing, and active member storage.
+- `dimensions/operators/dimension_set.py` — continuous creation plus insert/delete editing.
+- `dimensions/dimension_sets.py` — shared direction, stacked baseline geometry, reflow, and member-local state.
+- `dimensions/drawing.py`, `dimensions/output_geometry.py` — overlay collision handling and Grease Pencil/vector strokes.
+- `dimensions/annotation_manager.py`, `dimensions/repair.py`, `dimensions/ui.py` — one-row expandable management and member-local repair/editing.
 
 ## Verification
 
@@ -71,6 +70,13 @@ This is the same definition-versus-instance decision as `CON-04`'s spaced guides
 - A test that moving source geometry keeps members aligned.
 - A test that a member entering a repair state does not break the rest of the set.
 - Label collision tests at small segment lengths.
+
+`tests/dimension_set_smoke.py` verifies the persistent one-object model, shared
+chain alignment, automatic and explicit baseline spacing, insert/delete reflow,
+source motion, member-local repair state, one-row manager representation,
+per-member undo dispatch, and OUT-01 stroke generation. `tests/blender_lifecycle.py`
+opens the released schema-v2 fixture through the sequential v6 → v7 → v8 path
+and performs a real save/reload of a populated chain set.
 
 ## Out of scope
 

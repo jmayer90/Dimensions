@@ -106,3 +106,43 @@ class PointPlacementState:
         self.axis = self.DEFAULT_AXIS
         self.clear_numeric()
         return "CANCELLED"
+
+
+class HandleManipulationState:
+    """Pure one-stage contract for selected-annotation presentation handles."""
+
+    VALID_AXES = ("ALIGNED", "X", "Y", "Z")
+
+    def __init__(self, axis="ALIGNED"):
+        self.axis = axis if axis in self.VALID_AXES else "ALIGNED"
+        self.numeric_text = ""
+        self.numeric_valid = True
+        self.cancelled = False
+
+    def set_axis(self, axis):
+        if axis not in self.VALID_AXES:
+            return "NO_ACTION"
+        self.axis = axis
+        return "AXIS_SET"
+
+    def set_numeric_text(self, text, valid=True):
+        self.numeric_text = text
+        self.numeric_valid = True if not text.strip() else bool(valid)
+        return "NUMERIC_UPDATED"
+
+    def confirm(self):
+        if self.numeric_text.strip() and not self.numeric_valid:
+            return "NUMERIC_INVALID"
+        return "COMMITTED"
+
+    def escape(self):
+        if self.numeric_text:
+            self.numeric_text = ""
+            self.numeric_valid = True
+            return "NUMERIC_CLEARED"
+        self.cancelled = True
+        return "CANCELLED"
+
+    def cancel(self):
+        self.cancelled = True
+        return "CANCELLED"

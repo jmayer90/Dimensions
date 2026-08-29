@@ -1,7 +1,7 @@
 # FND-08 — Snap performance budgets on dense scenes
 
 **Milestone:** M1 Foundation
-**Status:** ✅ Complete — budgets and measurements delivered in 0.3.0; `FND-11` tracks the missed cache-build budget.
+**Status:** ✅ Complete — budgets and measurements delivered in 0.3.0; the `FND-11` cache-build follow-up is also complete.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch.

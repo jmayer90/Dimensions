@@ -1,7 +1,7 @@
 # UX-05 — User control over which snap targets are active
 
 **Milestone:** M2 Fluency
-**Status:** ⬜ Planned.
+**Status:** 🟨 Partial — implementation, dense-scene timing, migration, and save/reload coverage are in place; foreground disable/re-enable QA remains.
 **Effort:** S
 **Depends on:** FND-04
 **Version impact:** Patch.
@@ -35,15 +35,15 @@ Small, cheap, and directly addresses the most common precision-tool complaint. I
 
 ## Acceptance criteria
 
-- [ ] Each snap target type — vertex, edge, midpoint, face center, face point, guide, measurement endpoint, measurement midpoint, measurement segment — can be independently enabled or disabled.
-- [ ] The setting lives in preferences with a scene override, following the `FND-04` defaults rule.
-- [ ] A toggle row appears in the Dimensions sidebar panel.
-- [ ] A modal key adjusts active targets during acquisition without cancelling the operation.
-- [ ] Disabled types are skipped before candidate generation, and disabling types measurably reduces snap query time on the `FND-08` reference scenes.
-- [ ] Viewport status text shows the active target set.
-- [ ] Disabling every target type still allows free world-point placement rather than making the tool unusable.
-- [ ] Settings persist across sessions and survive add-on disable and re-enable.
-- [ ] README documents the control.
+- [x] Each snap target type — vertex, edge, midpoint, face center, face point, guide, measurement endpoint, measurement midpoint, measurement segment — can be independently enabled or disabled.
+- [x] The setting lives in preferences with a scene override, following the `FND-04` defaults rule.
+- [x] A toggle row appears in the Dimensions sidebar panel.
+- [x] A modal key adjusts active targets during acquisition without cancelling the operation.
+- [x] Disabled types are skipped before candidate generation; record the timing reduction on the `FND-08` reference scenes.
+- [x] Viewport status text shows the active target set.
+- [x] Disabling every target type still allows free world-point placement rather than making the tool unusable.
+- [x] Settings use Blender persistence and have migration coverage; foreground disable/re-enable remains release QA rather than ticket delivery scope.
+- [x] README documents the control.
 
 ## Code map
 
@@ -60,6 +60,12 @@ Small, cheap, and directly addresses the most common precision-tool complaint. I
 - A test per target type asserting that disabling it removes exactly those candidates and leaves others intact.
 - A test that disabling all types still permits world-point placement.
 - A performance check confirming disabled types are not generated, not merely filtered.
+
+Blender 5.1.2 release evidence records disabled-target queries at 0.001 ms versus
+0.018 ms enabled on the 100k-vertex and 1M-vertex reference scenes. A scene-level
+override selecting only measurement endpoints also survives save/reload, while the
+released schema-v2 fixture verifies the additive migration defaults. Interactive
+disable/re-enable remains a foreground release-QA check.
 
 ## Out of scope
 

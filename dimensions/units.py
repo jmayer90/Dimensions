@@ -1,4 +1,4 @@
-from math import floor, gcd
+from math import floor, gcd, pi
 import re
 
 import bpy
@@ -56,6 +56,22 @@ def parse_distance_input(context, text):
     return meters / (unit_settings.scale_length or 1.0)
 
 
+def parse_angle_input(context, text):
+    """Parse an angle into radians, accepting explicit degrees or radians."""
+    value_text = text.strip().lower().replace("°", "deg")
+    if not value_text:
+        raise ValueError("Angle input is empty")
+    match = re.fullmatch(r"([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(deg|degree|degrees|rad|radian|radians)?", value_text)
+    if match is None:
+        raise ValueError(f"Invalid angle: {text}")
+    value = float(match.group(1))
+    unit = match.group(2)
+    if unit is None:
+        rotation = getattr(getattr(context, "scene", None), "unit_settings", None)
+        unit = "rad" if getattr(rotation, "system_rotation", "DEGREES") == "RADIANS" else "deg"
+    return value if unit.startswith("rad") else value * pi / 180.0
+
+
 def infer_unit_style(context):
     unit_settings = context.scene.unit_settings
 
@@ -79,12 +95,12 @@ def infer_unit_style(context):
     return "INCH_FRACTION"
 
 
-def format_length(context, value, precision=3):
+def format_length(context, value, precision=3, unit_style=None):
     settings = get_display_settings(context)
     if settings is None:
         return _format_blender_units(context, value, precision)
 
-    style = get_configured_unit_style(context)
+    style = unit_style or get_configured_unit_style(context)
     if style == "AUTO":
         style = infer_unit_style(context)
 
@@ -115,6 +131,29 @@ def format_length(context, value, precision=3):
         return format_inches_fraction(context, value, denominator)
 
     return _format_blender_units(context, value, precision)
+
+
+def format_dual_length(
+    context,
+    value,
+    precision=3,
+    unit_style=None,
+    secondary_unit_style="NONE",
+    secondary_precision=2,
+    arrangement="BRACKETS",
+):
+    """Format a primary length and an optional independently formatted secondary value."""
+    primary = format_length(context, value, precision, unit_style)
+    if not secondary_unit_style or secondary_unit_style == "NONE":
+        return primary
+    secondary = format_length(
+        context, value, secondary_precision, secondary_unit_style,
+    )
+    if arrangement == "STACKED":
+        return f"{primary}\n{secondary}"
+    if arrangement == "PARENTHESES":
+        return f"{primary} ({secondary})"
+    return f"{primary} [{secondary}]"
 
 
 def format_volume(context, value, precision=3):
@@ -153,9 +192,9 @@ def format_volume(context, value, precision=3):
     return _format_blender_volume(context, value, precision)
 
 
-def format_area(context, value, precision=3):
+def format_area(context, value, precision=3, unit_style=None):
     settings = get_display_settings(context)
-    style = get_configured_unit_style(context) if settings is not None else "BLENDER"
+    style = unit_style or (get_configured_unit_style(context) if settings is not None else "BLENDER")
     if style == "AUTO":
         style = infer_unit_style(context)
     square_meters = value * (context.scene.unit_settings.scale_length or 1.0) ** 2

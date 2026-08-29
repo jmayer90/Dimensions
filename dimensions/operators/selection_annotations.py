@@ -188,7 +188,7 @@ class DIMENSIONS_OT_CaptureArea(bpy.types.Operator):
             and hasattr(obj, "dimension_props")
             and obj.dimension_props.enabled
             and obj.dimension_props.annotation_kind == "AREA"
-            and obj.dimension_props.measurement_state == "LIVE"
+            and obj.dimension_props.measurement_state in {"LIVE", "FALLBACK"}
         )
 
     def execute(self, context):

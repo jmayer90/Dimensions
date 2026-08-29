@@ -7,11 +7,12 @@ from .constants import (
     DIMENSION_COLLECTION_NAME,
     GUIDE_COLLECTION_NAME,
 )
-from .properties import apply_scene_style_to_dimension
+from .properties import apply_scene_style_to_dimension, clear_dimension_style_overrides
 from .preferences import get_preferences
 
 
 MEASUREMENT_SNAP_PROXY_FLAG = "dimensions_measurement_snap_proxy"
+GUIDE_POINT_SNAP_PROXY_FLAG = "dimensions_guide_point_snap_proxy"
 
 
 def _collection_in_scene(scene, collection):
@@ -76,10 +77,20 @@ def create_dimension_object(context, name="DIM Dimension"):
     collection.objects.link(dimension_object)
 
     if hasattr(dimension_object, "dimension_props"):
+        from .transform_policy import enforce_annotation_transform_policy
+
+        enforce_annotation_transform_policy(dimension_object)
+        # Scene synchronization distinguishes a freshly created locator from a
+        # legacy object whose pre-schema location may be a meaningful offset.
+        # Operators place new locators on their canonical geometry before the
+        # first sync; an untouched new locator should be moved there rather
+        # than interpreting the origin as a user-authored displacement.
+        dimension_object["_dimensions_new_locator"] = True
         dimension_object.dimension_props.enabled = True
         settings = getattr(context.scene, "dimensions_settings", None)
         if settings is not None:
             apply_scene_style_to_dimension(settings, dimension_object.dimension_props)
+            clear_dimension_style_overrides(dimension_object.dimension_props)
         from .migrations import stamp_scene_if_needed
 
         stamp_scene_if_needed(context.scene)
@@ -114,6 +125,80 @@ def create_measurement_object(context, name="MEASURE Construction Segment"):
     measurement_object.guide_props.kind = "MEASUREMENT"
     measurement_object.guide_props.axis = "ALIGNED"
     return measurement_object
+
+
+def create_guide_point_object(context, name="POINT Construction Point"):
+    point_object = create_guide_object(context, name)
+    point_object.guide_props.kind = "POINT"
+    point_object.guide_props.axis = "ALIGNED"
+    return point_object
+
+
+def create_guide_plane_object(context, name="PLANE Construction Plane"):
+    plane_object = create_guide_object(context, name)
+    plane_object.guide_props.kind = "PLANE"
+    plane_object.guide_props.axis = "ALIGNED"
+    return plane_object
+
+
+def ensure_guide_point_snap_proxy(point_object, scene=None):
+    """Expose a guide point to Blender's native vertex snapper."""
+    if (
+        point_object is None
+        or not hasattr(point_object, "guide_props")
+        or not point_object.guide_props.enabled
+        or getattr(point_object.guide_props, "kind", "GUIDE") != "POINT"
+    ):
+        return None
+    point_world = resolve_anchor(point_object.guide_props.start)
+    if point_world is None:
+        return None
+    flagged = [child for child in point_object.children if child.get(GUIDE_POINT_SNAP_PROXY_FLAG, False)]
+    proxy = next((child for child in flagged if child.type == "MESH"), None)
+    for duplicate in flagged:
+        if duplicate == proxy:
+            continue
+        duplicate_mesh = duplicate.data if duplicate.type == "MESH" else None
+        bpy.data.objects.remove(duplicate, do_unlink=True)
+        if duplicate_mesh is not None and duplicate_mesh.users == 0:
+            bpy.data.meshes.remove(duplicate_mesh)
+    if proxy is None:
+        mesh = bpy.data.meshes.new(f"{point_object.name} Snap Target")
+        proxy = bpy.data.objects.new(f"{point_object.name} Snap Target", mesh)
+        for collection in point_object.users_collection:
+            collection.objects.link(proxy)
+        proxy.parent = point_object
+        proxy.matrix_parent_inverse = point_object.matrix_world.inverted_safe()
+        proxy[GUIDE_POINT_SNAP_PROXY_FLAG] = True
+        proxy.hide_render = True
+        proxy.hide_select = True
+        proxy.display_type = "WIRE"
+        proxy.show_in_front = True
+    elif proxy.data.users > 1:
+        proxy.data = proxy.data.copy()
+    proxy.matrix_world = point_object.matrix_world.copy()
+    local_point = proxy.matrix_world.inverted_safe() @ point_world
+    if len(proxy.data.vertices) != 1 or (proxy.data.vertices[0].co - local_point).length > 1e-6:
+        proxy.data.clear_geometry()
+        proxy.data.from_pydata([local_point], [], [])
+        proxy.data.update()
+    if scene is None:
+        scene = getattr(getattr(bpy, "context", None), "scene", None)
+    settings = getattr(scene, "dimensions_settings", None)
+    globally_visible = settings is None or settings.show_construction_guides
+    try:
+        point_hidden = point_object.hide_get()
+    except (AttributeError, RuntimeError):
+        point_hidden = False
+    should_hide = (
+        not point_object.guide_props.visible or not globally_visible
+        or point_object.hide_viewport or point_hidden
+    )
+    try:
+        proxy.hide_set(should_hide)
+    except (AttributeError, RuntimeError):
+        proxy.hide_viewport = should_hide
+    return proxy
 
 
 def ensure_measurement_snap_proxy(measurement_object, scene=None):
@@ -205,6 +290,16 @@ def remove_measurement_snap_proxies(measurement_object):
             bpy.data.meshes.remove(mesh)
 
 
+def remove_guide_point_snap_proxies(point_object):
+    for child in list(getattr(point_object, "children", ())):
+        if not child.get(GUIDE_POINT_SNAP_PROXY_FLAG, False):
+            continue
+        mesh = child.data if child.type == "MESH" else None
+        bpy.data.objects.remove(child, do_unlink=True)
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+
 def remove_orphan_measurement_snap_proxies(scene):
     for obj in list(scene.objects):
         if not obj.get(MEASUREMENT_SNAP_PROXY_FLAG, False):
@@ -216,6 +311,23 @@ def remove_orphan_measurement_snap_proxies(scene):
             and hasattr(parent, "guide_props")
             and parent.guide_props.enabled
             and getattr(parent.guide_props, "kind", "GUIDE") == "MEASUREMENT"
+        ):
+            continue
+        mesh = obj.data if obj.type == "MESH" else None
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+
+def remove_orphan_guide_point_snap_proxies(scene):
+    for obj in list(scene.objects):
+        if not obj.get(GUIDE_POINT_SNAP_PROXY_FLAG, False):
+            continue
+        parent = obj.parent
+        if (
+            parent is not None and obj.type == "MESH"
+            and hasattr(parent, "guide_props") and parent.guide_props.enabled
+            and getattr(parent.guide_props, "kind", "GUIDE") == "POINT"
         ):
             continue
         mesh = obj.data if obj.type == "MESH" else None
