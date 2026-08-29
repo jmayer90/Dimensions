@@ -72,6 +72,10 @@ jobs:
         shell: powershell
         env:
           BLENDER_DIR: ${{ runner.temp }}/blender
+          # Hosted Windows runners expose no stable WGL device; Blender can crash
+          # before returning an unsupported-engine result. Linux and macOS retain
+          # the Eevee/Cycles render assertions while Windows runs every other gate.
+          DIMENSIONS_SKIP_RENDER_TESTS: "1"
         run: powershell -ExecutionPolicy Bypass -File scripts\validate.ps1 -Blender "$env:BLENDER_DIR\blender.exe"
       - name: Validate (Linux)
         if: runner.os == 'Linux'

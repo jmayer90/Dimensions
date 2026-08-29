@@ -1,5 +1,6 @@
 """Focused Blender smoke tests for the OUT-01 generation workflow."""
 
+import os
 import sys
 import tempfile
 import unittest
@@ -322,6 +323,10 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
         self.assertIsNot(replaced_area, original_area)
         self.assertIs(generated_output_objects(self.scene, angle_key)[0], replaced_angle)
 
+    @unittest.skipIf(
+        os.environ.get("DIMENSIONS_SKIP_RENDER_TESTS") == "1",
+        "GPU render engines are unavailable on this runner",
+    )
     def test_mixed_annotations_render_in_eevee_and_cycles(self):
         self._remove_existing_output()
         settings = self.scene.dimensions_settings

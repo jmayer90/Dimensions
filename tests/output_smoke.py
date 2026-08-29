@@ -1,5 +1,6 @@
 """Focused Blender smoke tests for the isolated OUT-01 output backend."""
 
+import os
 import sys
 import tempfile
 import unittest
@@ -187,6 +188,10 @@ class DimensionsOutputSmokeTests(unittest.TestCase):
             if other_collection is not None and other_collection.users == 0:
                 bpy.data.collections.remove(other_collection)
 
+    @unittest.skipIf(
+        os.environ.get("DIMENSIONS_SKIP_RENDER_TESTS") == "1",
+        "GPU render engines are unavailable on this runner",
+    )
     def test_generated_strokes_render_in_eevee_and_cycles_when_available(self):
         output = generate_grease_pencil_output(
             self.scene,
