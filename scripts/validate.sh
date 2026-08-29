@@ -59,8 +59,9 @@ cd "$root"
 "$blender" --background --factory-startup --command extension validate dimensions
 "$root/scripts/build_extension.sh" --blender "$blender"
 
-archive="$(find "$root/builds" -maxdepth 1 -type f -name 'dimensions-*.zip' -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)"
-if [[ -z "$archive" ]]; then
+version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*$/\1/p' "$root/dimensions/blender_manifest.toml")"
+archive="$root/builds/dimensions-$version.zip"
+if [[ -z "$version" || ! -f "$archive" ]]; then
     echo "Extension archive was not created" >&2
     exit 1
 fi
