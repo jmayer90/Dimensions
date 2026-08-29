@@ -38,6 +38,12 @@ jobs:
           fi
           echo "VERSION=$manifest_version" >> "$GITHUB_ENV"
 
+      - name: Install Blender runtime libraries
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libegl1
+
       - name: Download Blender
         shell: bash
         env:

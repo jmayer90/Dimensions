@@ -28,6 +28,12 @@ jobs:
       BLENDER_SERIES: ${{ matrix.blender.series }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install Blender runtime libraries (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libegl1
       - name: Download Blender (Windows)
         if: runner.os == 'Windows'
         shell: powershell
