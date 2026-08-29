@@ -41,7 +41,8 @@ jobs:
           BLENDER_DIR: ${{ runner.temp }}/blender
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "blender.zip"
-          Invoke-WebRequest "https://download.blender.org/release/Blender$env:BLENDER_SERIES/blender-$env:BLENDER_VERSION-windows-x64.zip" -OutFile $archive
+          curl.exe --fail --location "https://download.blender.org/release/Blender$env:BLENDER_SERIES/blender-$env:BLENDER_VERSION-windows-x64.zip" --output $archive
+          if ($LASTEXITCODE -ne 0) { throw "Blender download failed" }
           Expand-Archive $archive -DestinationPath $env:RUNNER_TEMP
           Move-Item (Join-Path $env:RUNNER_TEMP "blender-$env:BLENDER_VERSION-windows-x64") $env:BLENDER_DIR
       - name: Download Blender (Linux)
