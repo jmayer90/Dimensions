@@ -1,7 +1,7 @@
 # DIM-01 — Chain and baseline dimensions
 
 **Milestone:** M5 Documentation-grade
-**Status:** ✅ Complete — persistent chain and baseline sets delivered and verified on Blender 5.2.
+**Status:** ✅ Complete — persistent sets delivered; creation, repair, collision, and output paths hardened in the 0.6.0 candidate.
 **Effort:** M
 **Depends on:** UX-01
 **Version impact:** Patch. Additive.
@@ -77,6 +77,15 @@ source motion, member-local repair state, one-row manager representation,
 per-member undo dispatch, and OUT-01 stroke generation. `tests/blender_lifecycle.py`
 opens the released schema-v2 fixture through the sequential v6 → v7 → v8 path
 and performs a real save/reload of a populated chain set.
+
+The 0.6.0 hardening pass adds stable-direction and invalid-projection geometry
+coverage, shared-anchor repair propagation, reorder/hit/collision regressions, and
+adapter tests for continued creation, inference, active planes, axis/typed input,
+step-back, Edit Mode, and insert cleanup. Foreground follow-up makes the first
+member's axis/plane authoritative for preview and commit, restores the native
+snap aperture ahead of unlocked inference, refuses duplicate/reverse/off-axis
+members before persistence, and renders incompatible saved members as bounded
+Needs Repair geometry instead of shared-axis spokes.
 
 ## Out of scope
 

@@ -1,8 +1,8 @@
 import bpy
 
-from .annotation_manager import annotation_is_hidden, manager_item_matches, set_active_index_from_viewport
+from .annotation_manager import annotation_is_hidden, manager_item_matches
 from .constants import SIDEBAR_CATEGORY
-from .preferences import get_preferences
+from .preferences import ADDON_ID, get_preferences
 from .properties import (
     is_dimension_object,
     is_read_only_dimensions_object,
@@ -62,6 +62,11 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
         settings = context.scene.dimensions_settings
         snap_box.prop(settings, "use_snap_target_override", text="Scene Override")
         source = settings if settings.use_snap_target_override else preferences
+        snap_box.prop(
+            source,
+            "snap_pixel_radius" if settings.use_snap_target_override else "snap_pixel_threshold",
+            text="Snap Radius",
+        )
         draw_snap_target_row(snap_box, source)
 
 
@@ -116,9 +121,8 @@ class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
             layout.prop(settings, "imperial_denominator")
         layout.prop(settings, "precision")
         layout.prop(settings, "text_placement")
-        layout.prop(settings, "snap_pixel_radius")
         preferences = layout.operator("preferences.addon_show", text="Open Add-on Preferences", icon="PREFERENCES")
-        preferences.module = "dimensions"
+        preferences.module = ADDON_ID
 
 
 class CADDIM_PT_MeshSizeHUD(CADDIM_PT_PanelBase, bpy.types.Panel):
@@ -261,9 +265,6 @@ class CADDIM_PT_AnnotationManager(CADDIM_PT_PanelBase, bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         settings = context.scene.dimensions_settings
-        active = context.view_layer.objects.active
-        if active is not None:
-            set_active_index_from_viewport(settings, active)
         layout.template_list(
             "CADDIM_UL_AnnotationManager", "", settings, "annotation_manager_items",
             settings, "active_annotation_manager_index", rows=7,

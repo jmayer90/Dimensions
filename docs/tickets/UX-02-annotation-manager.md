@@ -1,7 +1,7 @@
 # UX-02 — Annotation manager: list, search, isolate, repair, restyle
 
 **Milestone:** M2 Fluency
-**Status:** ✅ Complete — delivered in 0.4.2 with filtered named-style assignment completing `OUT-03`.
+**Status:** ✅ Complete — delivered in 0.4.2; redraw safety and exact derived-source repair routing hardened in the 0.6.0 candidate.
 **Effort:** L
 **Depends on:** —
 **Version impact:** Patch.
@@ -69,6 +69,12 @@ Per row: an icon for annotation kind, the name, the current value, and a state i
 - A test that bulk operations produce one undo step.
 - A test that isolate/exit restores exactly the prior visibility state, including annotations already hidden before isolate.
 - A test that the list reflects annotations created or deleted outside the panel.
+
+The 0.6.0 hardening pass makes panel drawing strictly read-only: filtering consumes
+cached registry fields, while scene synchronization and Blender's active-object
+message bus update selection outside `draw()`. Exact Angular/Spacing pivot and end
+failures now route to the corresponding repair slot. Blender 5.2 smoke coverage
+asserts redraw purity, cached filtering, selection synchronization, and linked guards.
 
 ## Out of scope
 

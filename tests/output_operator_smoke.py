@@ -116,6 +116,60 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
         self.assertAlmostEqual(sizing.arrow_size, 0.20)
         self.assertAlmostEqual(output_text_height_for_annotation(self.scene, dimension, settings), 0.3)
 
+    def test_invalid_source_removes_matching_generated_artifact(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_scope = "VISIBLE"
+        settings.output_sizing_mode = "WORLD"
+        dimension = self._dimension("DIM Output Invalid Cleanup")
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        key = annotation_output_key(self.scene, dimension)
+        self.assertEqual(len(generated_output_objects(self.scene, key)), 1)
+
+        dimension.dimension_props.start.anchor_type = "VERTEX"
+        dimension.dimension_props.start.target_object = None
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        self.assertEqual(generated_output_objects(self.scene, key), ())
+
+    def test_deleted_annotation_removes_its_generated_artifact(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_scope = "VISIBLE"
+        settings.output_sizing_mode = "WORLD"
+        dimension = self._dimension("DIM Output Deleted Cleanup")
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        key = annotation_output_key(self.scene, dimension)
+        self.assertEqual(len(generated_output_objects(self.scene, key)), 1)
+
+        self.created.remove(dimension)
+        bpy.data.objects.remove(dimension, do_unlink=True)
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        self.assertEqual(generated_output_objects(self.scene, key), ())
+
+    def test_visible_scope_removes_hidden_artifact_but_selected_scope_preserves_unselected(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_sizing_mode = "WORLD"
+        visible = self._dimension("DIM Output Hidden Cleanup")
+        settings.output_scope = "VISIBLE"
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        key = annotation_output_key(self.scene, visible)
+        self.assertEqual(len(generated_output_objects(self.scene, key)), 1)
+
+        visible.hide_set(True)
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        self.assertEqual(generated_output_objects(self.scene, key), ())
+        visible.hide_set(False)
+
+        visible.select_set(True)
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        visible.select_set(False)
+        other = self._dimension("DIM Output Selected Reconcile")
+        other.select_set(True)
+        settings.output_scope = "SELECTED"
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        self.assertEqual(len(generated_output_objects(self.scene, key)), 1)
+
     def test_duplicated_annotations_receive_distinct_output_keys(self):
         first = self._dimension("DIM Output Key Source")
         first_key = annotation_output_key(self.scene, first)

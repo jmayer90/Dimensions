@@ -1,7 +1,7 @@
 # FND-06 — Make modal operators testable, then test them
 
 **Milestone:** M1 Foundation
-**Status:** ✅ Complete — delivered in 0.3.0; suites continue to expand with features.
+**Status:** ✅ Complete — delivered in 0.3.0; Chain/Baseline, Spacing, and datum-point adapters expanded in the 0.6.0 candidate.
 **Effort:** L
 **Depends on:** —
 **Version impact:** Patch.
@@ -65,6 +65,11 @@ The ticket is its own verification. The bar is that a contributor can change axi
 The 0.6.0 candidate adds dedicated adapter regressions for the two-edge Angle flow
 through radius commit and for face acquisition plus axis-constrained, typed-distance
 Area placement. Both flows also passed against a real Blender 5.2 viewport context.
+
+The hardening pass expands the headless adapter suite to 61 tests. New cases cover
+continued Chain/Baseline commits after active-object changes, active-plane and
+inference forwarding, constrained/typed input, member step-back/insert cleanup,
+Spacing click acquisition, and Coordinate/Elevation point acquisition and cancel.
 
 ## Out of scope
 

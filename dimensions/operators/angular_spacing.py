@@ -5,14 +5,22 @@ from math import degrees
 from mathutils import Vector
 
 from .. import messages
-from ..anchors import set_world_anchor
+from ..anchors import set_anchor_from_snap, set_world_anchor
 from ..collections import create_guide_object
 from ..derived_guides import angular_preview_line, bind_edge_source, bind_guide_source, resolve_derived_guide, resolve_source, spaced_guide_lines
 from ..drawing import clear_guide_preview_state, set_guide_preview_state
-from ..interaction import is_confirm_event, is_navigation_event, update_distance_text
+from ..interaction import (
+    is_confirm_event,
+    is_navigation_event,
+    remember_session_context,
+    session_context_changed,
+    update_distance_text,
+)
+from ..inference import InferenceSession, handle_inference_event, inference_status
 from ..keymaps import modal_action_from_event
 from ..properties import is_guide_object, is_read_only_dimensions_object
-from ..snapping import guide_line_world
+from ..snapping import copy_snap, find_nearest_snap_point, guide_line_world
+from ..snap_targets import handle_snap_target_event
 from ..units import parse_angle_input
 
 
@@ -179,11 +187,115 @@ class DIMENSIONS_OT_CreateSpacingGuide(bpy.types.Operator):
     count: bpy.props.IntProperty(name="Count", default=5, min=2, max=10000)
     extent: bpy.props.FloatProperty(name="Extent", default=4.0, min=0.000001, subtype="DISTANCE")
 
+    def invoke(self, context, _event):
+        if context.area is None or context.area.type != "VIEW_3D":
+            self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
+            return {"CANCELLED"}
+        self._source = active_source(context)
+        if self._source is None:
+            self.report(messages.WARNING, messages.SELECT_GUIDE_SOURCE)
+            return {"CANCELLED"}
+        self._origin_snap = None
+        self._end_snap = None
+        self._hover_snap = None
+        self._spacing_state = "PICK_ORIGIN"
+        self.inference_session = InferenceSession()
+        remember_session_context(self, context)
+        context.window_manager.modal_handler_add(self)
+        self._update_preview()
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if context.area is None or context.area.type != "VIEW_3D" or session_context_changed(self, context):
+            clear_guide_preview_state()
+            return {"CANCELLED"}
+        if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
+            clear_guide_preview_state()
+            return {"CANCELLED"}
+        if handle_snap_target_event(context, event):
+            self._update_preview()
+            return {"RUNNING_MODAL"}
+        if handle_inference_event(self.inference_session, event):
+            self._update_preview()
+            return {"RUNNING_MODAL"}
+        if event.type == "MOUSEMOVE":
+            snap = self._find_snap(context, event)
+            self._hover_snap = None if snap is None else copy_snap(snap)
+            self._update_preview()
+            return {"RUNNING_MODAL"}
+        if (event.type == "LEFTMOUSE" and event.value == "PRESS") or is_confirm_event(event):
+            if self._hover_snap is None:
+                snap = self._find_snap(context, event)
+                self._hover_snap = None if snap is None else copy_snap(snap)
+                if self._hover_snap is None:
+                    return {"RUNNING_MODAL"}
+            if self._spacing_state == "PICK_ORIGIN":
+                self._origin_snap = copy_snap(self._hover_snap)
+                if self.mode == "DISTRIBUTE":
+                    self._spacing_state = "PICK_END"
+                    self._hover_snap = None
+                    self._update_preview()
+                    return {"RUNNING_MODAL"}
+            else:
+                self._end_snap = copy_snap(self._hover_snap)
+            result = self._create(context, self._source, self._origin_snap, self._end_snap)
+            clear_guide_preview_state()
+            return result
+        if is_navigation_event(event):
+            return {"PASS_THROUGH"}
+        return {"RUNNING_MODAL"}
+
+    def cancel(self, _context):
+        clear_guide_preview_state()
+
+    def _find_snap(self, context, event):
+        from ..guide_planes import active_plane_frame
+
+        frame = active_plane_frame(context.scene)
+        origin = None if self._origin_snap is None else self._origin_snap["world_co"]
+        return find_nearest_snap_point(
+            context,
+            event.mouse_region_x,
+            event.mouse_region_y,
+            include_guides=True,
+            include_free=True,
+            plane_point=origin if frame is None else frame[0],
+            plane_normal=None if frame is None else frame[3],
+            inference_session=self.inference_session,
+            inference_origin=origin,
+        )
+
+    def _update_preview(self):
+        locked = tuple(snap for snap in (self._origin_snap, self._end_snap) if snap is not None)
+        state = {
+            "state": self._spacing_state,
+            "derived_guide": "SPACING",
+            "axis": "ALIGNED",
+            "locked_snaps": locked,
+            "hover_snap": self._hover_snap,
+        }
+        status = inference_status(self.inference_session)
+        if status:
+            state["inference_status"] = status
+        if self._origin_snap is not None:
+            state["start_world"] = self._origin_snap["world_co"]
+            end_snap = self._hover_snap if self._spacing_state == "PICK_END" else self._origin_snap
+            if end_snap is not None:
+                state["end_world"] = end_snap["world_co"]
+        set_guide_preview_state(state)
+
     def execute(self, context):
-        source = active_source(context)
+        source = getattr(self, "_source", None) or active_source(context)
         if source is None:
             self.report(messages.WARNING, messages.SELECT_GUIDE_SOURCE)
             return {"CANCELLED"}
+        return self._create(
+            context, source,
+            getattr(self, "_origin_snap", None),
+            getattr(self, "_end_snap", None),
+        )
+
+    def _create(self, context, source, origin_snap=None, end_snap=None):
         obj = create_guide_object(context, "GUIDE Spaced Set")
         props = obj.guide_props
         props.derived, props.derivation_mode = True, "SPACING"
@@ -193,8 +305,14 @@ class DIMENSIONS_OT_CreateSpacingGuide(bpy.types.Operator):
         bind_active_source(props.source_a, source)
         resolved_source = resolve_source(props.source_a)
         origin = context.scene.cursor.location if resolved_source is None else resolved_source["origin"]
-        set_world_anchor(props.construction_pivot, origin)
-        set_world_anchor(props.spacing_end, context.scene.cursor.location)
+        if origin_snap is None:
+            set_world_anchor(props.construction_pivot, origin)
+        else:
+            set_anchor_from_snap(props.construction_pivot, origin_snap)
+        if end_snap is None:
+            set_world_anchor(props.spacing_end, context.scene.cursor.location)
+        else:
+            set_anchor_from_snap(props.spacing_end, end_snap)
         lines = spaced_guide_lines(obj)
         if not lines:
             bpy.data.objects.remove(obj, do_unlink=True)

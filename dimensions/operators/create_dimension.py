@@ -94,6 +94,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.continuous_placement = continuous_placement
         self._state_machine = PointPlacementState(axis=session_axis(context))
         self.hover_snap = None
+        self.hover_mouse = None
         self.start_snap = None
         self.end_snap = None
         self.offset_distance = getattr(get_preferences(context), "default_offset_distance", DEFAULT_OFFSET_DISTANCE)
@@ -169,6 +170,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                     inference_origin=plane_point,
                     inference_axis=self.inference_axis,
                 )
+                self.hover_mouse = Vector((event.mouse_region_x, event.mouse_region_y))
             elif self.state == "SET_OFFSET" and not self.distance_text:
                 self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
 
@@ -177,7 +179,8 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
             if self.state == "PICK_START":
-                if self.hover_snap is None:
+                click_mouse = Vector((event.mouse_region_x, event.mouse_region_y))
+                if self.hover_snap is None or self.hover_mouse is None or click_mouse != self.hover_mouse:
                     self.hover_snap = find_nearest_snap_point(
                         context,
                         event.mouse_region_x,
@@ -186,13 +189,15 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                         inference_session=self.inference_session,
                         inference_axis=self.inference_axis,
                     )
+                    self.hover_mouse = click_mouse
                 if self.hover_snap is None:
                     return {"RUNNING_MODAL"}
 
                 return self._accept_start()
 
             if self.state == "PICK_END":
-                if self.hover_snap is None:
+                click_mouse = Vector((event.mouse_region_x, event.mouse_region_y))
+                if self.hover_snap is None or self.hover_mouse is None or click_mouse != self.hover_mouse:
                     self.hover_snap = find_nearest_snap_point(
                         context,
                         event.mouse_region_x,
@@ -203,6 +208,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                         inference_origin=self.start_snap["world_co"],
                         inference_axis=self.inference_axis,
                     )
+                    self.hover_mouse = click_mouse
                 if self.hover_snap is None:
                     return {"RUNNING_MODAL"}
 
@@ -512,6 +518,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         push_undo_step("Create Dimension")
         self._state_machine.restart()
         self.hover_snap = None
+        self.hover_mouse = None
         self.start_snap = None
         self.end_snap = None
         self.offset_plane_normal = None

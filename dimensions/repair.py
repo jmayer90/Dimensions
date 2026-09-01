@@ -12,7 +12,7 @@ from .anchors import (
 )
 from .area_binding import bind_area_face_indices, evaluate_area_binding
 from .properties import is_dimension_object
-from .dimension_sets import dimension_set_state
+from .dimension_sets import refresh_dimension_set_state, synchronize_set_member_anchor
 from .circle_binding import evaluate_circle_binding, store_circle_fit
 from .coordinate_dimensions import datum_frame
 
@@ -20,7 +20,7 @@ from .coordinate_dimensions import datum_frame
 def _refresh_repaired_state(props):
     kind = getattr(props, "annotation_kind", "LINEAR")
     if kind == "DIMENSION_SET":
-        return dimension_set_state(props)
+        return refresh_dimension_set_state(props)
     if kind == "CIRCLE":
         fit = evaluate_circle_binding(props)
         if fit is None:
@@ -169,6 +169,10 @@ def apply_repair_issue(annotation, issue):
     if anchor is None or anchor_resolution(anchor)[1] == "BY_ID":
         return False
     set_anchor(anchor, candidate["object"], candidate["vertex_index"])
+    anchor_name = issue.get("anchor_name", "")
+    if props.annotation_kind == "DIMENSION_SET" and anchor_name.startswith("SET_"):
+        _prefix, index, slot = anchor_name.split("_", 2)
+        synchronize_set_member_anchor(props, int(index), slot)
     props.measurement_state = _refresh_repaired_state(props)
     return True
 

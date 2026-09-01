@@ -28,6 +28,7 @@ from dimensions.output_geometry import (
     linear_dimension_label_strokes,
     linear_dimension_output_spec,
     coordinate_elevation_output_spec,
+    annotation_output_state,
 )
 
 
@@ -188,6 +189,20 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
             )
         )
         self.assertTrue(TEXT_OUTPUT_SUPPORTED)
+
+    def test_fallback_linear_and_angle_sources_are_not_authoritative_output(self):
+        sizing = WorldSizingPolicy(line_width=0.02, arrow_size=0.4)
+        linear = self._linear_dimension()
+        linear.dimension_props.start.anchor_type = "VERTEX"
+        linear.dimension_props.start.target_object = None
+        self.assertEqual(annotation_output_state(linear), "NEEDS_REPAIR")
+        self.assertIsNone(linear_dimension_output_spec(linear, "broken-linear", sizing))
+
+        angle = self._angle_dimension()
+        angle.dimension_props.center.anchor_type = "VERTEX"
+        angle.dimension_props.center.target_object = None
+        self.assertEqual(annotation_output_state(angle), "NEEDS_REPAIR")
+        self.assertIsNone(angle_dimension_output_spec(angle, "broken-angle", sizing))
 
     def test_linear_label_generates_world_space_strokes(self):
         dimension = self._linear_dimension()

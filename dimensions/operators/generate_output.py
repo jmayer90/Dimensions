@@ -13,6 +13,11 @@ from ..angle_binding import resolve_angle_source
 from ..area_binding import area_label_world, evaluate_area_binding
 from ..dimension_geometry import get_dimension_world_geometry
 from ..grease_pencil_output import generate_grease_pencil_output
+from ..grease_pencil_output import (
+    OUTPUT_SOURCE_KEY,
+    generated_output_objects,
+    remove_generated_output,
+)
 from ..output_geometry import (
     WorldSizingPolicy,
     angle_dimension_label_strokes,
@@ -24,6 +29,7 @@ from ..output_geometry import (
     dimension_set_output_spec,
     circle_dimension_output_spec,
     coordinate_elevation_output_spec,
+    annotation_output_state,
 )
 from ..properties import is_dimension_object, resolve_dimension_style
 
@@ -95,8 +101,36 @@ def _prune_output_source_bindings(scene):
             continue
         seen_sources.add(source_pointer)
         seen_keys.add(binding.key)
+    removed = 0
     for index in reversed(invalid_indices):
+        key = bindings[index].key
+        if key:
+            removed += remove_generated_output(scene, key)
         bindings.remove(index)
+    return removed
+
+
+def reconcile_stale_output(context, scope):
+    """Remove artifacts whose source is gone, invalid, or hidden from Visible scope."""
+    scene = context.scene
+    removed = _prune_output_source_bindings(scene)
+    bindings = scene.dimensions_settings.output_source_bindings
+    valid_keys = {binding.key for binding in bindings if binding.key}
+    for output in generated_output_objects(scene):
+        key = output.get(OUTPUT_SOURCE_KEY, "")
+        if key and key not in valid_keys:
+            removed += remove_generated_output(scene, key)
+    for binding in bindings:
+        source = binding.source
+        if source is None:
+            continue
+        invalid = annotation_output_state(source) not in {"LIVE", "CAPTURED"}
+        hidden = scope == "VISIBLE" and (
+            not source.dimension_props.visible or not _is_visible(context, source)
+        )
+        if invalid or hidden:
+            removed += remove_generated_output(scene, binding.key)
+    return removed
 
 
 def annotation_output_key(scene, annotation):
@@ -259,8 +293,12 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
     def execute(self, context):
         settings = context.scene.dimensions_settings
         scope = settings.output_scope
+        removed = reconcile_stale_output(context, scope)
         annotations = annotations_for_output(context, scope)
         if not annotations:
+            if removed:
+                self.report(messages.INFO, messages.generated_output(0, removed=removed))
+                return {"FINISHED"}
             self.report(messages.WARNING, messages.OUTPUT_NO_ANNOTATIONS)
             return {"CANCELLED"}
         if settings.output_sizing_mode == "CAMERA" and context.scene.camera is None:
@@ -272,6 +310,11 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
         skipped_repair = 0
         output_keys = annotation_output_keys(context.scene, annotations)
         for annotation in annotations:
+            if annotation_output_state(annotation) not in {"LIVE", "CAPTURED"}:
+                removed += remove_generated_output(context.scene, output_keys[annotation.name])
+                skipped += 1
+                skipped_repair += 1
+                continue
             resolved_annotation = _ResolvedAnnotation(annotation, settings)
             sizing = output_sizing_for_annotation(context.scene, annotation, settings)
             if sizing is None:
@@ -290,6 +333,7 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
                     text_height, context.scene.camera,
                 )
                 if spec is None:
+                    removed += remove_generated_output(context.scene, output_keys[annotation.name])
                     skipped += 1
                     continue
                 generate_grease_pencil_output(context.scene, spec)
@@ -301,6 +345,7 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
                     text_height, context.scene.camera,
                 )
                 if spec is None:
+                    removed += remove_generated_output(context.scene, output_keys[annotation.name])
                     skipped += 1
                     continue
                 generate_grease_pencil_output(context.scene, spec)
@@ -312,6 +357,7 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
                     text_height, context.scene.camera,
                 )
                 if spec is None:
+                    removed += remove_generated_output(context.scene, output_keys[annotation.name])
                     skipped += 1
                     continue
                 generate_grease_pencil_output(context.scene, spec)
@@ -324,6 +370,7 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
             }.get(annotation_kind)
             spec = spec_builder(resolved_annotation, output_keys[annotation.name], sizing)
             if spec is None:
+                removed += remove_generated_output(context.scene, output_keys[annotation.name])
                 skipped += 1
                 if annotation_kind == "AREA" and annotation.dimension_props.measurement_state == "NEEDS_REPAIR":
                     skipped_repair += 1
@@ -354,6 +401,9 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
             generated += 1
 
         if generated == 0:
+            if removed:
+                self.report(messages.INFO, messages.generated_output(0, skipped, skipped_repair, removed))
+                return {"FINISHED"}
             report_message = (
                 messages.OUTPUT_AREA_REPAIR_REQUIRED
                 if skipped_repair
@@ -363,7 +413,7 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
             return {"CANCELLED"}
         context.view_layer.use_pass_z = True
         context.view_layer.use_pass_grease_pencil = True
-        self.report(messages.INFO, messages.generated_output(generated, skipped, skipped_repair))
+        self.report(messages.INFO, messages.generated_output(generated, skipped, skipped_repair, removed))
         return {"FINISHED"}
 
 

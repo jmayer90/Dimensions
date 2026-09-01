@@ -219,6 +219,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             self.report(messages.WARNING, messages.MEASUREMENT_REQUIRED_TO_SAVE)
             return {"RUNNING_MODAL"}
         self._create_persistent(context, segment[0], segment[1], select=False)
+        push_undo_step("Save Measurement")
         self.report(messages.INFO, messages.SAVED_TRANSIENT_MEASUREMENT)
         return {"RUNNING_MODAL"}
 

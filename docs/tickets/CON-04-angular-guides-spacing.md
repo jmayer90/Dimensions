@@ -1,7 +1,7 @@
 # CON-04 — Angular guides and repeated spacing
 
 **Milestone:** M3 Construction
-**Status:** ✅ Complete in 0.5.0.
+**Status:** ✅ Complete in 0.5.0; anchored Spacing acquisition and repair hardened in the 0.6.0 candidate.
 **Effort:** M
 **Depends on:** CON-02
 **Version impact:** Patch. Additive.
@@ -92,6 +92,12 @@ On Blender 5.1.2, the deterministic 200-line benchmark measures 0.125 ms for
 production draw preparation and 2.287 ms for a public guide-snap query, below
 the respective 33.333 ms and 8 ms budgets. The benchmark is part of both release
 validation scripts.
+
+The 0.6.0 hardening pass turns Spacing creation into an anchored modal workflow:
+all modes acquire an origin and Distribute acquires a second endpoint through the
+shared snap/inference/active-plane path. Both anchors persist their source type,
+can be repaired independently, and are covered for source motion, loss, repair,
+click-without-mousemove, and pure query resolution on Blender 5.2.
 
 ## Out of scope
 

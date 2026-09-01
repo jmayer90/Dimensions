@@ -11,7 +11,13 @@ from .area_binding import evaluate_area_binding
 from .dimension_geometry import get_angle_world_geometry
 from .dimension_sets import dimension_set_state
 from .circle_binding import circle_geometry, circle_value
-from .coordinate_dimensions import coordinate_values, elevation_value, is_datum_object, signed_number
+from .coordinate_dimensions import (
+    coordinate_label,
+    coordinate_values,
+    elevation_value,
+    is_datum_object,
+    signed_number,
+)
 from .properties import is_dimension_object, is_guide_object, resolve_dimension_style
 from .units import format_area, format_length
 
@@ -177,11 +183,17 @@ def annotation_display_value(scene, obj):
         result = coordinate_values(props)
         if result is None:
             return "Unavailable"
-        components = {"X": (0,), "Y": (1,), "XY": (0, 1), "XYZ": (0, 1, 2)}[props.coordinate_components]
-        return " · ".join(f"{'XYZ'[index]} {format_length(context, abs(result['values'][index]), style.precision, style.unit_style)}" for index in components)
+        return coordinate_label(
+            props,
+            result["values"],
+            lambda value: format_length(context, value, style.precision, style.unit_style),
+        ).replace("\n", " · ")
     if kind == "ELEVATION":
         result = elevation_value(props)
-        return "Unavailable" if result is None else signed_number(result["value"], props.elevation_precision, props.elevation_show_plus)
+        if result is None:
+            return "Unavailable"
+        value = signed_number(result["value"], props.elevation_precision, props.elevation_show_plus)
+        return f"{props.elevation_prefix}{value}{props.elevation_suffix}"
     if kind == "DIMENSION_SET":
         count = len(props.set_members)
         label = "Chain" if props.set_kind == "CHAIN" else "Baseline"
@@ -248,12 +260,12 @@ def manager_item_matches(settings, item):
     if obj is None:
         return False
     query = settings.annotation_manager_search.strip().casefold()
-    if query and query not in obj.name.casefold():
+    if query and query not in item.name.casefold():
         return False
-    kind = annotation_kind(obj).lower()
+    kind = item.kind.lower()
     if not getattr(settings, f"annotation_manager_kind_{kind}", False):
         return False
-    state = annotation_state(obj).lower()
+    state = item.state.lower()
     if not getattr(settings, f"annotation_manager_state_{state}", False):
         return False
     if settings.annotation_manager_references_active and not annotation_references_object(

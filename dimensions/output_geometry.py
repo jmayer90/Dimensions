@@ -10,7 +10,7 @@ from math import cos, degrees, sin, tau
 
 from mathutils import Vector
 
-from .anchors import resolve_anchor
+from .anchors import anchor_resolution, dimension_source_anchors, resolve_anchor
 from .angle_binding import resolve_angle_source
 from .area_binding import area_label_world, evaluate_area_binding
 from .dimension_geometry import get_angle_world_geometry, get_dimension_world_geometry
@@ -25,10 +25,47 @@ from .units import format_area, format_dual_length, format_length
 TEXT_OUTPUT_SUPPORTED = True
 
 
+def annotation_output_state(dimension_object):
+    """Return the current authoritative output state without trusting cached RNA state."""
+    props = getattr(dimension_object, "dimension_props", None)
+    if props is None or not getattr(props, "enabled", False):
+        return "NEEDS_REPAIR"
+    cached_state = getattr(props, "measurement_state", "LIVE")
+    if cached_state not in {"LIVE", "CAPTURED"}:
+        return cached_state
+    kind = getattr(props, "annotation_kind", "LINEAR")
+    if kind == "DIMENSION_SET":
+        return dimension_set_state(props)
+    if kind == "CIRCLE":
+        fit = circle_geometry(props)
+        return "NEEDS_REPAIR" if fit is None else fit["state"]
+    if kind in {"COORDINATE", "ELEVATION"}:
+        result = coordinate_values(props) if kind == "COORDINATE" else elevation_value(props)
+        return "NEEDS_REPAIR" if result is None else result["state"]
+    if kind == "AREA":
+        if props.measurement_state == "CAPTURED":
+            return "CAPTURED"
+        result = evaluate_area_binding(props)
+        return "NEEDS_REPAIR" if result is None else result.get("state", "LIVE")
+    statuses = [
+        anchor_resolution(anchor)[1]
+        for _name, anchor in dimension_source_anchors(props)
+    ]
+    if "UNRESOLVABLE" in statuses:
+        return "NEEDS_REPAIR"
+    if "BY_FALLBACK" in statuses:
+        return "FALLBACK"
+    return "LIVE"
+
+
 def coordinate_elevation_output_spec(context, dimension_object, source_key, sizing, text_height, camera=None):
     """Generate render/vector strokes for coordinate and elevation annotations."""
     props = getattr(dimension_object, "dimension_props", None)
-    if props is None or props.annotation_kind not in {"COORDINATE", "ELEVATION"}:
+    if (
+        props is None
+        or props.annotation_kind not in {"COORDINATE", "ELEVATION"}
+        or annotation_output_state(dimension_object) not in {"LIVE", "CAPTURED"}
+    ):
         return None
     kind = props.annotation_kind
     result = coordinate_values(props) if kind == "COORDINATE" else elevation_value(props)
@@ -191,6 +228,7 @@ def linear_dimension_output_spec(dimension_object, source_key, sizing):
         props is None
         or not getattr(props, "enabled", False)
         or getattr(props, "annotation_kind", "LINEAR") != "LINEAR"
+        or annotation_output_state(dimension_object) not in {"LIVE", "CAPTURED"}
     ):
         return None
 
@@ -269,11 +307,14 @@ def dimension_set_output_spec(context, dimension_object, source_key, sizing, tex
     props = getattr(dimension_object, "dimension_props", None)
     if props is None or getattr(props, "annotation_kind", "LINEAR") != "DIMENSION_SET":
         return None
-    if dimension_set_state(props) != "LIVE":
+    if annotation_output_state(dimension_object) != "LIVE":
         return None
     color = tuple(float(channel) for channel in props.color)
     strokes = []
-    for item in dimension_set_world_geometry(props):
+    geometry_items = dimension_set_world_geometry(props)
+    if any(not item.get("geometry_valid", True) for item in geometry_items):
+        return None
+    for item in geometry_items:
         line_start = Vector(item["line_start_world"]) + Vector(props.presentation_offset)
         line_end = Vector(item["line_end_world"]) + Vector(props.presentation_offset)
         direction = (line_end - line_start).normalized()
@@ -304,8 +345,13 @@ def dimension_set_output_spec(context, dimension_object, source_key, sizing, tex
         label = f"{props.value_prefix}{format_dual_length(context, item['value'], props.precision, props.unit_style, getattr(props, 'secondary_unit_style', 'NONE'), getattr(props, 'secondary_precision', 2), getattr(props, 'dual_unit_arrangement', 'BRACKETS'))}{props.value_suffix}"
         width, _height = text_block_dimensions(label, text_height)
         if (line_end - line_start).length < width + sizing.arrow_size * 2.0:
-            center = line_end + direction * (sizing.arrow_size + width * 0.6)
-            strokes.append(OutputStroke((line_end, center - direction * width * 0.5), color, sizing.line_width))
+            margin = text_height * (5.0 / 14.0)
+            if props.set_kind == "CHAIN" and item["index"] % 2 == 1:
+                center = line_start - direction * (sizing.arrow_size + margin + width * 0.5)
+                strokes.append(OutputStroke((line_start, center + direction * (width * 0.5 + margin * 0.5)), color, sizing.line_width))
+            else:
+                center = line_end + direction * (sizing.arrow_size + margin + width * 0.5)
+                strokes.append(OutputStroke((line_end, center - direction * (width * 0.5 + margin * 0.5)), color, sizing.line_width))
         else:
             center = (line_start + line_end) * 0.5 + perpendicular * (text_height * 0.8)
         label_camera = None if getattr(props, "label_orientation", "HORIZONTAL") == "ALIGNED" else camera
@@ -324,7 +370,11 @@ def dimension_set_output_spec(context, dimension_object, source_key, sizing, tex
 
 def circle_dimension_output_spec(context, dimension_object, source_key, sizing, text_height, camera=None):
     props = getattr(dimension_object, "dimension_props", None)
-    if props is None or getattr(props, "annotation_kind", "LINEAR") != "CIRCLE":
+    if (
+        props is None
+        or getattr(props, "annotation_kind", "LINEAR") != "CIRCLE"
+        or annotation_output_state(dimension_object) not in {"LIVE", "CAPTURED"}
+    ):
         return None
     fit = circle_geometry(props)
     if fit is None or fit["state"] not in {"LIVE", "CAPTURED"}:
@@ -376,6 +426,7 @@ def angle_dimension_output_spec(dimension_object, source_key, sizing):
         props is None
         or not getattr(props, "enabled", False)
         or getattr(props, "annotation_kind", "LINEAR") != "ANGLE"
+        or annotation_output_state(dimension_object) not in {"LIVE", "CAPTURED"}
     ):
         return None
     source = resolve_angle_source(props)
@@ -419,7 +470,7 @@ def area_dimension_output_spec(dimension_object, source_key, sizing):
         props is None
         or not getattr(props, "enabled", False)
         or getattr(props, "annotation_kind", "LINEAR") != "AREA"
-        or props.measurement_state not in {"LIVE", "CAPTURED"}
+        or annotation_output_state(dimension_object) not in {"LIVE", "CAPTURED"}
     ):
         return None
     result = evaluate_area_binding(props) if props.measurement_state != "CAPTURED" else None

@@ -188,6 +188,8 @@ class InferenceSession:
             enabled_targets=enabled_targets,
         )
         inference = _nearest_candidate(candidates, mouse_x, mouse_y, pixel_threshold)
+        if inference is not None and self.locked:
+            inference["inference_locked"] = True
         self.active_candidate = inference
         return inference
 

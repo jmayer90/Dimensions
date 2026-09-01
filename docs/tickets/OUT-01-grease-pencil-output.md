@@ -1,7 +1,7 @@
 # OUT-01 — Render path via generated Grease Pencil
 
 **Milestone:** M4 Output
-**Status:** ✅ Complete — the linear surface shipped in 0.4.0; angle and area continuation is `OUT-04`.
+**Status:** ✅ Complete — the linear surface shipped in 0.4.0; all persistent kinds and stale-artifact authority were hardened by the 0.6.0 candidate.
 **Effort:** L
 **Depends on:** FND-03
 **Version impact:** **Minor trigger 3 (new product surface)** — lands in `0.4.0`.
@@ -75,6 +75,12 @@ Recommend supporting both, defaulting to camera-relative since producing a drawi
 - A test that generated output is confined to the output collection and correctly tagged.
 - Render tests: render a small scene headless in EEVEE and Cycles and assert non-empty output where dimensions should appear.
 - Visual comparison of viewport overlay against a render from the same camera, recorded in the PR.
+
+The 0.6.0 hardening pass adds one live authority gate shared with vector export.
+Generation removes artifacts for deleted or non-authoritative sources and, under
+Visible scope, newly hidden sources; Selected scope preserves valid unselected
+artifacts deliberately. Blender 5.2 passes 18 output-geometry tests, 16 operator
+tests including EEVEE/Cycles renders, and 9 vector-export tests.
 
 ## Out of scope
 

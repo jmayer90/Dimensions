@@ -4,6 +4,7 @@ import inspect
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import bpy
 from mathutils import Vector
@@ -19,7 +20,9 @@ from dimensions.collections import create_dimension_object
 from dimensions.dimension_sets import (
     anchor_snapshot, automatic_baseline_spacing, delete_set_member,
     dimension_set_state, dimension_set_world_geometry, insert_chain_anchor,
+    move_set_member, synchronize_set_member_anchor,
 )
+from dimensions.drawing import _build_dimension_set_geometry, _geometry_hit_distance
 from dimensions.operators.dimension_set import DIMENSIONS_OT_CreateDimensionSet
 from dimensions.output_geometry import WorldSizingPolicy, dimension_set_output_spec
 from dimensions.constants import CURRENT_SCHEMA_VERSION
@@ -79,6 +82,18 @@ class DimensionsSetTests(unittest.TestCase):
         self.assertEqual([round(item["value"], 3) for item in geometry], [0.5, 1.5])
         self.assertLess((geometry[0]["end_world"] - geometry[1]["start_world"]).length, 1e-6)
 
+    def test_reordering_chain_points_preserves_the_original_datum_and_continuity(self):
+        obj = self._set("CHAIN", ((0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)))
+        props = obj.dimension_props
+        self.assertTrue(move_set_member(props, 0, 1))
+        geometry = dimension_set_world_geometry(props)
+        self.assertEqual(tuple(geometry[0]["start_world"]), (0.0, 0.0, 0.0))
+        self.assertEqual(tuple(geometry[0]["end_world"]), (2.0, 0.0, 0.0))
+        self.assertTrue(all(
+            (geometry[index]["end_world"] - geometry[index + 1]["start_world"]).length < 1e-6
+            for index in range(len(geometry) - 1)
+        ))
+
     def test_baseline_automatic_spacing_derives_from_text_and_is_adjustable(self):
         obj = self._set("BASELINE", ((0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)))
         props = obj.dimension_props
@@ -113,6 +128,49 @@ class DimensionsSetTests(unittest.TestCase):
         self.assertEqual(remaining[0]["state"], "LIVE")
         self.assertEqual(remaining[1]["state"], "NEEDS_REPAIR")
 
+    def test_off_axis_or_reverse_chain_members_are_repair_cases(self):
+        obj = self._set("CHAIN", ((0, 0, 0), (2, 0, 0), (0, 3, 0)))
+        geometry = dimension_set_world_geometry(obj.dimension_props)
+        self.assertEqual(len(geometry), 2)
+        self.assertEqual([item["index"] for item in geometry], [0, 1])
+        self.assertEqual([round(item["value"], 3) for item in geometry], [2.0, 2.0])
+        self.assertEqual([item["geometry_valid"] for item in geometry], [True, False])
+        self.assertEqual(geometry[1]["geometry_issue"], "OFF_AXIS")
+        self.assertEqual(dimension_set_state(obj.dimension_props), "NEEDS_REPAIR")
+        self.assertIsNone(
+            dimension_set_output_spec(bpy.context, obj, "off-axis-set", WorldSizingPolicy(0.01, 0.1), 0.14)
+        )
+
+        reverse = self._set("CHAIN", ((0, 0, 0), (2, 0, 0), (1, 0, 0)))
+        reverse_geometry = dimension_set_world_geometry(reverse.dimension_props)
+        self.assertEqual(reverse_geometry[1]["geometry_issue"], "NON_FORWARD")
+        self.assertEqual(dimension_set_state(reverse.dimension_props), "NEEDS_REPAIR")
+
+    def test_saved_perpendicular_member_is_visible_as_a_repair_case_and_never_outputs(self):
+        obj = self._set("CHAIN", ((0, 0, 0), (2, 0, 0), (2, 3, 0)))
+        props = obj.dimension_props
+        geometry = dimension_set_world_geometry(props)
+        self.assertEqual(len(geometry), 2)
+        self.assertEqual([item["geometry_valid"] for item in geometry], [True, False])
+        self.assertEqual(dimension_set_state(props), "NEEDS_REPAIR")
+        self.assertIsNone(
+            dimension_set_output_spec(bpy.context, obj, "invalid-set", WorldSizingPolicy(0.01, 0.1), 0.14)
+        )
+
+    def test_chain_joint_and_baseline_datum_updates_remain_structural(self):
+        chain = self._set("CHAIN", ((0, 0, 0), (1, 0, 0), (2, 0, 0)))
+        set_world_anchor(chain.dimension_props.set_members[0].end, Vector((1.5, 0, 0)))
+        synchronize_set_member_anchor(chain.dimension_props, 0, "END")
+        self.assertEqual(
+            tuple(chain.dimension_props.set_members[1].start.world_co),
+            (1.5, 0.0, 0.0),
+        )
+
+        baseline = self._set("BASELINE", ((0, 0, 0), (1, 0, 0), (2, 0, 0)))
+        set_world_anchor(baseline.dimension_props.set_members[1].start, Vector((0.5, 0, 0)))
+        synchronize_set_member_anchor(baseline.dimension_props, 1, "START")
+        self.assertTrue(all(tuple(member.start.world_co) == (0.5, 0.0, 0.0) for member in baseline.dimension_props.set_members))
+
     def test_manager_represents_the_set_once_and_output_contains_all_members(self):
         obj = self._set("CHAIN", ((0, 0, 0), (1, 0, 0), (1.05, 0, 0)))
         sync_annotation_manager(self.scene)
@@ -124,6 +182,81 @@ class DimensionsSetTests(unittest.TestCase):
         spec = dimension_set_output_spec(bpy.context, obj, "set-output", WorldSizingPolicy(0.01, 0.1), 0.14)
         self.assertIsNotNone(spec)
         self.assertGreater(len(spec.strokes), 12)
+
+    def test_short_chain_output_alternates_label_sides(self):
+        obj = self._set("CHAIN", ((0, 0, 0), (0.05, 0, 0), (0.1, 0, 0)))
+        positions = []
+        with patch("dimensions.output_geometry._text_strokes_at", side_effect=lambda _label, position, *_args, **_kwargs: positions.append(Vector(position)) or ()):
+            spec = dimension_set_output_spec(
+                bpy.context, obj, "alternating-labels", WorldSizingPolicy(0.01, 0.1), 0.14,
+            )
+        self.assertIsNotNone(spec)
+        self.assertEqual(len(positions), 2)
+        self.assertGreater(positions[0].x, 0.05)
+        self.assertLess(positions[1].x, 0.05)
+
+    def test_dimension_set_hit_testing_delegates_to_member_geometry(self):
+        member = {
+            "value": 1.0,
+            "line_start_screen": Vector((0.0, 0.0)),
+            "line_end_screen": Vector((100.0, 0.0)),
+            "line_mid_screen": Vector((50.0, 0.0)),
+            "line_direction_screen": Vector((1.0, 0.0)),
+            "anchor_start_screen": Vector((0.0, -20.0)),
+            "anchor_end_screen": Vector((100.0, -20.0)),
+            "measurement_state": "LIVE",
+            "text_placement": "INLINE",
+            "precision": 3,
+            "text_size": 14,
+            "arrow_size": 10.0,
+        }
+        geometry = {"annotation_kind": "DIMENSION_SET", "members": (member,)}
+        distance = _geometry_hit_distance(bpy.context, geometry, 3, Vector((50.0, 0.0)))
+        self.assertLess(distance, 1e-6)
+        self.assertIsNone(_geometry_hit_distance(
+            bpy.context, {"annotation_kind": "DIMENSION_SET", "members": ()}, 3, Vector(),
+        ))
+
+    def test_baseline_viewport_spacing_is_a_minimum_not_a_replacement(self):
+        obj = self._set("BASELINE", ((0, 0, 0), (1, 0, 0), (2, 0, 0)))
+        props = obj.dimension_props
+
+        def project(_context, start, end, geometry):
+            line_start = Vector((geometry["line_start_world"].x, geometry["line_start_world"].y * 100.0))
+            line_end = Vector((geometry["line_end_world"].x, geometry["line_end_world"].y * 100.0))
+            return {
+                "anchor_start_screen": Vector((start.x, start.y * 100.0)),
+                "anchor_end_screen": Vector((end.x, end.y * 100.0)),
+                "line_start_screen": line_start,
+                "line_end_screen": line_end,
+                "line_mid_screen": (line_start + line_end) * 0.5,
+                "line_direction_screen": Vector((1.0, 0.0)),
+            }
+
+        def style(_context, _props, geometry):
+            geometry.update({
+                "precision": 3, "text_size": 14, "arrow_size": 10.0,
+                "color": (1.0, 1.0, 1.0, 1.0),
+                "selected_color": (1.0, 0.7, 0.2, 1.0),
+            })
+            return geometry
+
+        with (
+            patch("dimensions.drawing._project_dimension_geometry", side_effect=project),
+            patch("dimensions.drawing._annotation_style", side_effect=style),
+        ):
+            props.set_spacing = 1.0
+            expanded = _build_dimension_set_geometry(bpy.context, props)
+            self.assertAlmostEqual(
+                expanded["members"][1]["line_mid_screen"].y - expanded["members"][0]["line_mid_screen"].y,
+                100.0,
+            )
+            props.set_spacing = 0.01
+            clamped = _build_dimension_set_geometry(bpy.context, props)
+            self.assertAlmostEqual(
+                clamped["members"][1]["line_mid_screen"].y - clamped["members"][0]["line_mid_screen"].y,
+                21.0,
+            )
 
     def test_set_generates_through_the_out01_operator(self):
         obj = self._set("BASELINE", ((0, 0, 0), (1, 0, 0), (2, 0, 0)))

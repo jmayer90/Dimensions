@@ -264,9 +264,22 @@ def build_dimension_geometry_for_object(context, dimension_object):
 
 def _build_dimension_set_geometry(context, props):
     members = []
+    invalid_member_count = 0
     presentation_offset = Vector(props.presentation_offset)
     for item in dimension_set_world_geometry(props):
         world_geometry = dict(item)
+        if not item.get("geometry_valid", True):
+            invalid_member_count += 1
+            fallback_direction = item["end_world"] - item["start_world"]
+            if fallback_direction.length < 1e-6:
+                continue
+            offset = Vector(item["offset_direction_world"]) * float(item["offset_distance"])
+            world_geometry.update({
+                "line_start_world": item["start_world"] + offset,
+                "line_end_world": item["end_world"] + offset,
+                "line_mid_world": (item["start_world"] + item["end_world"]) * 0.5 + offset,
+                "measure_direction_world": fallback_direction.normalized(),
+            })
         if presentation_offset.length_squared > 1e-12:
             for key in ("line_start_world", "line_end_world", "line_mid_world"):
                 world_geometry[key] = world_geometry[key] + presentation_offset
@@ -279,11 +292,12 @@ def _build_dimension_set_geometry(context, props):
             "value": item["value"],
             "dimension_type": props.dimension_type,
             "measurement_mode": "TRUE",
-            "measurement_state": item["state"],
+            "measurement_state": "NEEDS_REPAIR" if not item.get("geometry_valid", True) else item["state"],
             "text_placement": "INLINE",
             "custom_text": "",
             "custom_text_position": "ABOVE",
             "set_member_index": item["index"],
+            "invalid_set_geometry": not item.get("geometry_valid", True),
         })
         styled = _annotation_style(context, props, screen)
         if props.set_kind == "BASELINE" and members:
@@ -295,12 +309,15 @@ def _build_dimension_set_geometry(context, props):
             if perpendicular.dot(source_side) < 0.0:
                 perpendicular.negate()
             required_pitch = styled["text_size"] * 1.5
-            desired_mid = first["line_mid_screen"] + perpendicular * (item["index"] * required_pitch)
+            actual_distance = (styled["line_mid_screen"] - first["line_mid_screen"]).dot(perpendicular)
+            desired_distance = max(actual_distance, item["index"] * required_pitch)
+            desired_mid = first["line_mid_screen"] + perpendicular * desired_distance
             delta = desired_mid - styled["line_mid_screen"]
             for key in ("line_start_screen", "line_end_screen", "line_mid_screen"):
                 styled[key] = styled[key] + delta
-        estimated_label_width = max(3.0, len(str(round(item["value"], styled["precision"])))) * styled["text_size"] * 0.58
-        if (screen["line_end_screen"] - screen["line_start_screen"]).length < estimated_label_width + styled["arrow_size"] * 2.0:
+        label = _format_linear_dimension_label(context, styled, styled["precision"])
+        label_width = _text_dimensions(label, styled["text_size"])[0]
+        if (styled["line_end_screen"] - styled["line_start_screen"]).length < label_width + styled["arrow_size"] * 2.0:
             styled["text_placement"] = "OUTSIDE" if item["index"] % 2 == 0 else "OUTSIDE_START"
         members.append(styled)
     if not members:
@@ -309,7 +326,8 @@ def _build_dimension_set_geometry(context, props):
         "annotation_kind": "DIMENSION_SET",
         "set_kind": props.set_kind,
         "members": tuple(members),
-        "measurement_state": dimension_set_state(props),
+        "measurement_state": "NEEDS_REPAIR" if invalid_member_count else dimension_set_state(props),
+        "invalid_member_count": invalid_member_count,
         "color": members[0]["color"],
         "selected_color": members[0]["selected_color"],
         "precision": members[0]["precision"],
@@ -1130,9 +1148,12 @@ def _draw_interaction_status(state):
     inference = state.get("inference_status", "")
     if inference:
         parts.append(inference)
+    interaction_warning = state.get("interaction_warning", "")
+    if interaction_warning:
+        parts.append(interaction_warning)
     color = (
         (1.0, 0.22, 0.12, 1.0)
-        if not state.get("distance_input_valid", True)
+        if not state.get("distance_input_valid", True) or interaction_warning
         else (0.72, 0.78, 0.88, 0.78)
     )
     _draw_text_left(" · ".join(parts), Vector((24.0, 44.0)), color, 12)
@@ -1285,7 +1306,8 @@ def _collect_dimension_geometry(context, batcher, geometry, color, precision):
         return
     if geometry.get("annotation_kind") == "DIMENSION_SET":
         for member in geometry["members"]:
-            _collect_dimension_geometry(context, batcher, member, color, member["precision"])
+            member_color = (1.0, 0.18, 0.12, 1.0) if member.get("invalid_set_geometry") else color
+            _collect_dimension_geometry(context, batcher, member, member_color, member["precision"])
         return
     if geometry.get("annotation_kind") == "AREA":
         _collect_area_geometry(context, batcher, geometry, color, precision)
@@ -2055,6 +2077,14 @@ def _project_world_to_screen(context, world_co):
 
 
 def _geometry_hit_distance(context, geometry, precision, mouse):
+    if geometry.get("annotation_kind") == "DIMENSION_SET":
+        distances = tuple(
+            distance for distance in (
+            _geometry_hit_distance(context, member, member.get("precision", precision), mouse)
+            for member in geometry.get("members", ())
+            ) if distance is not None
+        )
+        return None if not distances else min(distances)
     if geometry.get("annotation_kind") in {"COORDINATE", "ELEVATION"}:
         return _point_to_segment_distance(mouse, geometry["leader_start_screen"], geometry["leader_end_screen"])
     if geometry.get("annotation_kind") == "AREA":

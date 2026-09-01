@@ -1,7 +1,7 @@
 # DIM-03 — Coordinate and elevation dimensions
 
 **Milestone:** M5 Documentation-grade
-**Status:** ✅ Complete in 0.5.0.
+**Status:** ✅ Complete in 0.5.0; explicit datum and viewport acquisition hardened in the 0.6.0 candidate.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.
@@ -85,6 +85,12 @@ datum motion and repair propagation, relative-state precedence, row alignment,
 zero-decimal formatting, generated output structure, and save/reload of datum,
 coordinate, and relative-elevation bindings. The full smoke, lifecycle, and output
 geometry suites pass.
+
+The 0.6.0 hardening pass removes the ambiguous first-datum fallback: an active or
+explicitly chosen datum is required when several exist. Object Mode now acquires
+the annotated point through shared snapping, inference, and active-plane
+projection; Mesh Edit Mode binds exactly one selected vertex. Modal cancel and
+persistent vertex-source coverage are part of the 61-test Blender 5.2 adapter suite.
 
 ## Out of scope
 

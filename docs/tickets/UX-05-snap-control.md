@@ -68,11 +68,14 @@ released schema-v2 fixture verifies the additive migration defaults. Blender 5.2
 foreground QA projected a real mesh vertex in a live 3D View: Vertex-only snapping
 returned the vertex, disabling Vertex skipped the candidate entirely, and re-enabling
 it restored the same candidate. The temporary object and scene settings were removed
-or restored after the check.
+or restored after the check. The 0.6.0 foreground follow-up also makes the add-on
+Snap Radius authoritative with preference targets, switches radius and targets
+together under Scene Override, and restores distance-led scoring so enabled target
+types remain selectable rather than a far vertex owning the entire aperture.
 
 ## Out of scope
 
-- Changing the scoring function for enabled types.
+- Per-tool scoring profiles or different priority tables by annotation kind.
 - Per-annotation-type snap profiles (for example, "areas only snap to faces"). Possibly useful later; not now.
 
 ## Invariants

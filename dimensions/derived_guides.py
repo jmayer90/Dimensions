@@ -86,62 +86,82 @@ def centerline_preview(first, second, direction):
 
 
 def resolve_source(source, visited=None):
+    """Resolve one derived-guide source without persisting dependency state."""
+    geometry, state = source_resolution(source, visited)
+    return geometry if state == "LIVE" else None
+
+
+def source_resolution(source, visited=None):
+    """Return current source geometry and its pure resolution state."""
     kind = getattr(source, "kind", "NONE")
     if kind == "EDGE":
         start, start_status = anchor_resolution(source.start)
         end, end_status = anchor_resolution(source.end)
         if start_status != "BY_ID" or end_status != "BY_ID" or (end - start).length < EPSILON:
-            return None
-        return {"kind": "LINE", "origin": start, "direction": (end - start).normalized()}
+            return None, "NEEDS_REPAIR"
+        return {"kind": "LINE", "origin": start, "direction": (end - start).normalized()}, "LIVE"
     if kind == "GUIDE":
         guide = getattr(source, "guide_object", None)
         if getattr(getattr(guide, "guide_props", None), "kind", "") == "PLANE":
-            from .guide_planes import resolve_guide_plane
-            frame = resolve_guide_plane(guide, visited)
-            if frame is None:
-                return None
-            return {"kind": "PLANE", "origin": frame[0], "normal": frame[3]}
-        line = resolve_derived_guide(guide, visited)
-        if line is None:
-            return None
-        return {"kind": "LINE", "origin": line[0], "direction": line[1]}
+            from .guide_planes import guide_plane_resolution
+
+            frame, state = guide_plane_resolution(guide, visited)
+            if state != "LIVE" or frame is None:
+                return None, state
+            return {"kind": "PLANE", "origin": frame[0], "normal": frame[3]}, "LIVE"
+        line, state = derived_guide_resolution(guide, visited)
+        if state != "LIVE" or line is None:
+            return None, state
+        return {"kind": "LINE", "origin": line[0], "direction": line[1]}, "LIVE"
     if kind == "FACE":
         obj = getattr(source, "target_object", None)
         if obj is None or obj.type != "MESH":
-            return None
+            return None, "NEEDS_REPAIR"
         matches = _faces_by_id(obj).get(getattr(source, "face_id", 0), ())
         if len(matches) != 1 or len(matches[0].verts) != source.face_vertex_count:
-            return None
+            return None, "NEEDS_REPAIR"
         result = _evaluate_faces(obj, matches)
         if result is None:
-            return None
-        return {"kind": "PLANE", "origin": result["center"], "normal": result["normal"]}
-    return None
+            return None, "NEEDS_REPAIR"
+        return {"kind": "PLANE", "origin": result["center"], "normal": result["normal"]}, "LIVE"
+    return None, "NEEDS_REPAIR"
 
 
 def resolve_derived_guide(guide, visited=None):
-    """Resolve an infinite guide line, refusing dependency cycles."""
+    """Resolve an infinite guide line without mutating persistent state."""
+    line, state = derived_guide_resolution(guide, visited)
+    return line if state == "LIVE" else None
+
+
+def derived_guide_resolution(guide, visited=None):
+    """Return the current guide line and pure dependency state."""
     if guide is None or not getattr(getattr(guide, "guide_props", None), "enabled", False):
-        return None
+        return None, "NEEDS_REPAIR"
     props = guide.guide_props
     if getattr(props, "kind", "GUIDE") != "GUIDE":
-        return None
+        return None, "NEEDS_REPAIR"
     visited = set() if visited is None else set(visited)
     identity = guide.as_pointer() if hasattr(guide, "as_pointer") else id(guide)
     if identity in visited:
-        _set_state(props, "CYCLE")
-        return None
+        return None, "CYCLE"
     visited.add(identity)
     if not getattr(props, "derived", False):
         result = _fixed_line(props)
-        _set_state(props, "LIVE" if result is not None else "NEEDS_REPAIR")
-        return result
+        return result, "LIVE" if result is not None else "NEEDS_REPAIR"
 
-    source_a = resolve_source(props.source_a, visited)
-    source_b = resolve_source(props.source_b, visited) if props.derivation_mode == "CENTERLINE" else None
+    if props.derivation_mode == "SPACING":
+        lines, state = spacing_guide_resolution(guide, visited)
+        return (None if not lines else lines[0]), state
+
+    source_a, source_a_state = source_resolution(props.source_a, visited)
+    source_b, source_b_state = (
+        source_resolution(props.source_b, visited)
+        if props.derivation_mode == "CENTERLINE" else (None, "LIVE")
+    )
+    if "CYCLE" in {source_a_state, source_b_state}:
+        return None, "CYCLE"
     if source_a is None or (props.derivation_mode == "CENTERLINE" and source_b is None):
-        _set_state(props, "NEEDS_REPAIR")
-        return None
+        return None, "NEEDS_REPAIR"
 
     if props.derivation_mode == "CENTERLINE":
         result = _centerline(source_a, source_b, Vector(props.derived_direction))
@@ -150,16 +170,9 @@ def resolve_derived_guide(guide, visited=None):
         result = None if pivot_status != "BY_ID" else _angular_line(
             source_a, pivot, props.guide_angle, Vector(props.derived_direction),
         )
-    elif props.derivation_mode == "SPACING":
-        lines = spaced_guide_lines(guide, visited)
-        result = None if not lines else lines[0]
     else:
         result = _offset_line(source_a, props.offset_distance, props.offset_side, Vector(props.derived_direction))
-    _set_state(props, "LIVE" if result is not None else "NEEDS_REPAIR")
-    if result is not None:
-        props.last_resolved_origin = tuple(result[0])
-        props.last_resolved_direction = tuple(result[1])
-    return result
+    return result, "LIVE" if result is not None else "NEEDS_REPAIR"
 
 
 def angular_preview_line(source, pivot, angle, plane_normal):
@@ -201,30 +214,36 @@ def spacing_definition(props):
 
 
 def spaced_guide_lines(guide, visited=None):
+    """Resolve repeated guide lines without mutating persistent state."""
+    lines, state = spacing_guide_resolution(guide, visited)
+    return lines if state == "LIVE" else ()
+
+
+def spacing_guide_resolution(guide, visited=None):
+    """Return repeated guide lines and their pure dependency state."""
     if guide is None or not getattr(getattr(guide, "guide_props", None), "enabled", False):
-        return ()
+        return (), "NEEDS_REPAIR"
     props = guide.guide_props
     if not props.derived or props.derivation_mode != "SPACING":
-        return ()
-    source = resolve_source(props.source_a, visited)
+        return (), "NEEDS_REPAIR"
+    source, source_state = source_resolution(props.source_a, visited)
+    if source_state == "CYCLE":
+        return (), "CYCLE"
     origin, origin_status = anchor_resolution(props.construction_pivot)
     if source is None or origin_status != "BY_ID":
-        _set_state(props, "NEEDS_REPAIR")
-        return ()
+        return (), "NEEDS_REPAIR"
     if source["kind"] == "PLANE":
         direction = _plane_tangent(source["normal"], Vector(props.derived_direction))
     else:
         direction = Vector(source["direction"]).normalized()
     if direction is None:
-        _set_state(props, "NEEDS_REPAIR")
-        return ()
+        return (), "NEEDS_REPAIR"
     offset = Vector(props.derived_direction) - direction * Vector(props.derived_direction).dot(direction)
     distributed_extent = None
     if props.spacing_mode == "DISTRIBUTE":
         end, end_status = anchor_resolution(props.spacing_end)
         if end_status != "BY_ID":
-            _set_state(props, "NEEDS_REPAIR")
-            return ()
+            return (), "NEEDS_REPAIR"
         between = Vector(end) - Vector(origin)
         perpendicular_between = between - direction * between.dot(direction)
         if perpendicular_between.length >= EPSILON:
@@ -235,17 +254,13 @@ def spaced_guide_lines(guide, visited=None):
     if offset.length < EPSILON:
         offset = direction.cross(Vector((0.0, 1.0, 0.0)))
     if offset.length < EPSILON:
-        _set_state(props, "NEEDS_REPAIR")
-        return ()
+        return (), "NEEDS_REPAIR"
     offset.normalize()
     interval, count = spacing_definition(props)
     if distributed_extent is not None:
         interval = distributed_extent / (count - 1)
     lines = tuple((Vector(origin) + offset * interval * index, direction.copy()) for index in range(count))
-    _set_state(props, "LIVE")
-    props.last_resolved_origin = tuple(lines[0][0])
-    props.last_resolved_direction = tuple(direction)
-    return lines
+    return lines, "LIVE"
 
 
 def would_create_cycle(target, source_guides):
@@ -351,6 +366,19 @@ def _clear_source(source):
     source.kind = "NONE"
     source.target_object = None
     source.guide_object = None
+
+
+def store_derived_guide_resolution(props, line, state):
+    """Persist a computed guide resolution from the scene-sync write phase."""
+    from .properties import is_read_only_dimensions_object
+
+    owner = getattr(props, "id_data", None)
+    if owner is not None and is_read_only_dimensions_object(owner):
+        return
+    _set_state(props, state)
+    if line is not None:
+        props.last_resolved_origin = tuple(line[0])
+        props.last_resolved_direction = tuple(line[1])
 
 
 def _set_state(props, state):

@@ -4,6 +4,7 @@ import bpy
 from mathutils import Vector
 
 from .. import messages
+from ..anchors import set_anchor_from_snap
 from ..collections import create_guide_object
 from ..derived_guides import (
     bind_source_from_snap,
@@ -20,6 +21,7 @@ from ..keymaps import modal_action_from_event
 from ..snapping import copy_snap, find_nearest_snap_point, get_mouse_ray, project_mouse_to_plane
 from ..snap_targets import handle_snap_target_event
 from ..units import format_length, parse_distance_input
+from ..properties import is_read_only_dimensions_object
 
 
 def eligible_offset_source(snap):
@@ -238,7 +240,7 @@ class DIMENSIONS_OT_DetachDerivedGuide(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.view_layer.objects.active
-        if obj is None or not detach_derived_guide(obj):
+        if obj is None or is_read_only_dimensions_object(obj) or not detach_derived_guide(obj):
             self.report(messages.WARNING, messages.SELECT_DERIVED_GUIDE)
             return {"CANCELLED"}
         self.report(messages.INFO, messages.DETACHED_DERIVED_GUIDE)
@@ -252,13 +254,22 @@ class DIMENSIONS_OT_RepairDerivedGuideSource(bpy.types.Operator):
 
     source_slot: bpy.props.EnumProperty(
         name="Source",
-        items=[("A", "Source A", "Replace the first source"), ("B", "Source B", "Replace the second source")],
+        items=[
+            ("A", "Source A", "Replace the first source"),
+            ("B", "Source B", "Replace the second source"),
+            ("PIVOT", "Origin / Pivot", "Replace the angular pivot or spacing origin"),
+            ("SPACING_END", "Spacing End", "Replace the distribute-mode end reference"),
+        ],
         default="A",
     )
 
     def invoke(self, context, _event):
         obj = context.view_layer.objects.active
-        if obj is None or not getattr(getattr(obj, "guide_props", None), "derived", False):
+        if (
+            obj is None
+            or not getattr(getattr(obj, "guide_props", None), "derived", False)
+            or is_read_only_dimensions_object(obj)
+        ):
             self.report(messages.WARNING, messages.SELECT_DERIVED_GUIDE)
             return {"CANCELLED"}
         self.guide = obj
@@ -268,8 +279,16 @@ class DIMENSIONS_OT_RepairDerivedGuideSource(bpy.types.Operator):
 
     def modal(self, context, event):
         if event.type == "MOUSEMOVE":
-            snap = find_nearest_snap_point(context, event.mouse_region_x, event.mouse_region_y, include_free=False)
-            self.hover_snap = copy_snap(snap) if eligible_offset_source(snap) else None
+            repairs_anchor = self.source_slot in {"PIVOT", "SPACING_END"}
+            snap = find_nearest_snap_point(
+                context, event.mouse_region_x, event.mouse_region_y,
+                include_free=repairs_anchor,
+            )
+            self.hover_snap = (
+                copy_snap(snap)
+                if snap is not None and (repairs_anchor or eligible_offset_source(snap))
+                else None
+            )
             set_guide_preview_state({
                 "state": "REPAIR_DERIVED_GUIDE",
                 "hover_screen": None if self.hover_snap is None else self.hover_snap["screen_co"],
@@ -277,6 +296,17 @@ class DIMENSIONS_OT_RepairDerivedGuideSource(bpy.types.Operator):
             })
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "PRESS" and self.hover_snap is not None:
+            if self.source_slot in {"PIVOT", "SPACING_END"}:
+                anchor = (
+                    self.guide.guide_props.construction_pivot
+                    if self.source_slot == "PIVOT"
+                    else self.guide.guide_props.spacing_end
+                )
+                set_anchor_from_snap(anchor, self.hover_snap)
+                resolve_derived_guide(self.guide)
+                clear_guide_preview_state()
+                self.report(messages.INFO, messages.REATTACHED_DERIVED_GUIDE_SOURCE)
+                return {"FINISHED"}
             source_guide = self.hover_snap.get("guide_object")
             if source_guide is not None and would_create_cycle(self.guide, (source_guide,)):
                 self.report(messages.WARNING, messages.DERIVED_GUIDE_CYCLE_REFUSED)

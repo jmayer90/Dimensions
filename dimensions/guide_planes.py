@@ -3,7 +3,6 @@
 from mathutils import Vector
 
 from .anchors import anchor_resolution
-from .derived_guides import resolve_source
 
 
 EPSILON = 1e-6
@@ -32,15 +31,25 @@ def plane_frame(origin, normal, preferred_axis=None):
 
 
 def resolve_guide_plane(plane_object, visited=None):
-    """Resolve a saved plane, refusing dependency cycles and exposing repair state."""
+    """Resolve a saved plane without mutating its persistent repair metadata."""
+    frame, state = guide_plane_resolution(plane_object, visited)
+    return frame if state == "LIVE" else None
+
+
+def guide_plane_resolution(plane_object, visited=None):
+    """Return the current frame candidate and state for a saved plane.
+
+    A non-live candidate is retained so scene synchronization can persist the
+    last usable fallback frame. Query callers must use ``resolve_guide_plane``
+    and therefore never treat that candidate as authoritative geometry.
+    """
     props = getattr(plane_object, "guide_props", None)
     if props is None or not props.enabled or getattr(props, "kind", "GUIDE") != "PLANE":
-        return None
+        return None, "NEEDS_REPAIR"
     visited = set() if visited is None else set(visited)
     identity = plane_object.as_pointer() if hasattr(plane_object, "as_pointer") else id(plane_object)
     if identity in visited:
-        _store_state(props, None, "CYCLE")
-        return None
+        return None, "CYCLE"
     visited.add(identity)
 
     definition = getattr(props, "plane_definition", "POINT_NORMAL")
@@ -51,8 +60,7 @@ def resolve_guide_plane(plane_object, visited=None):
         for anchor in (props.plane_point_a, props.plane_point_b, props.plane_point_c):
             point, status = anchor_resolution(anchor)
             if status == "UNRESOLVABLE":
-                _store_state(props, None, "NEEDS_REPAIR")
-                return None
+                return None, "NEEDS_REPAIR"
             fallback = fallback or status != "BY_ID"
             points.append(Vector(point))
         edge_u = points[1] - points[0]
@@ -60,16 +68,21 @@ def resolve_guide_plane(plane_object, visited=None):
         normal = edge_u.cross(edge_v)
         frame = plane_frame(points[0], normal, edge_u)
         if fallback:
-            _store_state(props, frame, "NEEDS_REPAIR")
-            return None
+            return frame, "NEEDS_REPAIR"
     elif definition == "FACE":
-        source = resolve_source(props.source_a, visited)
+        from .derived_guides import source_resolution
+
+        source, source_state = source_resolution(props.source_a, visited)
+        if source_state == "CYCLE":
+            return None, "CYCLE"
         if source is not None and source["kind"] == "PLANE":
             frame = plane_frame(source["origin"], source["normal"], props.plane_axis_u)
     elif definition == "OFFSET":
         source_object = props.source_a.guide_object
-        source_frame = resolve_guide_plane(source_object, visited)
-        if source_frame is not None:
+        source_frame, source_state = guide_plane_resolution(source_object, visited)
+        if source_state == "CYCLE":
+            return None, "CYCLE"
+        if source_state == "LIVE" and source_frame is not None:
             sign = -1.0 if props.offset_side < 0 else 1.0
             origin, axis_u, _axis_v, normal = source_frame
             frame = plane_frame(
@@ -82,13 +95,9 @@ def resolve_guide_plane(plane_object, visited=None):
         if status == "BY_ID":
             frame = plane_frame(point, props.plane_normal, props.plane_axis_u)
         elif status != "UNRESOLVABLE":
-            _store_state(
-                props, plane_frame(point, props.plane_normal, props.plane_axis_u), "NEEDS_REPAIR",
-            )
-            return None
+            return plane_frame(point, props.plane_normal, props.plane_axis_u), "NEEDS_REPAIR"
 
-    _store_state(props, frame, "LIVE" if frame is not None else "NEEDS_REPAIR")
-    return frame
+    return frame, "LIVE" if frame is not None else "NEEDS_REPAIR"
 
 
 def active_plane_frame(scene):
@@ -155,7 +164,8 @@ def plane_space_delta(raw_delta, axis, frame):
     return direction * raw_delta.dot(direction)
 
 
-def _store_state(props, frame, state):
+def store_guide_plane_resolution(props, frame, state):
+    """Persist a computed plane resolution from the scene-sync write phase."""
     from .properties import is_read_only_dimensions_object
 
     owner = getattr(props, "id_data", None)

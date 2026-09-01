@@ -33,8 +33,13 @@ from dimensions.modal_state import HandleManipulationState, PointPlacementState
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
 from dimensions.operators.create_angle import DIMENSIONS_OT_CreateAngle
 from dimensions.operators.create_area import DIMENSIONS_OT_CreateArea
+from dimensions.operators.create_coordinate import _CreateDatumAnnotation
+from dimensions.operators.dimension_set import (
+    DIMENSIONS_OT_CreateDimensionSet,
+    DIMENSIONS_OT_InsertDimensionSetMember,
+)
 from dimensions.operators.measure import CADDIM_OT_Measure
-from dimensions.operators.angular_spacing import angular_preview_state
+from dimensions.operators.angular_spacing import DIMENSIONS_OT_CreateSpacingGuide, angular_preview_state
 from dimensions.viewport_state import clear_state, get_state, set_state
 from dimensions.ui import CADDIM_PT_MainPanel, CADDIM_PT_MeshSelection
 
@@ -334,6 +339,7 @@ class CreateDimensionModalTests(unittest.TestCase):
             CADDIM_OT_CreateDimension,
             _state_machine=PointPlacementState(),
             hover_snap=None,
+            hover_mouse=None,
             start_snap=None,
             end_snap=None,
             offset_distance=0.25,
@@ -482,6 +488,19 @@ class CreateDimensionModalTests(unittest.TestCase):
         self.assertEqual(self.operator.state, PICK_START)
         self.assertGreater(provider.query_count, 0)
 
+    def test_click_at_changed_coordinates_requeries_instead_of_committing_stale_hover(self):
+        self.operator.hover_snap = make_snap((1.0, 0.0, 0.0))
+        self.operator.hover_mouse = Vector((10.0, 10.0))
+        fresh = make_snap((5.0, 0.0, 0.0))
+        with patch("dimensions.operators.create_dimension.find_nearest_snap_point", return_value=fresh) as query:
+            result = self.operator.modal(
+                self.context,
+                make_event("LEFTMOUSE", "PRESS", mouse_region_x=50, mouse_region_y=10),
+            )
+        self.assertEqual(result, {"RUNNING_MODAL"})
+        query.assert_called_once()
+        self.assertEqual(self.operator.start_snap["world_co"], Vector((5.0, 0.0, 0.0)))
+
     def test_a_coincident_second_point_is_refused_with_a_warning(self):
         self._pick_two_points((1.0, 1.0, 1.0), (1.0, 1.0, 1.0))
         self.assertEqual(self.operator.state, PICK_END)
@@ -551,6 +570,382 @@ class CreateDimensionModalTests(unittest.TestCase):
         self.assertIsNone(self.operator.start_snap)
         self.assertIsNone(self.operator.end_snap)
         undo_step.assert_called_once_with("Create Dimension")
+
+
+class CreateDimensionSetModalTests(unittest.TestCase):
+    def setUp(self):
+        self.before_objects = set(bpy.data.objects)
+        self.previous_active = bpy.context.view_layer.objects.active
+        self.context = make_context(scene=bpy.context.scene)
+        self.context.view_layer = bpy.context.view_layer
+        self.operator = make_operator_harness(
+            DIMENSIONS_OT_CreateDimensionSet,
+            set_kind="CHAIN",
+            datum_snap=None,
+            previous_snap=None,
+            hover_snap=None,
+            hover_mouse=None,
+            set_object_name="",
+            axis="ALIGNED",
+            distance_text="",
+            distance_input_valid=True,
+            candidate_issue=None,
+            offset_plane_normal=None,
+            inference_session=InferenceSession(),
+        )
+        remember_session_context(self.operator, self.context)
+
+    def tearDown(self):
+        for obj in list(bpy.data.objects):
+            if obj not in self.before_objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        if self.previous_active is not None and bpy.data.objects.get(self.previous_active.name) is not None:
+            bpy.context.view_layer.objects.active = self.previous_active
+
+    def _drive(self, events, snaps):
+        provider = ScriptedSnapProvider(snaps)
+        with (
+            patch("dimensions.operators.dimension_set.find_nearest_snap_point", provider),
+            patch("dimensions.operators.dimension_set.push_undo_step") as undo_step,
+            patch("dimensions.operators.dimension_set.set_preview_state"),
+        ):
+            results = [self.operator.modal(self.context, event) for event in events]
+        return results, provider, undo_step
+
+    def _created_set(self):
+        return bpy.data.objects.get(self.operator.set_object_name)
+
+    def test_invoke_accepts_object_and_edit_mesh_but_reports_other_modes(self):
+        handlers = []
+        self.context.window_manager = SimpleNamespace(modal_handler_add=handlers.append)
+        self.context.mode = "SCULPT"
+        self.assertEqual(self.operator.invoke(self.context, make_event()), {"CANCELLED"})
+        self.assertTrue(any("Object or Mesh Edit Mode" in message for _severity, message in self.operator.reports))
+
+        self.operator.reports.clear()
+        self.context.mode = "EDIT_MESH"
+        with patch("dimensions.operators.dimension_set.set_preview_state"):
+            self.assertEqual(self.operator.invoke(self.context, make_event()), {"RUNNING_MODAL"})
+        self.assertEqual(handlers, [self.operator])
+
+    def test_chain_continues_after_its_owned_active_object_change(self):
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        results, _provider, undo_step = self._drive(
+            [click, move, click, move, click],
+            [make_snap((0, 0, 0)), make_snap((1, 0, 0)), make_snap((2, 0, 0))],
+        )
+        obj = self._created_set()
+        self.assertTrue(all(result == {"RUNNING_MODAL"} for result in results))
+        self.assertIsNotNone(obj)
+        self.assertEqual(len(obj.dimension_props.set_members), 2)
+        self.assertFalse(session_context_changed(self.operator, self.context))
+        self.assertEqual(undo_step.call_count, 2)
+        self.assertEqual(self.operator.modal(self.context, make_event("ESC", "PRESS")), {"FINISHED"})
+
+    def test_baseline_members_keep_one_datum(self):
+        self.operator.set_kind = "BASELINE"
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        self._drive(
+            [click, move, click, move, click],
+            [make_snap((0, 0, 0)), make_snap((1, 0, 0)), make_snap((2, 0, 0))],
+        )
+        starts = [tuple(member.start.world_co) for member in self._created_set().dimension_props.set_members]
+        self.assertEqual(starts, [(0.0, 0.0, 0.0), (0.0, 0.0, 0.0)])
+
+    def test_axis_constraint_and_typed_distance_commit_world_endpoint(self):
+        self.assertEqual(self.operator.modal(self.context, make_event("Y", "PRESS")), {"RUNNING_MODAL"})
+        provider = ScriptedSnapProvider([make_snap((0, 0, 0)), make_snap((1, 1, 0))])
+        with (
+            patch("dimensions.operators.dimension_set.find_nearest_snap_point", provider),
+            patch("dimensions.operators.dimension_set.push_undo_step"),
+            patch("dimensions.operators.dimension_set.set_preview_state"),
+        ):
+            self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS"))
+            self.operator.modal(self.context, make_event("MOUSEMOVE", "PRESS"))
+            self.operator.modal(self.context, make_event("TEXTINPUT", "PRESS", ascii_character="2"))
+            self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS"))
+        member = self._created_set().dimension_props.set_members[0]
+        self.assertEqual(tuple(member.end.world_co), (0.0, 2.0, 0.0))
+        self.assertEqual(self._created_set().dimension_props.dimension_type, "Y")
+
+    def test_step_back_removes_last_member_then_returns_to_datum_pick(self):
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        self._drive([click, move, click], [make_snap((0, 0, 0)), make_snap((1, 0, 0))])
+        self.assertIsNotNone(self._created_set())
+        with patch("dimensions.operators.dimension_set.set_preview_state"):
+            self.operator.modal(self.context, make_event("BACK_SPACE", "PRESS"))
+        self.assertEqual(self.operator.set_object_name, "")
+        self.assertIsNotNone(self.operator.datum_snap)
+        with patch("dimensions.operators.dimension_set.set_preview_state"):
+            self.operator.modal(self.context, make_event("BACK_SPACE", "PRESS"))
+        self.assertIsNone(self.operator.datum_snap)
+
+    def test_perpendicular_member_is_refused_before_persistence(self):
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        self._drive(
+            [click, move, click, move, click],
+            [make_snap((0, 0, 0)), make_snap((2, 0, 0)), make_snap((2, 3, 0))],
+        )
+        obj = self._created_set()
+        self.assertEqual(len(obj.dimension_props.set_members), 1)
+        self.assertTrue(any("shared axis" in message.lower() for _severity, message in self.operator.reports))
+
+    def test_oblique_or_reverse_chain_points_are_refused_before_persistence(self):
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        self._drive(
+            [click, move, click, move, click, move, click],
+            [make_snap((0, 0, 0)), make_snap((2, 0, 0)), make_snap((3, 1, 0)), make_snap((1, 0, 0))],
+        )
+        obj = self._created_set()
+        self.assertEqual(len(obj.dimension_props.set_members), 1)
+        report_text = " ".join(message for _severity, message in self.operator.reports)
+        self.assertIn("shared axis", report_text)
+        self.assertIn("farther along", report_text)
+
+    def test_axis_cannot_change_after_the_first_set_member(self):
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        self._drive([click, move, click], [make_snap((0, 0, 0)), make_snap((2, 0, 0))])
+        obj = self._created_set()
+        original_axis = obj.dimension_props.dimension_type
+        self.assertEqual(self.operator.modal(self.context, make_event("Y", "PRESS")), {"RUNNING_MODAL"})
+        self.assertEqual(obj.dimension_props.dimension_type, original_axis)
+        self.assertTrue(any("fixed" in message.lower() for _severity, message in self.operator.reports))
+
+    def test_inference_lock_and_active_plane_are_forwarded(self):
+        self.operator.inference_session.references = [{
+            "label": "Edge", "reference_line": ((0, 0, 0), (1, 0, 0)),
+        }]
+        with patch("dimensions.operators.dimension_set.set_preview_state") as preview:
+            self.assertEqual(self.operator.modal(self.context, make_event("L", "PRESS")), {"RUNNING_MODAL"})
+            self.assertTrue(self.operator.inference_session.locked)
+            self.assertIn("inference_status", preview.call_args.args[0])
+
+        calls = []
+        frame = (Vector((0, 0, 0)), Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1)))
+        with (
+            patch("dimensions.guide_planes.active_plane_frame", return_value=frame),
+            patch("dimensions.operators.dimension_set.find_nearest_snap_point", side_effect=lambda *_args, **kwargs: calls.append(kwargs) or make_snap((0, 0, 0))),
+            patch("dimensions.operators.dimension_set.set_preview_state"),
+        ):
+            self.operator.modal(self.context, make_event("MOUSEMOVE", "PRESS"))
+        self.assertEqual(tuple(calls[0]["plane_point"]), (0.0, 0.0, 0.0))
+        self.assertEqual(tuple(calls[0]["plane_normal"]), (0.0, 0.0, 1.0))
+
+    def test_edit_mode_creation_does_not_replace_the_active_mesh(self):
+        mesh = bpy.data.meshes.new("Dimension Set Modal Edit Source")
+        source = bpy.data.objects.new("Dimension Set Modal Edit Source", mesh)
+        bpy.context.scene.collection.objects.link(source)
+        bpy.context.view_layer.objects.active = source
+        self.context.mode = "EDIT_MESH"
+        remember_session_context(self.operator, self.context)
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        self._drive([click, move, click], [make_snap((0, 0, 0)), make_snap((1, 0, 0))])
+        self.assertEqual(bpy.context.view_layer.objects.active, source)
+        self.assertEqual(len(self._created_set().dimension_props.set_members), 1)
+
+    def test_insert_click_without_prior_mousemove_requeries_and_cancel_cleans_preview(self):
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        self._drive([click, move, click], [make_snap((0, 0, 0)), make_snap((1, 0, 0))])
+        obj = self._created_set()
+        insert = make_operator_harness(
+            DIMENSIONS_OT_InsertDimensionSetMember,
+            object_name=obj.name,
+            member_index=0,
+            hover_snap=None,
+        )
+        remember_session_context(insert, self.context)
+        with (
+            patch("dimensions.operators.dimension_set.find_nearest_snap_point", return_value=make_snap((0.5, 0, 0))),
+            patch("dimensions.operators.dimension_set.clear_preview_state") as clear_preview,
+        ):
+            self.assertEqual(insert.modal(self.context, click), {"FINISHED"})
+            clear_preview.assert_called_once()
+        self.assertEqual(len(obj.dimension_props.set_members), 2)
+
+        insert.hover_snap = None
+        remember_session_context(insert, self.context)
+        with patch("dimensions.operators.dimension_set.clear_preview_state") as clear_preview:
+            self.assertEqual(insert.modal(self.context, make_event("ESC", "PRESS")), {"CANCELLED"})
+            clear_preview.assert_called_once()
+
+    def test_insert_refuses_a_coincident_split_point(self):
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        self._drive([click, move, click], [make_snap((0, 0, 0)), make_snap((1, 0, 0))])
+        obj = self._created_set()
+        insert = make_operator_harness(
+            DIMENSIONS_OT_InsertDimensionSetMember,
+            object_name=obj.name,
+            member_index=0,
+            hover_snap=make_snap((0, 0, 0)),
+            hover_mouse=Vector((0, 0)),
+        )
+        remember_session_context(insert, self.context)
+        self.assertEqual(insert.modal(self.context, click), {"RUNNING_MODAL"})
+        self.assertEqual(len(obj.dimension_props.set_members), 1)
+        self.assertTrue(any("different" in message.lower() for _severity, message in insert.reports))
+
+    def test_insert_refuses_off_axis_or_outside_split_points(self):
+        click = make_event("LEFTMOUSE", "PRESS")
+        move = make_event("MOUSEMOVE", "PRESS")
+        self._drive([click, move, click], [make_snap((0, 0, 0)), make_snap((2, 0, 0))])
+        obj = self._created_set()
+        insert = make_operator_harness(
+            DIMENSIONS_OT_InsertDimensionSetMember,
+            object_name=obj.name,
+            member_index=0,
+            hover_snap=None,
+            hover_mouse=None,
+        )
+        remember_session_context(insert, self.context)
+        with patch(
+            "dimensions.operators.dimension_set.find_nearest_snap_point",
+            side_effect=[make_snap((1, 1, 0)), make_snap((3, 0, 0))],
+        ):
+            self.assertEqual(insert.modal(self.context, click), {"RUNNING_MODAL"})
+            insert.hover_snap = None
+            insert.hover_mouse = None
+            self.assertEqual(insert.modal(self.context, click), {"RUNNING_MODAL"})
+        self.assertEqual(len(obj.dimension_props.set_members), 1)
+        report_text = " ".join(message for _severity, message in insert.reports)
+        self.assertIn("shared axis", report_text)
+        self.assertIn("farther along", report_text)
+
+
+class CreateSpacingGuideModalTests(unittest.TestCase):
+    def setUp(self):
+        from dimensions.anchors import set_world_anchor
+        from dimensions.collections import create_guide_object
+
+        self.before_objects = set(bpy.data.objects)
+        self.previous_active = bpy.context.view_layer.objects.active
+        self.source = create_guide_object(bpy.context, "GUIDE Spacing Modal Source")
+        set_world_anchor(self.source.guide_props.start, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(self.source.guide_props.end, Vector((1.0, 0.0, 0.0)))
+        bpy.context.view_layer.objects.active = self.source
+        self.context = make_context(scene=bpy.context.scene)
+        self.context.view_layer = bpy.context.view_layer
+        self.context.window_manager = SimpleNamespace(modal_handler_add=lambda _operator: None)
+        self.operator = make_operator_harness(
+            DIMENSIONS_OT_CreateSpacingGuide,
+            mode="COUNT",
+            interval=1.0,
+            count=3,
+            extent=2.0,
+        )
+
+    def tearDown(self):
+        for obj in list(bpy.data.objects):
+            if obj not in self.before_objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        if self.previous_active is not None and bpy.data.objects.get(self.previous_active.name) is not None:
+            bpy.context.view_layer.objects.active = self.previous_active
+
+    def test_click_without_mousemove_acquires_the_spacing_origin(self):
+        mesh = bpy.data.meshes.new("Spacing Modal Point")
+        mesh.from_pydata([(2.0, 3.0, 0.0)], [], [])
+        target = bpy.data.objects.new("Spacing Modal Point", mesh)
+        bpy.context.scene.collection.objects.link(target)
+        snap = make_snap((2.0, 3.0, 0.0), snap_type="VERTEX", obj=target, vertex_index=0)
+        try:
+            with patch("dimensions.operators.angular_spacing.set_guide_preview_state"):
+                self.assertEqual(self.operator.invoke(self.context, make_event()), {"RUNNING_MODAL"})
+            with (
+                patch("dimensions.operators.angular_spacing.find_nearest_snap_point", return_value=snap),
+                patch("dimensions.operators.angular_spacing.set_guide_preview_state"),
+                patch("dimensions.operators.angular_spacing.clear_guide_preview_state") as clear_preview,
+            ):
+                self.assertEqual(
+                    self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS")),
+                    {"FINISHED"},
+                )
+                clear_preview.assert_called_once()
+            created = bpy.context.view_layer.objects.active
+            self.assertEqual(created.guide_props.construction_pivot.anchor_type, "VERTEX")
+            self.assertEqual(created.guide_props.construction_pivot.target_object, target)
+        finally:
+            if target.name in bpy.data.objects:
+                bpy.data.objects.remove(target, do_unlink=True)
+            if mesh.name in bpy.data.meshes:
+                bpy.data.meshes.remove(mesh)
+
+
+class CreateDatumAnnotationModalTests(unittest.TestCase):
+    def setUp(self):
+        from dimensions.anchors import set_world_anchor
+        from dimensions.collections import create_guide_point_object
+
+        self.before_objects = set(bpy.data.objects)
+        self.previous_active = bpy.context.view_layer.objects.active
+        self.datum = create_guide_point_object(bpy.context, "DATUM Modal")
+        self.datum.guide_props.is_datum = True
+        self.datum.guide_props.datum_name = "Modal"
+        set_world_anchor(self.datum.guide_props.start, Vector((0.0, 0.0, 0.0)))
+        self.context = make_context(scene=bpy.context.scene)
+        self.context.view_layer = bpy.context.view_layer
+        self.context.window_manager = SimpleNamespace(modal_handler_add=lambda _operator: None)
+        self.operator = make_operator_harness(
+            _CreateDatumAnnotation,
+            datum_name="",
+            datum_object_name=self.datum.name,
+            annotation_kind="COORDINATE",
+        )
+
+    def tearDown(self):
+        for obj in list(bpy.data.objects):
+            if obj not in self.before_objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        if self.previous_active is not None and bpy.data.objects.get(self.previous_active.name) is not None:
+            bpy.context.view_layer.objects.active = self.previous_active
+
+    def test_object_mode_click_acquires_a_persistent_vertex_anchor(self):
+        from dimensions.anchors import resolve_anchor
+
+        mesh = bpy.data.meshes.new("Coordinate Modal Source")
+        mesh.from_pydata([(4.0, 5.0, 6.0)], [], [])
+        source = bpy.data.objects.new("Coordinate Modal Source", mesh)
+        bpy.context.scene.collection.objects.link(source)
+        snap = make_snap((4.0, 5.0, 6.0), snap_type="VERTEX", obj=source, vertex_index=0)
+        try:
+            with patch("dimensions.operators.create_coordinate.set_preview_state"):
+                self.assertEqual(self.operator.execute(self.context), {"RUNNING_MODAL"})
+            with (
+                patch("dimensions.operators.create_coordinate.find_nearest_snap_point", return_value=snap),
+                patch("dimensions.operators.create_coordinate.set_preview_state"),
+                patch("dimensions.operators.create_coordinate.clear_preview_state") as clear_preview,
+            ):
+                self.assertEqual(
+                    self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS")),
+                    {"FINISHED"},
+                )
+                clear_preview.assert_called_once()
+            created = bpy.context.view_layer.objects.active
+            self.assertEqual(created.dimension_props.datum_object, self.datum)
+            self.assertEqual(created.dimension_props.start.anchor_type, "VERTEX")
+            self.assertEqual(created.dimension_props.start.target_object, source)
+            self.assertEqual(resolve_anchor(created.dimension_props.start), Vector((4.0, 5.0, 6.0)))
+        finally:
+            if mesh.name in bpy.data.meshes:
+                bpy.data.meshes.remove(mesh)
+
+    def test_cancel_clears_point_acquisition_without_creating_an_annotation(self):
+        with patch("dimensions.operators.create_coordinate.set_preview_state"):
+            self.assertEqual(self.operator.execute(self.context), {"RUNNING_MODAL"})
+        with patch("dimensions.operators.create_coordinate.clear_preview_state") as clear_preview:
+            self.assertEqual(self.operator.modal(self.context, make_event("ESC", "PRESS")), {"CANCELLED"})
+            clear_preview.assert_called_once()
+        self.assertFalse(any(
+            getattr(getattr(obj, "dimension_props", None), "annotation_kind", "") == "COORDINATE"
+            for obj in set(bpy.data.objects) - self.before_objects
+        ))
 
 
 class CreateAngleModalTests(unittest.TestCase):
@@ -815,6 +1210,9 @@ def main():
                 HandleManipulationStateTests,
                 InteractionContextTests,
                 CreateDimensionModalTests,
+                CreateDimensionSetModalTests,
+                CreateSpacingGuideModalTests,
+                CreateDatumAnnotationModalTests,
                 CreateAngleModalTests,
                 CreateAreaModalTests,
                 TransientMeasureModalTests,

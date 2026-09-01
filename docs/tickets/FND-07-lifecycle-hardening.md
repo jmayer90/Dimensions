@@ -1,7 +1,7 @@
 # FND-07 — Lifecycle hardening: undo, append, link, multi-scene
 
 **Milestone:** M1 Foundation
-**Status:** ✅ Complete — the background lifecycle matrix and two-window foreground isolation are verified on Blender 5.2.
+**Status:** ✅ Complete — the lifecycle matrix remains verified; query-time RNA writes and linked tool mutations were hardened in the 0.6.0 candidate.
 **Effort:** M
 **Depends on:** FND-02
 **Version impact:** Patch.
@@ -69,6 +69,11 @@ Specific work likely needed:
 - Blender 5.2 foreground: `bpy.ops.wm.window_new_main()` created a second main window for a temporary second scene. Each temporary scene contained one world-anchored dimension with a distinct value (2.0 and 3.0). Each window context resolved its assigned scene; the Annotation Manager registry and scene-owned `Dimensions` collection contained only that scene's object; the other scene's object was absent; and geometry evaluation returned the expected value in both contexts. Cleanup closed the temporary window, restored the original `Scene`, and removed all temporary data.
 - This foreground check is recorded evidence rather than an automated test: Blender background mode cannot exercise multiple application windows reliably.
 - Run: `/app/blender/blender --background --factory-startup --python tests/blender_lifecycle.py`.
+
+The 0.6.0 hardening pass separates pure plane/derived/set queries from the guarded
+scene-sync write phase, removes manager selection writes from panel redraw, and
+adds read-only refusal to guide detach/repair, datum promotion, and Area capture.
+Blender 5.2 passes the expanded 33-test lifecycle/linked-data suite.
 
 ## Out of scope
 

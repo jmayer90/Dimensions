@@ -9,6 +9,7 @@ from ..angle_binding import derive_angle_from_world_edges, set_angle_edge
 from ..collections import create_dimension_object
 from ..constants import DEFAULT_OFFSET_DISTANCE
 from ..dimension_geometry import get_dimension_world_geometry
+from ..properties import is_read_only_dimensions_object
 
 
 _pending_area_annotation_name = ""
@@ -189,10 +190,15 @@ class DIMENSIONS_OT_CaptureArea(bpy.types.Operator):
             and obj.dimension_props.enabled
             and obj.dimension_props.annotation_kind == "AREA"
             and obj.dimension_props.measurement_state in {"LIVE", "FALLBACK"}
+            and not is_read_only_dimensions_object(obj)
         )
 
     def execute(self, context):
-        props = context.view_layer.objects.active.dimension_props
+        annotation = context.view_layer.objects.active
+        if is_read_only_dimensions_object(annotation):
+            self.report(messages.WARNING, messages.MANAGER_LINKED_READ_ONLY)
+            return {"CANCELLED"}
+        props = annotation.dimension_props
         result = evaluate_area_binding(props)
         if result is not None:
             props.area_value = result["area"]

@@ -43,6 +43,7 @@ from dimensions.area_binding import bind_area_face_indices, evaluate_area_bindin
 from dimensions.annotation_manager import (
     annotation_references_object,
     filtered_manager_objects,
+    manager_item_matches,
     registry_rebuild_count,
     sync_annotation_manager,
 )
@@ -114,7 +115,18 @@ from dimensions.operators.create_area import _constrained_label_world
 from dimensions.operators.selection_annotations import DIMENSIONS_OT_CaptureArea
 from dimensions.operators.create_guide import CADDIM_OT_CreateGuide
 from dimensions.operators.create_guide_point import DIMENSIONS_OT_CreateGuidePoint, selection_centroid
-from dimensions.operators.offset_guide import DIMENSIONS_OT_CreateDerivedGuide
+from dimensions.operators.guide_plane import DIMENSIONS_OT_CreateGuidePlane
+from dimensions.operators.offset_guide import (
+    DIMENSIONS_OT_CreateDerivedGuide,
+    DIMENSIONS_OT_DetachDerivedGuide,
+    DIMENSIONS_OT_RepairDerivedGuideSource,
+)
+from dimensions.operators.angular_spacing import DIMENSIONS_OT_CreateSpacingGuide
+from dimensions.operators.measure import CADDIM_OT_Measure
+from dimensions.operators.create_coordinate import (
+    DIMENSIONS_OT_CreateDatum,
+    _CreateDatumAnnotation,
+)
 from dimensions.operators.annotation_manager import isolate_annotations, restore_annotation_visibility
 from dimensions.projected_snap import (
     _build_sources,
@@ -131,6 +143,7 @@ from dimensions.snapping import (
     _add_edge_snap_candidates,
     _best_snap_candidate,
     _best_acquisition_candidate,
+    _configured_snap_pixel_threshold,
     _edit_mesh_projected_vertex_priority,
     _nearest_projected_edit_mesh_element,
     _nearest_projected_vertex,
@@ -1162,6 +1175,14 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
             self.assertIsNotNone(area_dimension_output_spec(
                 annotation, "modifier-live", WorldSizingPolicy(0.01, 0.1),
             ))
+            with patch(
+                "dimensions.operators.selection_annotations.is_read_only_dimensions_object",
+                return_value=True,
+            ):
+                self.assertFalse(DIMENSIONS_OT_CaptureArea.poll(bpy.context))
+                capture = make_operator_harness(DIMENSIONS_OT_CaptureArea)
+                self.assertEqual(capture.execute(bpy.context), {"CANCELLED"})
+            self.assertEqual(props.measurement_state, "LIVE")
         finally:
             bpy.data.objects.remove(annotation, do_unlink=True)
             bpy.data.objects.remove(source, do_unlink=True)
@@ -1322,7 +1343,14 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         face_guide.guide_props.derived_direction = (1.0, 0.0, 0.0)
         self.assertTrue(bind_face_source(face_guide.guide_props.source_a, source, 0))
 
+        edge_guide.guide_props.derived_state = "NEEDS_REPAIR"
+        edge_guide.guide_props.last_resolved_origin = (9.0, 9.0, 9.0)
         self.assertEqual(resolve_derived_guide(edge_guide)[0], Vector((0.0, 2.0, 0.0)))
+        self.assertEqual(edge_guide.guide_props.derived_state, "NEEDS_REPAIR")
+        self.assertEqual(tuple(edge_guide.guide_props.last_resolved_origin), (9.0, 9.0, 9.0))
+        sync_scene_objects(bpy.context.scene)
+        self.assertEqual(edge_guide.guide_props.derived_state, "LIVE")
+        self.assertEqual(tuple(edge_guide.guide_props.last_resolved_origin), (0.0, 2.0, 0.0))
         self.assertEqual(resolve_derived_guide(face_guide)[0], Vector((2.0, 1.5, 2.0)))
         source.location = (0.0, 5.0, 1.0)
         bpy.context.view_layer.update()
@@ -1369,7 +1397,9 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         bind_guide_source(cycle_a.guide_props.source_a, cycle_b)
         bind_guide_source(cycle_b.guide_props.source_a, cycle_a)
         self.assertIsNone(resolve_derived_guide(cycle_a))
-        self.assertIn(cycle_a.guide_props.derived_state, {"CYCLE", "NEEDS_REPAIR"})
+        self.assertEqual(cycle_a.guide_props.derived_state, "LIVE")
+        sync_scene_objects(bpy.context.scene)
+        self.assertEqual(cycle_a.guide_props.derived_state, "CYCLE")
 
     def test_deleted_derived_source_is_truthfully_needs_repair(self):
         source = self._make_object(
@@ -1383,10 +1413,14 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         guide.guide_props.derived_direction = (0.0, 1.0, 0.0)
         bind_edge_source(guide.guide_props.source_a, source, 0)
         self.assertIsNotNone(resolve_derived_guide(guide))
+        sync_scene_objects(bpy.context.scene)
+        self.assertEqual(guide.guide_props.derived_state, "LIVE")
         guide.guide_props.source_a.target_object = None
         guide.guide_props.source_a.start.target_object = None
         guide.guide_props.source_a.end.target_object = None
         self.assertIsNone(resolve_derived_guide(guide))
+        self.assertEqual(guide.guide_props.derived_state, "LIVE")
+        sync_scene_objects(bpy.context.scene)
         self.assertEqual(guide.guide_props.derived_state, "NEEDS_REPAIR")
 
     def test_derived_guide_uses_standard_units_flip_action_and_one_undo_step(self):
@@ -1477,11 +1511,24 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         self.assertEqual(snap["label"], "Measurement Midpoint")
         self.assertEqual(snap["world_co"], Vector((55.0, 10.0, 0.0)))
 
-    def test_logical_vertex_owns_the_full_snap_radius(self):
+    def test_snap_ranking_balances_proximity_with_logical_target_bias(self):
         mouse = Vector((0.0, 0.0))
         face = {"priority": 10, "screen_co": mouse.copy()}
         vertex = {"priority": 0, "screen_co": Vector((27.0, 0.0))}
-        self.assertIs(_best_snap_candidate([face, vertex], mouse, 28.0), vertex)
+        edge = {"priority": 2, "screen_co": mouse.copy()}
+        self.assertIs(_best_snap_candidate([face, vertex], mouse, 28.0), face)
+        self.assertIs(_best_snap_candidate([edge, vertex], mouse, 28.0), edge)
+        vertex["screen_co"] = Vector((3.0, 0.0))
+        self.assertIs(_best_snap_candidate([edge, vertex], mouse, 28.0), vertex)
+
+    def test_snap_radius_uses_preferences_until_the_scene_override_is_enabled(self):
+        settings = SimpleNamespace(use_snap_target_override=False, snap_pixel_radius=9)
+        context = SimpleNamespace(scene=SimpleNamespace(dimensions_settings=settings))
+        preferences = SimpleNamespace(snap_pixel_threshold=64)
+        with patch("dimensions.snapping.get_preferences", return_value=preferences):
+            self.assertEqual(_configured_snap_pixel_threshold(context, None), 64.0)
+            settings.use_snap_target_override = True
+            self.assertEqual(_configured_snap_pixel_threshold(context, None), 9.0)
 
     def test_off_face_projected_vertex_does_not_steal_an_edit_mesh_edge(self):
         obj, mesh = self._make_edit_object(
@@ -2271,6 +2318,10 @@ class DimensionsAnnotationManagerTests(unittest.TestCase):
         self.settings.annotation_manager_reference_object = source
 
         self.assertEqual(filtered_manager_objects(self.settings), (area,))
+        item = next(item for item in self.settings.annotation_manager_items if item.annotation == area)
+        area.dimension_props.measurement_state = "LIVE"
+        self.assertEqual(item.state, "NEEDS_REPAIR")
+        self.assertTrue(manager_item_matches(self.settings, item))
         self.assertTrue(annotation_references_object(area, source))
         self.assertFalse(annotation_references_object(linear, source))
 
@@ -2358,8 +2409,7 @@ class DimensionsAnnotationManagerTests(unittest.TestCase):
         self.assertTrue(first.select_get())
 
         bpy.context.view_layer.objects.active = second
-        from dimensions.annotation_manager import set_active_index_from_viewport
-        set_active_index_from_viewport(self.settings, second)
+        sync_scene_objects(self.scene)
         self.assertEqual(
             self.settings.annotation_manager_items[self.settings.active_annotation_manager_index].annotation,
             second,
@@ -2866,11 +2916,11 @@ class DimensionsInferenceTests(unittest.TestCase):
             self.assertEqual(inference.cycle_local_axis("X", "X", context), "LOCAL_X")
             self.assertEqual(inference.cycle_local_axis("LOCAL_X", "X", context), "X")
 
-    def test_existing_geometry_wins_at_comparable_distance_but_not_when_farther(self):
-        base = {"screen_co": Vector((3.0, 0.0))}
+    def test_existing_geometry_owns_the_snap_radius_unless_inference_is_locked(self):
+        base = {"screen_co": Vector((27.0, 0.0))}
         derived = {"screen_co": Vector((1.5, 0.0)), "derived": True, "inference_type": "EXTENSION"}
         self.assertIs(_best_acquisition_candidate((base, derived), Vector((0.0, 0.0))), base)
-        derived["screen_co"] = Vector((0.1, 0.0))
+        derived["inference_locked"] = True
         self.assertIs(_best_acquisition_candidate((base, derived), Vector((0.0, 0.0))), derived)
 
     def test_face_reference_defines_active_plane(self):
@@ -3088,6 +3138,49 @@ class DimensionsCoordinateElevationTests(unittest.TestCase):
 
         self.assertEqual(batcher._text_items[0][0], "+3")
 
+    def test_creation_uses_explicit_datum_and_the_acquired_source_point(self):
+        other_datum = create_guide_point_object(bpy.context, "DATUM Explicit")
+        other_datum.guide_props.is_datum = True
+        other_datum.guide_props.datum_name = "Explicit"
+        set_world_anchor(other_datum.guide_props.start, Vector((1.0, 2.0, 3.0)))
+        mesh = bpy.data.meshes.new("Coordinate Acquired Point")
+        mesh.from_pydata([(7.0, 8.0, 9.0)], [], [])
+        source = bpy.data.objects.new("Coordinate Acquired Point", mesh)
+        bpy.context.scene.collection.objects.link(source)
+        created = None
+        try:
+            operator = make_operator_harness(
+                _CreateDatumAnnotation,
+                datum_name="",
+                datum_object_name=other_datum.name,
+                annotation_kind="COORDINATE",
+            )
+            with patch(
+                "dimensions.operators.create_coordinate._selected_vertex",
+                return_value=(source, 0, Vector((7.0, 8.0, 9.0))),
+            ):
+                self.assertEqual(
+                    _CreateDatumAnnotation.execute(operator, bpy.context),
+                    {"FINISHED"},
+                )
+            created = bpy.context.view_layer.objects.active
+            self.assertEqual(created.dimension_props.datum_object, other_datum)
+            self.assertEqual(resolve_anchor(created.dimension_props.start), Vector((7.0, 8.0, 9.0)))
+            self.assertEqual(resolve_anchor(created.dimension_props.end), Vector((7.5, 8.0, 9.0)))
+        finally:
+            for obj in (created, source, other_datum):
+                if obj is not None and obj.name in bpy.data.objects:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+            if mesh.name in bpy.data.meshes:
+                bpy.data.meshes.remove(mesh)
+
+    def test_linked_datum_promotion_refuses_mutation(self):
+        bpy.context.view_layer.objects.active = self.datum
+        operator = make_operator_harness(DIMENSIONS_OT_CreateDatum, datum_name="Blocked")
+        with patch("dimensions.operators.create_coordinate.is_read_only_dimensions_object", return_value=True):
+            self.assertEqual(operator.execute(bpy.context), {"CANCELLED"})
+        self.assertEqual(self.datum.guide_props.datum_name, "Test")
+
 
 class DimensionsGuidePlaneTests(unittest.TestCase):
     def setUp(self):
@@ -3142,8 +3235,15 @@ class DimensionsGuidePlaneTests(unittest.TestCase):
             range(3),
         ):
             set_anchor(anchor, source, index)
+        plane.guide_props.plane_state = "NEEDS_REPAIR"
+        plane.guide_props.last_resolved_origin = (9.0, 9.0, 9.0)
         frame = resolve_guide_plane(plane)
         self.assertIsNotNone(frame)
+        self.assertEqual(plane.guide_props.plane_state, "NEEDS_REPAIR")
+        self.assertEqual(tuple(plane.guide_props.last_resolved_origin), (9.0, 9.0, 9.0))
+        sync_scene_objects(bpy.context.scene)
+        self.assertEqual(plane.guide_props.plane_state, "LIVE")
+        self.assertEqual(tuple(plane.guide_props.last_resolved_origin), (0.0, 0.0, 0.0))
         self.assertAlmostEqual(frame[3].dot(Vector((0, 0, 1))), 1.0)
         source.location.z = 4.0
         bpy.context.view_layer.update()
@@ -3151,6 +3251,8 @@ class DimensionsGuidePlaneTests(unittest.TestCase):
         self.assertAlmostEqual(moved[0].z, 4.0)
         source.data.vertices[2].co = (4.0, 0.0, 0.0)
         self.assertIsNone(resolve_guide_plane(plane))
+        self.assertEqual(plane.guide_props.plane_state, "LIVE")
+        sync_scene_objects(bpy.context.scene)
         self.assertEqual(plane.guide_props.plane_state, "NEEDS_REPAIR")
 
     def test_point_normal_face_and_offset_definitions(self):
@@ -3187,7 +3289,27 @@ class DimensionsGuidePlaneTests(unittest.TestCase):
         self.created.remove(source)
         bpy.data.objects.remove(source, do_unlink=True)
         self.assertIsNone(resolve_guide_plane(face_plane))
+        self.assertEqual(face_plane.guide_props.plane_state, "LIVE")
+        sync_scene_objects(bpy.context.scene)
         self.assertEqual(face_plane.guide_props.plane_state, "NEEDS_REPAIR")
+
+    def test_create_plane_uses_the_pure_resolved_frame_for_initial_location(self):
+        previous_cursor = bpy.context.scene.cursor.location.copy()
+        try:
+            bpy.context.scene.cursor.location = (3.0, 4.0, 5.0)
+            operator = make_operator_harness(
+                DIMENSIONS_OT_CreateGuidePlane,
+                definition="POINT_NORMAL",
+                normal=(0.0, 0.0, 1.0),
+                offset=0.0,
+                extent=2.0,
+            )
+            self.assertEqual(operator.execute(bpy.context), {"FINISHED"})
+            plane = bpy.context.view_layer.objects.active
+            self.created.append(plane)
+            self.assertEqual(plane.location, Vector((3.0, 4.0, 5.0)))
+        finally:
+            bpy.context.scene.cursor.location = previous_cursor
 
     def test_active_plane_axes_projection_extent_and_clear_restore_world_contract(self):
         plane = self._plane()
@@ -3337,10 +3459,14 @@ class DimensionsAngularSpacingTests(unittest.TestCase):
             set_anchor(props.construction_pivot, origin_source, 0)
             props.derived_direction = (0, 1, 0)
             self.assertEqual(len(spaced_guide_lines(spaced)), props.spacing_count)
+            sync_scene_objects(bpy.context.scene)
+            self.assertEqual(props.derived_state, "LIVE")
 
             bpy.data.objects.remove(origin_source, do_unlink=True)
 
             self.assertEqual(spaced_guide_lines(spaced), ())
+            self.assertEqual(props.derived_state, "LIVE")
+            sync_scene_objects(bpy.context.scene)
             self.assertEqual(props.derived_state, "NEEDS_REPAIR")
         finally:
             for name in (
@@ -3353,6 +3479,106 @@ class DimensionsAngularSpacingTests(unittest.TestCase):
                     bpy.data.objects.remove(obj, do_unlink=True)
             if mesh.name in bpy.data.meshes:
                 bpy.data.meshes.remove(mesh)
+
+    def test_spacing_creation_preserves_acquired_origin_and_end_anchors(self):
+        source = create_guide_object(bpy.context, "GUIDE Anchored Spacing Direction")
+        mesh = bpy.data.meshes.new("Anchored Spacing Points")
+        mesh.from_pydata([(2.0, 3.0, 0.0), (2.0, 9.0, 0.0)], [], [])
+        target = bpy.data.objects.new("Anchored Spacing Points", mesh)
+        bpy.context.scene.collection.objects.link(target)
+        spaced = None
+        try:
+            set_world_anchor(source.guide_props.start, Vector((0.0, 0.0, 0.0)))
+            set_world_anchor(source.guide_props.end, Vector((1.0, 0.0, 0.0)))
+            operator = make_operator_harness(
+                DIMENSIONS_OT_CreateSpacingGuide,
+                mode="DISTRIBUTE", interval=1.0, count=4, extent=4.0,
+            )
+            origin_snap = _world_snap(2.0, 3.0)
+            origin_snap.update(type="VERTEX", object=target, vertex_index=0)
+            end_snap = _world_snap(2.0, 9.0)
+            end_snap.update(type="VERTEX", object=target, vertex_index=1)
+
+            self.assertEqual(
+                operator._create(bpy.context, ("GUIDE", source), origin_snap, end_snap),
+                {"FINISHED"},
+            )
+            spaced = bpy.context.view_layer.objects.active
+            props = spaced.guide_props
+            self.assertEqual(props.construction_pivot.anchor_type, "VERTEX")
+            self.assertEqual(props.construction_pivot.target_object, target)
+            self.assertEqual(props.spacing_end.anchor_type, "VERTEX")
+            self.assertEqual(props.spacing_end.target_object, target)
+            self.assertEqual([round(line[0].y, 5) for line in spaced_guide_lines(spaced)], [3, 5, 7, 9])
+
+            target.location.y = 2.0
+            bpy.context.view_layer.update()
+            self.assertEqual([round(line[0].y, 5) for line in spaced_guide_lines(spaced)], [5, 7, 9, 11])
+        finally:
+            for obj in (spaced, target, source):
+                if obj is not None and obj.name in bpy.data.objects:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+            if mesh.name in bpy.data.meshes:
+                bpy.data.meshes.remove(mesh)
+
+    def test_spacing_repair_can_reattach_origin_and_distribute_end(self):
+        source = create_guide_object(bpy.context, "GUIDE Spacing Repair Direction")
+        spaced = create_guide_object(bpy.context, "GUIDE Spacing Repair")
+        mesh = bpy.data.meshes.new("Spacing Repair Points")
+        mesh.from_pydata([(1.0, 2.0, 0.0), (1.0, 8.0, 0.0)], [], [])
+        target = bpy.data.objects.new("Spacing Repair Points", mesh)
+        bpy.context.scene.collection.objects.link(target)
+        try:
+            set_world_anchor(source.guide_props.start, Vector((0.0, 0.0, 0.0)))
+            set_world_anchor(source.guide_props.end, Vector((1.0, 0.0, 0.0)))
+            props = spaced.guide_props
+            props.derived = True
+            props.derivation_mode = "SPACING"
+            props.spacing_mode = "DISTRIBUTE"
+            props.spacing_count = 4
+            props.derived_direction = (0.0, 1.0, 0.0)
+            bind_guide_source(props.source_a, source)
+            for anchor in (props.construction_pivot, props.spacing_end):
+                anchor.anchor_type = "VERTEX"
+                anchor.target_object = None
+                anchor.source_object_name = "Deleted"
+            bpy.context.view_layer.objects.active = spaced
+
+            for slot, vertex_index in (("PIVOT", 0), ("SPACING_END", 1)):
+                snap = _world_snap(1.0, 2.0 + vertex_index * 6.0)
+                snap.update(type="VERTEX", object=target, vertex_index=vertex_index)
+                operator = make_operator_harness(
+                    DIMENSIONS_OT_RepairDerivedGuideSource,
+                    source_slot=slot,
+                    guide=spaced,
+                    hover_snap=snap,
+                )
+                self.assertEqual(operator.modal(bpy.context, make_event("LEFTMOUSE")), {"FINISHED"})
+
+            self.assertEqual(props.construction_pivot.target_object, target)
+            self.assertEqual(props.spacing_end.target_object, target)
+            self.assertEqual(len(spaced_guide_lines(spaced)), 4)
+        finally:
+            for obj in (spaced, target, source):
+                if obj.name in bpy.data.objects:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+            if mesh.name in bpy.data.meshes:
+                bpy.data.meshes.remove(mesh)
+
+    def test_linked_derived_guides_refuse_detach_and_repair(self):
+        guide = create_guide_object(bpy.context, "GUIDE Linked Guard")
+        guide.guide_props.derived = True
+        guide.guide_props.derivation_mode = "OFFSET"
+        try:
+            bpy.context.view_layer.objects.active = guide
+            detach = make_operator_harness(DIMENSIONS_OT_DetachDerivedGuide)
+            repair = make_operator_harness(DIMENSIONS_OT_RepairDerivedGuideSource, source_slot="A")
+            with patch("dimensions.operators.offset_guide.is_read_only_dimensions_object", return_value=True):
+                self.assertEqual(detach.execute(bpy.context), {"CANCELLED"})
+                self.assertEqual(repair.invoke(bpy.context, None), {"CANCELLED"})
+            self.assertTrue(guide.guide_props.derived)
+        finally:
+            bpy.data.objects.remove(guide, do_unlink=True)
 
 
 class DimensionsTransientMeasurementTests(unittest.TestCase):
@@ -3391,6 +3617,24 @@ class DimensionsTransientMeasurementTests(unittest.TestCase):
         finally:
             unit_settings.system, unit_settings.length_unit, unit_settings.scale_length, settings.metric_unit_style = original
 
+    def test_saving_transient_measurement_pushes_its_own_undo_step(self):
+        operator = make_operator_harness(
+            CADDIM_OT_Measure,
+            start_world=None,
+            end_world=None,
+            completed_start_world=Vector((0.0, 0.0, 0.0)),
+            completed_end_world=Vector((2.0, 0.0, 0.0)),
+        )
+        before = set(bpy.data.objects)
+        with patch("dimensions.operators.measure.push_undo_step") as push_undo:
+            self.assertEqual(operator._save_transient(bpy.context), {"RUNNING_MODAL"})
+        created = set(bpy.data.objects) - before
+        self.assertEqual(len(created), 2)  # Measurement Empty plus its native snap proxy.
+        push_undo.assert_called_once_with("Save Measurement")
+        for obj in sorted(created, key=lambda item: bool(item.parent)):
+            if obj.name in bpy.data.objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+
 
 class DimensionsPackagingTests(unittest.TestCase):
     """Guard the differences between running from the repository and from an install.
@@ -3412,6 +3656,13 @@ class DimensionsPackagingTests(unittest.TestCase):
             preferences.DIMENSIONS_AddonPreferences.bl_idname,
             preferences.ADDON_ID,
         )
+
+    def test_sidebar_uses_the_installed_addon_id_and_never_syncs_selection_during_draw(self):
+        from dimensions import ui
+
+        source = Path(ui.__file__).read_text(encoding="utf-8")
+        self.assertIn("preferences.module = ADDON_ID", source)
+        self.assertNotIn("set_active_index_from_viewport", source)
 
     def test_get_preferences_never_raises_without_a_registered_addon(self):
         from dimensions.preferences import DEFAULT_PREFERENCES, get_preferences

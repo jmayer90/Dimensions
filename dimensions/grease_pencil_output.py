@@ -274,3 +274,11 @@ def generated_output_objects(scene, source_key=None):
     if collection is None:
         return ()
     return tuple(_generated_objects(collection, source_key))
+
+
+def remove_generated_output(scene, source_key):
+    """Remove every generated artifact for one persistent annotation key."""
+    objects = generated_output_objects(scene, source_key)
+    for obj in objects:
+        _remove_generated_object(obj)
+    return len(objects)

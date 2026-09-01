@@ -52,8 +52,8 @@ Invisible to users, blocking for everything else. Build here before building on 
 | [FND-03](FND-03-draw-performance.md) | Make draw cost scale with annotations, not scene size | ✅ Complete | 0.3.0 | M | — |
 | [FND-04](FND-04-addon-preferences.md) | Add-on preferences | ✅ Complete | 0.3.0 | M | — |
 | [FND-05](FND-05-keymaps.md) | Registered, customizable keymaps | ✅ Complete | 0.3.0 | M | FND-01, FND-04 |
-| [FND-06](FND-06-modal-testing.md) | Make modal operators testable, then test them | ✅ Complete | 0.3.0 | L | — |
-| [FND-07](FND-07-lifecycle-hardening.md) | Lifecycle hardening: undo, append, link, multi-scene | ✅ Complete | Background path in 0.3.0; expanded matrix and foreground QA in 0.4.2 | M | FND-02 |
+| [FND-06](FND-06-modal-testing.md) | Make modal operators testable, then test them | ✅ Complete | 0.3.0; Chain/Baseline, Spacing, and datum acquisition expanded in 0.6.0 candidate | L | — |
+| [FND-07](FND-07-lifecycle-hardening.md) | Lifecycle hardening: undo, append, link, multi-scene | ✅ Complete | Background path in 0.3.0; expanded matrix/foreground QA in 0.4.2; query-write hardening in 0.6.0 candidate | M | FND-02 |
 | [FND-08](FND-08-snap-performance.md) | Snap performance budgets on dense scenes | ✅ Complete | 0.3.0 | M | — |
 | [FND-09](FND-09-posix-scripts.md) | Cross-platform build and validate scripts | ✅ Complete | 0.3.0 | S | — |
 | [FND-10](FND-10-error-reporting.md) | Consistent, actionable error reporting | ✅ Complete | 0.3.0 | S | — |
@@ -68,7 +68,7 @@ The difference between a tool that works and one people keep using.
 | --- | --- | --- | --- | --- | --- |
 | [FND-11](FND-11-snap-cache-build-cost.md) | Bring projected snap-cache build within budget | ✅ Complete | 0.4.2 | M | FND-08 |
 | [UX-01](UX-01-continuous-placement.md) | Continuous placement with a persistent Auto/X/Y/Z session mode | ✅ Complete | 0.3.1 | M | — |
-| [UX-02](UX-02-annotation-manager.md) | Annotation manager: list, search, isolate, repair, restyle | ✅ Complete | 0.4.2 | L | — |
+| [UX-02](UX-02-annotation-manager.md) | Annotation manager: list, search, isolate, repair, restyle | ✅ Complete | 0.4.2; redraw/repair routing hardened in 0.6.0 candidate | L | — |
 | [UX-03](UX-03-inference-engine.md) | Inference: parallel, perpendicular, extension, intersection, local axis | ✅ Complete | 0.4.2 | L | FND-08 |
 | [UX-04](UX-04-direct-handles.md) | Direct viewport handles for placement, radius, and offset | ✅ Complete | 0.4.3 | M | FND-01 |
 | [UX-05](UX-05-snap-control.md) | User control over which snap targets are active | ✅ Complete | 0.4.2; foreground QA in 0.6.0 candidate | S | FND-04 |
@@ -86,7 +86,7 @@ Snapping lines and points as a first-class way to build dimensionally, not just 
 | [CON-01](CON-01-guide-points.md) | Guide points | ✅ Complete | 0.4.3 | M | — |
 | [CON-02](CON-02-offset-guides.md) | Offset and parallel guides at a typed distance | ✅ Complete | 0.4.3 | M | CON-01 |
 | [CON-03](CON-03-guide-planes.md) | Guide planes and an active construction plane | ✅ Complete | 0.5.0 | L | CON-02 |
-| [CON-04](CON-04-angular-guides-spacing.md) | Angular guides and repeated spacing | ✅ Complete | 0.5.0 | M | CON-02 |
+| [CON-04](CON-04-angular-guides-spacing.md) | Angular guides and repeated spacing | ✅ Complete | 0.5.0; anchored acquisition/repair hardened in 0.6.0 candidate | M | CON-02 |
 
 ### M4 — Output
 
@@ -94,7 +94,7 @@ Milestone numbers group related work; they are not a strict delivery queue. The 
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [OUT-01](OUT-01-grease-pencil-output.md) | Render path via generated Grease Pencil | ✅ Complete | 0.4.0 | L | FND-03 |
+| [OUT-01](OUT-01-grease-pencil-output.md) | Render path via generated Grease Pencil | ✅ Complete | 0.4.0; live authority/stale cleanup hardened in 0.6.0 candidate | L | FND-03 |
 | [OUT-02](OUT-02-vector-export.md) | SVG and PDF vector export | ✅ Complete | 0.4.2 | L | OUT-01 |
 | [OUT-03](OUT-03-styles.md) | Named, reusable annotation styles | ✅ Complete | 0.4.2 | M | FND-02 |
 | [OUT-04](OUT-04-angle-area-output.md) | Extend generated output to angle and area annotations | ✅ Complete | 0.4.1 | M | OUT-01 |
@@ -104,9 +104,9 @@ Milestone numbers group related work; they are not a strict delivery queue. The 
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [DIM-01](DIM-01-chain-baseline.md) | Chain and baseline dimensions | ✅ Complete | 0.4.3 | M | UX-01 |
+| [DIM-01](DIM-01-chain-baseline.md) | Chain and baseline dimensions | ✅ Complete | 0.4.3; interaction/geometry/output hardened in 0.6.0 candidate | M | UX-01 |
 | [DIM-02](DIM-02-radial-diameter-arc.md) | Radial, diameter, and arc-length dimensions | ✅ Complete | 0.4.3 | M | — |
-| [DIM-03](DIM-03-coordinate-elevation.md) | Coordinate and elevation dimensions | ✅ Complete | 0.5.0 | M | — |
+| [DIM-03](DIM-03-coordinate-elevation.md) | Coordinate and elevation dimensions | ✅ Complete | 0.5.0; explicit datum/point acquisition hardened in 0.6.0 candidate | M | — |
 | [DIM-04](DIM-04-presentation-controls.md) | Drafting presentation controls: ticks, arrows, units, and alignment | ✅ Complete | 0.4.3 | M | OUT-03 |
 
 ## Suggested order

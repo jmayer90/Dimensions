@@ -92,11 +92,12 @@ class DIMENSIONS_OT_CreateGuidePlane(bpy.types.Operator):
             )
             props.offset_distance = abs(self.offset)
             props.offset_side = -1 if self.offset < 0.0 else 1
-        if not valid or resolve_guide_plane(plane) is None:
+        frame = resolve_guide_plane(plane) if valid else None
+        if frame is None:
             bpy.data.objects.remove(plane, do_unlink=True)
             self.report(messages.WARNING, messages.GUIDE_PLANE_DEFINITION_INVALID)
             return {"CANCELLED"}
-        plane.location = Vector(props.last_resolved_origin)
+        plane.location = frame[0]
         for selected in context.selected_objects:
             selected.select_set(False)
         plane.select_set(True)

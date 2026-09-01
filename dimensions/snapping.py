@@ -13,7 +13,7 @@ from .properties import is_guide_object
 from .snap_targets import enabled_snap_targets
 
 
-COMPARABLE_INFERENCE_PIXEL_DISTANCE = 2.0
+SNAP_PRIORITY_PIXEL_BIAS = 2.0
 
 
 def copy_snap(snap):
@@ -211,7 +211,7 @@ def find_nearest_snap_point(
 
 def _snap_candidate_score(candidate, mouse):
     distance = (candidate["screen_co"] - mouse).length
-    return candidate.get("priority", 100), distance
+    return distance + candidate.get("priority", 100) * SNAP_PRIORITY_PIXEL_BIAS
 
 
 def _best_acquisition_candidate(candidates, mouse):
@@ -219,16 +219,18 @@ def _best_acquisition_candidate(candidates, mouse):
     candidates = [candidate for candidate in candidates if candidate is not None]
     if not candidates:
         return None
-    distances = [(candidate["screen_co"] - mouse).length for candidate in candidates]
-    closest_distance = min(distances)
-    comparable_geometry = [
-        candidate
-        for candidate, distance in zip(candidates, distances)
-        if not candidate.get("derived")
-        and distance <= closest_distance + COMPARABLE_INFERENCE_PIXEL_DISTANCE
+    locked_inference = [
+        candidate for candidate in candidates
+        if candidate.get("derived") and candidate.get("inference_locked")
     ]
-    if comparable_geometry:
-        return min(comparable_geometry, key=lambda candidate: _snap_candidate_score(candidate, mouse))
+    if locked_inference:
+        return min(locked_inference, key=lambda candidate: (
+            (candidate["screen_co"] - mouse).length,
+            candidate.get("inference_type", ""),
+        ))
+    existing_geometry = [candidate for candidate in candidates if not candidate.get("derived")]
+    if existing_geometry:
+        return min(existing_geometry, key=lambda candidate: _snap_candidate_score(candidate, mouse))
     return min(
         candidates,
         key=lambda candidate: (
@@ -304,10 +306,6 @@ def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=None
                 projected_vertex["face_index"] = face_index
         candidates.append(projected_vertex)
 
-    best = _best_snap_candidate(candidates, mouse, pixel_threshold)
-    if best is not None:
-        return best
-
     screen_co = view3d_utils.location_3d_to_region_2d(
         context.region,
         context.region_data,
@@ -315,20 +313,23 @@ def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=None
     )
     if screen_co is None:
         screen_co = mouse
+    if "face_point" in enabled_targets:
+        candidates.append({
+            "type": "FACE",
+            "label": "Face",
+            "priority": 10,
+            "object": obj,
+            "vertex_index": -1,
+            "face_index": face_index,
+            "world_co": hit["location"].copy(),
+            "screen_co": screen_co.copy(),
+            "normal": hit["normal"].copy(),
+        })
 
-    if "face_point" not in enabled_targets:
-        return None
-    return {
-        "type": "FACE",
-        "label": "Face",
-        "priority": 10,
-        "object": obj,
-        "vertex_index": -1,
-        "face_index": face_index,
-        "world_co": hit["location"].copy(),
-        "screen_co": screen_co.copy(),
-        "normal": hit["normal"].copy(),
-    }
+    best = _best_snap_candidate(candidates, mouse, pixel_threshold)
+    if best is not None:
+        return best
+    return None
 
 
 def _add_edit_mesh_candidates(context, obj, face_index, mouse, candidates, enabled_targets=None):
@@ -618,7 +619,7 @@ def _best_snap_candidate(candidates, mouse, pixel_threshold):
         if distance >= pixel_threshold:
             continue
 
-        score = candidate.get("priority", 100), distance
+        score = distance + candidate.get("priority", 100) * SNAP_PRIORITY_PIXEL_BIAS
         if best is None or score < best[0]:
             best = (score, candidate)
 
@@ -629,9 +630,12 @@ def _configured_snap_pixel_threshold(context, requested_threshold):
     if requested_threshold is not None:
         return float(requested_threshold)
     settings = getattr(getattr(context, "scene", None), "dimensions_settings", None)
-    if settings is None:
+    if settings is not None and getattr(settings, "use_snap_target_override", False):
+        return float(settings.snap_pixel_radius)
+    try:
+        return float(get_preferences(context).snap_pixel_threshold)
+    except (AttributeError, TypeError, ValueError):
         return DEFAULT_SNAP_PIXEL_THRESHOLD
-    return float(settings.snap_pixel_radius)
 
 
 def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold):

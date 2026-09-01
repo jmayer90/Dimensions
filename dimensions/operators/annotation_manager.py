@@ -21,6 +21,7 @@ from ..drawing import set_preview_state
 from ..derived_guides import resolve_source
 from ..area_binding import evaluate_area_binding
 from ..repair import repair_issues
+from ..anchors import anchor_resolution
 from .style import _active_style, assign_style_to_annotations
 
 
@@ -220,9 +221,24 @@ class DIMENSIONS_OT_ManagerRepairEntry(bpy.types.Operator):
             return bpy.ops.dimensions.repair_guide_plane("INVOKE_DEFAULT", object_name=obj.name)
         if obj is not None and is_guide_object(obj) and getattr(obj.guide_props, "derived", False):
             _select_only(context, obj)
-            slot = "A"
-            if resolve_source(obj.guide_props.source_a) is not None:
+            props = obj.guide_props
+            if resolve_source(props.source_a) is None:
+                slot = "A"
+            elif props.derivation_mode == "CENTERLINE" and resolve_source(props.source_b) is None:
                 slot = "B"
+            elif (
+                props.derivation_mode in {"ANGULAR", "SPACING"}
+                and anchor_resolution(props.construction_pivot)[1] != "BY_ID"
+            ):
+                slot = "PIVOT"
+            elif (
+                props.derivation_mode == "SPACING"
+                and props.spacing_mode == "DISTRIBUTE"
+                and anchor_resolution(props.spacing_end)[1] != "BY_ID"
+            ):
+                slot = "SPACING_END"
+            else:
+                slot = "A"
             return bpy.ops.dimensions.repair_derived_guide_source("INVOKE_DEFAULT", source_slot=slot)
         if obj is None or not is_dimension_object(obj):
             self.report(messages.WARNING, messages.MANAGER_ITEM_MISSING)

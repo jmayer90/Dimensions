@@ -15,7 +15,11 @@ from .collections import (
     remove_orphan_measurement_snap_proxies,
 )
 from .dimension_geometry import get_angle_world_geometry, get_dimension_world_geometry
-from .dimension_sets import dimension_set_state, dimension_set_world_geometry
+from .dimension_sets import (
+    dimension_set_state,
+    dimension_set_world_geometry,
+    refresh_dimension_set_state,
+)
 from .circle_binding import circle_geometry, store_circle_fit
 from .projected_snap import clear_projected_snap_cache, invalidate_projected_snap_cache_from_depsgraph
 from .properties import is_dimension_object, is_guide_object
@@ -26,6 +30,7 @@ from .transform_policy import annotation_world_location, enforce_annotation_tran
 
 _sync_active = False
 _sync_scheduled = False
+_selection_sync_owner = object()
 
 
 def register_scene_sync():
@@ -34,6 +39,7 @@ def register_scene_sync():
     for handlers in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         if _undo_redo_handler not in handlers:
             handlers.append(_undo_redo_handler)
+    _subscribe_selection_sync()
     schedule_scene_sync()
 
 
@@ -46,6 +52,7 @@ def unregister_scene_sync():
             handlers.remove(_undo_redo_handler)
     if bpy.app.timers.is_registered(_run_scheduled_sync):
         bpy.app.timers.unregister(_run_scheduled_sync)
+    bpy.msgbus.clear_by_owner(_selection_sync_owner)
     _sync_scheduled = False
     clear_volume_cache()
     invalidate_projected_snap_cache_from_depsgraph(None)
@@ -58,6 +65,22 @@ def schedule_scene_sync():
         return
     _sync_scheduled = True
     bpy.app.timers.register(_run_scheduled_sync, first_interval=0.0)
+
+
+def _subscribe_selection_sync():
+    """Schedule manager-index synchronization when a viewport active object changes."""
+    bpy.msgbus.clear_by_owner(_selection_sync_owner)
+    try:
+        bpy.msgbus.subscribe_rna(
+            key=(bpy.types.LayerObjects, "active"),
+            owner=_selection_sync_owner,
+            args=(),
+            notify=schedule_scene_sync,
+            options={"PERSISTENT"},
+        )
+    except (AttributeError, TypeError, ValueError):
+        # Background and restricted registration contexts can omit LayerObjects.
+        pass
 
 
 def _run_scheduled_sync():
@@ -112,6 +135,7 @@ def sync_scene_objects(scene):
         from .annotation_manager import sync_annotation_manager
 
         sync_annotation_manager(scene)
+        _sync_annotation_manager_selection(scene)
     finally:
         _sync_active = False
 
@@ -124,7 +148,7 @@ def _is_editable(obj):
 
 def _sync_guide(obj, scene):
     if getattr(obj.guide_props, "kind", "GUIDE") == "PLANE":
-        from .guide_planes import resolve_guide_plane
+        from .guide_planes import guide_plane_resolution, store_guide_plane_resolution
 
         for anchor in (
             obj.guide_props.plane_point_a,
@@ -134,18 +158,27 @@ def _sync_guide(obj, scene):
             obj.guide_props.source_a.end,
         ):
             refresh_anchor_resolution(anchor)
-        frame = resolve_guide_plane(obj)
-        _set_translation(obj, None if frame is None else frame[0])
+        frame, state = guide_plane_resolution(obj)
+        store_guide_plane_resolution(obj.guide_props, frame, state)
+        _set_translation(obj, None if state != "LIVE" or frame is None else frame[0])
         return
-    refresh_anchor_resolution(obj.guide_props.start)
-    refresh_anchor_resolution(obj.guide_props.end)
-    refresh_anchor_resolution(obj.guide_props.construction_pivot)
-    refresh_anchor_resolution(obj.guide_props.spacing_end)
+    for anchor in (
+        obj.guide_props.start,
+        obj.guide_props.end,
+        obj.guide_props.construction_pivot,
+        obj.guide_props.spacing_end,
+        obj.guide_props.source_a.start,
+        obj.guide_props.source_a.end,
+        obj.guide_props.source_b.start,
+        obj.guide_props.source_b.end,
+    ):
+        refresh_anchor_resolution(anchor)
     if getattr(obj.guide_props, "derived", False):
-        from .derived_guides import resolve_derived_guide
+        from .derived_guides import derived_guide_resolution, store_derived_guide_resolution
 
-        line = resolve_derived_guide(obj)
-        start_world = None if line is None else line[0]
+        line, state = derived_guide_resolution(obj)
+        store_derived_guide_resolution(obj.guide_props, line, state)
+        start_world = None if state != "LIVE" or line is None else line[0]
     else:
         start_world = resolve_anchor(obj.guide_props.start)
     target_world = start_world
@@ -175,6 +208,7 @@ def _sync_dimension(obj):
         _sync_annotation_placement(obj, props, result["point"])
         return
     if annotation_kind == "DIMENSION_SET":
+        refresh_dimension_set_state(props)
         geometry = dimension_set_world_geometry(props)
         _set_measurement_state(props, dimension_set_state(props))
         if geometry:
@@ -301,3 +335,19 @@ def _set_area_source_anchor(props, center_world):
 def _set_measurement_state(props, state):
     if props.measurement_state != state:
         props.measurement_state = state
+
+
+def _sync_annotation_manager_selection(scene):
+    """Mirror the current viewport selection outside UI draw callbacks."""
+    try:
+        context = bpy.context
+        if context.scene != scene:
+            return
+        active = context.view_layer.objects.active
+        if active is None:
+            return
+        from .annotation_manager import set_active_index_from_viewport
+
+        set_active_index_from_viewport(scene.dimensions_settings, active)
+    except (AttributeError, RuntimeError):
+        pass

@@ -1,7 +1,7 @@
 # FND-11 — Bring the projected snap cache build within budget
 
 **Milestone:** M2 Fluency (carried from M1)
-**Status:** ✅ Complete — the 1M-vertex cache builds in 75.252 ms and reprojects in 0.150 ms.
+**Status:** ✅ Complete — revalidated in the 0.6.0 candidate at 50.128 ms build and 0.179 ms reprojection.
 **Effort:** M
 **Depends on:** FND-08
 **Version impact:** Patch.
@@ -59,6 +59,10 @@ Blender 5.2.0 LTS on the reference harness now measures:
 | 100k vertices, 1 object | 6.118 ms | 0.097 ms | 0.018 ms |
 | 100k vertices, 50 objects | 7.908 ms | 0.284 ms | 0.021 ms |
 | 1M vertices, 10 objects | **75.252 ms** | **0.150 ms** | 0.017 ms |
+
+The 0.6.0 candidate was revalidated on the current Windows host at 50.128 ms
+build, 0.179 ms reprojection, and 0.028 ms query for the same 1M-vertex scene.
+The original table remains the delivery-host record; both runs satisfy every budget.
 
 ## Acceptance criteria
 

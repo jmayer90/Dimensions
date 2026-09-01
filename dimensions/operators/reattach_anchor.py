@@ -2,6 +2,7 @@ import bpy
 
 from .. import messages
 from ..anchors import resolve_anchor, set_anchor_from_snap
+from ..dimension_sets import synchronize_set_member_anchor
 from ..drawing import clear_preview_state, set_preview_state
 from ..properties import is_dimension_object, is_guide_object, is_read_only_dimensions_object
 from ..snapping import copy_snap, find_nearest_snap_point
@@ -86,6 +87,12 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
 
             anchor = self._get_target_anchor()
             set_anchor_from_snap(anchor, self.hover_snap)
+            if self.anchor_name in {"SET_START", "SET_END"}:
+                props = self.dimension_object.dimension_props
+                index = self.member_index if self.member_index >= 0 else props.active_set_member_index
+                synchronize_set_member_anchor(
+                    props, index, "START" if self.anchor_name == "SET_START" else "END",
+                )
             from ..scene_sync import sync_scene_objects
 
             sync_scene_objects(context.scene)

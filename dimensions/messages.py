@@ -34,6 +34,9 @@ CIRCLE_FIT_INVALID = "The selected points cannot define a circle"
 CIRCLE_CAPTURE_POOR_FIT = "Improve or repair the circular source before capturing its value"
 AREA_SOURCE_INVALID = "Repair the Area source, then create or move its label"
 DIFFERENT_END_POINT_REQUIRED = "Choose a different end point"
+DIMENSION_SET_POINT_OFF_AXIS = "Choose a point on the dimension set's shared axis"
+CHAIN_POINT_MUST_ADVANCE = "Choose the next point farther along the chain axis"
+DIMENSION_SET_AXIS_LOCKED = "The dimension set direction is fixed by its first member"
 DIMENSION_OFFSET_PLANE_REQUIRED = "Adjust the view and choose two distinct points before placing the dimension"
 GUIDE_DIRECTION_DISTANCE_REQUIRED = "Choose a direction and a non-zero guide distance"
 MEASUREMENT_DIRECTION_DISTANCE_REQUIRED = "Choose a direction and a non-zero measurement distance"
@@ -67,6 +70,7 @@ CREATED_DATUM = "Created named datum"
 CREATED_COORDINATE = "Created coordinate dimension"
 CREATED_ELEVATION = "Created elevation dimension"
 DATUM_REQUIRED = "Create or select a named datum first"
+DATUM_POINT_REQUIRED = "Select exactly one mesh vertex or acquire a point in Object Mode"
 CREATED_DERIVED_GUIDE = "Created derived guide"
 DERIVED_GUIDE_PARALLEL_REQUIRED = "Choose a second source parallel to the first"
 SELECT_DERIVED_GUIDE = "Select a live derived guide first"
@@ -182,12 +186,14 @@ def cleared_measurements(count):
     return f"Removed {count} measurement(s)"
 
 
-def generated_output(generated, skipped=0, skipped_repair=0):
+def generated_output(generated, skipped=0, skipped_repair=0, removed=0):
     message = f"Generated Grease Pencil output for {generated} annotation(s)"
     if skipped:
         message += f"; skipped {skipped} unavailable annotation(s)"
     if skipped_repair:
-        message += "; repair skipped Area source(s)"
+        message += "; repair skipped unavailable source(s)"
+    if removed:
+        message += f"; removed {removed} stale artifact(s)"
     return message
 
 

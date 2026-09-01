@@ -18,11 +18,11 @@ from ..output_geometry import (
     dimension_set_output_spec,
     circle_dimension_output_spec,
     coordinate_elevation_output_spec,
+    annotation_output_state,
 )
 from ..operators.generate_output import annotations_for_output
 from ..properties import resolve_dimension_style
 from ..sheet_layout import SheetLayoutError, SheetMetadata, build_sheet_layout
-from ..dimension_sets import dimension_set_state
 from ..vector_export import (
     VectorExportError,
     build_vector_document,
@@ -53,14 +53,7 @@ def vector_output_strokes(context):
     for index, annotation in enumerate(annotations):
         props = annotation.dimension_props
         annotation_kind = getattr(props, "annotation_kind", "LINEAR")
-        if annotation_kind == "DIMENSION_SET":
-            state = dimension_set_state(props)
-        elif annotation_kind == "CIRCLE":
-            from ..circle_binding import circle_geometry
-            fit = circle_geometry(props)
-            state = "NEEDS_REPAIR" if fit is None else fit["state"]
-        else:
-            state = getattr(props, "measurement_state", "LIVE")
+        state = annotation_output_state(annotation)
         if state not in {"LIVE", "CAPTURED"}:
             skipped += 1
             continue
