@@ -25,6 +25,16 @@ def ensure_vertex_id(mesh, vertex_index):
     return next_id
 
 
+def anchor_vertex_count(obj):
+    if obj.mode != "EDIT":
+        return len(obj.data.vertices)
+    import bmesh
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    return len(bm.verts)
+
+
 def ensure_object_vertex_id(obj, vertex_index):
     if obj.mode != "EDIT":
         return ensure_vertex_id(obj.data, vertex_index)
@@ -54,7 +64,7 @@ def set_anchor(anchor, obj, vertex_index):
     if obj is None or obj.type != "MESH":
         raise ValueError("Anchor target must be a mesh object")
 
-    if vertex_index < 0 or vertex_index >= len(obj.data.vertices):
+    if vertex_index < 0 or vertex_index >= anchor_vertex_count(obj):
         raise ValueError("Anchor vertex index is out of range")
 
     if obj.mode == "EDIT":
@@ -148,6 +158,9 @@ def anchor_resolution(anchor):
             layer = bm.verts.layers.int.get(VERTEX_ID_ATTRIBUTE)
             matches = [] if layer is None else [vert for vert in bm.verts if vert[layer] == vertex_id]
             return _resolved_vertex_matches(obj, anchor, matches)
+        if 0 <= vertex_index < len(bm.verts):
+            return obj.matrix_world @ bm.verts[vertex_index].co, "BY_ID"
+        return obj.matrix_world @ Vector(anchor.fallback_local_co), "BY_FALLBACK"
     elif vertex_id > 0:
         attribute = mesh.attributes.get(VERTEX_ID_ATTRIBUTE)
         matches = [] if attribute is None else [
@@ -244,7 +257,7 @@ def migrate_anchor_identity(anchor):
         return False
     obj = anchor.target_object
     vertex_index = anchor.vertex_index
-    if obj is None or obj.type != "MESH" or not (0 <= vertex_index < len(obj.data.vertices)):
+    if obj is None or obj.type != "MESH" or not (0 <= vertex_index < anchor_vertex_count(obj)):
         return False
     anchor.vertex_id = ensure_object_vertex_id(obj, vertex_index)
     return True

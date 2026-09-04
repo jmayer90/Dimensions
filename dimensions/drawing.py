@@ -1275,7 +1275,19 @@ def _collect_dimension_geometry(context, batcher, geometry, color, precision):
                 precision = 3
             label = f"{geometry.get('elevation_prefix') or ''}{signed_number(geometry['value'], precision, bool(geometry.get('elevation_show_plus')))}{geometry.get('elevation_suffix') or ''}"
         else:
-            label = coordinate_label(geometry, geometry["values"], lambda value: format_length(context, value, precision, geometry.get("unit_style")))
+            label = coordinate_label(
+                geometry,
+                geometry["values"],
+                lambda value: format_dual_length(
+                    context,
+                    value,
+                    precision,
+                    geometry.get("unit_style"),
+                    geometry.get("secondary_unit_style", "NONE"),
+                    geometry.get("secondary_precision", 2),
+                    geometry.get("dual_unit_arrangement", "BRACKETS"),
+                ),
+            )
         if geometry.get("measurement_state") == "NEEDS_REPAIR":
             label += " [Needs Repair]"
         batcher.add_segments(segments, color, geometry.get("line_width", DEFAULT_LINE_WIDTH))

@@ -93,52 +93,65 @@ def _raycast_edit_mesh(context, origin_world, direction_world):
     import bmesh
     from mathutils.bvhtree import BVHTree
 
-    obj = context.edit_object
-    if obj is None or obj.type != "MESH":
+    edit_objects = [
+        obj for obj in getattr(context, "objects_in_mode", (context.edit_object,))
+        if obj is not None and obj.type == "MESH"
+    ]
+    if not edit_objects:
         return None
 
-    bm = bmesh.from_edit_mesh(obj.data)
-    if not bm.faces:
-        return None
+    best_hit = None
+    best_dist = float("inf")
 
-    bm.verts.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
-    bm.verts.index_update()
-    bm.faces.index_update()
-    visible_faces = [face for face in bm.faces if not face.hide]
-    if not visible_faces:
-        return None
-    tree = BVHTree.FromPolygons(
-        [vertex.co.copy() for vertex in bm.verts],
-        [[vertex.index for vertex in face.verts] for face in visible_faces],
-        all_triangles=False,
-    )
-    inverse = obj.matrix_world.inverted_safe()
-    origin_local = inverse @ origin_world
-    direction_local = inverse.to_3x3() @ direction_world
-    if direction_local.length < 1e-8:
-        return None
-    direction_local.normalize()
+    for obj in edit_objects:
+        bm = bmesh.from_edit_mesh(obj.data)
+        if not bm.faces:
+            continue
 
-    location, normal, visible_face_index, _distance = tree.ray_cast(
-        origin_local,
-        direction_local,
-    )
-    if location is None or visible_face_index is None:
-        return None
-    face_index = visible_faces[visible_face_index].index
+        bm.verts.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        bm.verts.index_update()
+        bm.faces.index_update()
+        visible_faces = [face for face in bm.faces if not face.hide]
+        if not visible_faces:
+            continue
+        tree = BVHTree.FromPolygons(
+            [vertex.co.copy() for vertex in bm.verts],
+            [[vertex.index for vertex in face.verts] for face in visible_faces],
+            all_triangles=False,
+        )
+        inverse = obj.matrix_world.inverted_safe()
+        origin_local = inverse @ origin_world
+        direction_local = inverse.to_3x3() @ direction_world
+        if direction_local.length < 1e-8:
+            continue
+        direction_local.normalize()
 
-    normal_world = obj.matrix_world.to_3x3().inverted_safe().transposed() @ normal
-    if normal_world.length > 1e-8:
-        normal_world.normalize()
+        location, normal, visible_face_index, _distance = tree.ray_cast(
+            origin_local,
+            direction_local,
+        )
+        if location is None or visible_face_index is None:
+            continue
+        face_index = visible_faces[visible_face_index].index
 
-    return {
-        "object": obj,
-        "location": obj.matrix_world @ location,
-        "normal": normal_world,
-        "face_index": face_index,
-        "edit_mesh": True,
-    }
+        normal_world = obj.matrix_world.to_3x3().inverted_safe().transposed() @ normal
+        if normal_world.length > 1e-8:
+            normal_world.normalize()
+
+        hit_world = obj.matrix_world @ location
+        hit_dist = (hit_world - origin_world).length
+        if hit_dist < best_dist:
+            best_dist = hit_dist
+            best_hit = {
+                "object": obj,
+                "location": hit_world,
+                "normal": normal_world,
+                "face_index": face_index,
+                "edit_mesh": True,
+            }
+
+    return best_hit
 
 
 def find_nearest_snap_point(
@@ -286,7 +299,7 @@ def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=None
         if "face_center" in enabled_targets:
             _add_face_center_candidate(context, obj, polygon, candidates, face_index)
     else:
-        local_hit = obj.matrix_world.inverted() @ hit["location"]
+        local_hit = obj.matrix_world.inverted_safe() @ hit["location"]
         if "vertex" in enabled_targets:
             _add_vertex_candidates(context, obj, _nearest_base_vertices(obj, local_hit), candidates)
 
@@ -642,7 +655,11 @@ def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold):
     if not has_view3d_window_region(context):
         return None
 
-    if context.mode != "EDIT_MESH" or context.edit_object is None:
+    edit_objects = [
+        obj for obj in getattr(context, "objects_in_mode", (context.edit_object,))
+        if obj is not None and obj.type == "MESH"
+    ]
+    if context.mode != "EDIT_MESH" or not edit_objects:
         return nearest_visible_projected_vertex(
             context,
             mouse_x,
@@ -655,7 +672,7 @@ def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold):
     best = None
     import bmesh
 
-    objects_and_vertices = [(context.edit_object, bmesh.from_edit_mesh(context.edit_object.data).verts)]
+    objects_and_vertices = [(obj, bmesh.from_edit_mesh(obj.data).verts) for obj in edit_objects]
 
     for obj, vertices in objects_and_vertices:
         vertices.ensure_lookup_table()
@@ -692,61 +709,67 @@ def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold):
 def _nearest_projected_edit_mesh_element(context, mouse_x, mouse_y, pixel_threshold, enabled_targets=None):
     import bmesh
 
-    obj = context.edit_object
-    if obj is None or obj.type != "MESH":
+    edit_objects = [
+        obj for obj in getattr(context, "objects_in_mode", (context.edit_object,))
+        if obj is not None and obj.type == "MESH"
+    ]
+    if not edit_objects:
         return None
 
-    bm = bmesh.from_edit_mesh(obj.data)
-    bm.verts.ensure_lookup_table()
-    bm.edges.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
-    bm.verts.index_update()
-    bm.edges.index_update()
-    bm.faces.index_update()
     mouse = Vector((mouse_x, mouse_y))
     candidates = []
 
     if enabled_targets is None:
         enabled_targets = frozenset(("vertex", "edge", "midpoint"))
-    for vertex in bm.verts if "vertex" in enabled_targets else ():
-        if vertex.hide:
-            continue
-        world_co = obj.matrix_world @ vertex.co
-        screen_co = view3d_utils.location_3d_to_region_2d(
-            context.region,
-            context.region_data,
-            world_co,
-        )
-        if screen_co is None:
-            continue
-        candidates.append(
-            {
-                "type": "VERTEX",
-                "label": "Vertex",
-                "priority": 0,
-                "object": obj,
-                "vertex_index": vertex.index,
-                "world_co": world_co.copy(),
-                "screen_co": screen_co.copy(),
-            }
-        )
 
-    for edge in bm.edges if {"edge", "midpoint"} & enabled_targets else ():
-        if edge.hide:
-            continue
-        linked_face = next((face for face in edge.link_faces if not face.hide), None)
-        _add_edge_snap_candidates(
-            context,
-            obj,
-            edge.verts[0].co,
-            edge.verts[1].co,
-            mouse,
-            candidates,
-            edge_index=edge.index,
-            edge_vertices=(edge.verts[0].index, edge.verts[1].index),
-            face_index=-1 if linked_face is None else linked_face.index,
-            enabled_targets=enabled_targets,
-        )
+    for obj in edit_objects:
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        bm.verts.index_update()
+        bm.edges.index_update()
+        bm.faces.index_update()
+
+        for vertex in bm.verts if "vertex" in enabled_targets else ():
+            if vertex.hide:
+                continue
+            world_co = obj.matrix_world @ vertex.co
+            screen_co = view3d_utils.location_3d_to_region_2d(
+                context.region,
+                context.region_data,
+                world_co,
+            )
+            if screen_co is None:
+                continue
+            candidates.append(
+                {
+                    "type": "VERTEX",
+                    "label": "Vertex",
+                    "priority": 0,
+                    "object": obj,
+                    "vertex_index": vertex.index,
+                    "world_co": world_co.copy(),
+                    "screen_co": screen_co.copy(),
+                }
+            )
+
+        for edge in bm.edges if {"edge", "midpoint"} & enabled_targets else ():
+            if edge.hide:
+                continue
+            linked_face = next((face for face in edge.link_faces if not face.hide), None)
+            _add_edge_snap_candidates(
+                context,
+                obj,
+                edge.verts[0].co,
+                edge.verts[1].co,
+                mouse,
+                candidates,
+                edge_index=edge.index,
+                edge_vertices=(edge.verts[0].index, edge.verts[1].index),
+                face_index=-1 if linked_face is None else linked_face.index,
+                enabled_targets=enabled_targets,
+            )
 
     return _best_snap_candidate(candidates, mouse, pixel_threshold)
 

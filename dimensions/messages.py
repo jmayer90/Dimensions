@@ -208,6 +208,10 @@ def vector_export_failed(detail):
     return f"Vector export failed: {detail}"
 
 
+def set_drawing_scale(denominator):
+    return f"Set drawing scale to 1:{denominator:g}"
+
+
 CREATED_GUIDE_PLANE = "Created guide plane"
 GUIDE_PLANE_DEFINITION_INVALID = "Choose a valid non-degenerate plane definition"
 SELECT_GUIDE_PLANE = "Select a live guide plane"

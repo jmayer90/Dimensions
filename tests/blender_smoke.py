@@ -559,6 +559,34 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         world = resolve_anchor(anchor)
         self.assertEqual(world, Vector((1.0, 0.0, 0.0)))
 
+    def test_edit_mode_anchor_accepts_vertex_created_in_live_bmesh(self):
+        guide = create_guide_object(bpy.context, "DimensionsNewEditVertexAnchorSmoke")
+        self.addCleanup(bpy.data.objects.remove, guide, do_unlink=True)
+        target, mesh = self._make_edit_object(
+            "DimensionsNewEditVertexTargetSmoke",
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            faces=[(0, 1, 2)],
+        )
+        try:
+            bm = bmesh.from_edit_mesh(mesh)
+            new_vertex = bm.verts.new((2.0, 3.0, 0.0))
+            bm.verts.index_update()
+            bm.verts.ensure_lookup_table()
+            self.assertEqual(len(mesh.vertices), 3)
+            self.assertEqual(new_vertex.index, 3)
+            new_vertex_index = new_vertex.index
+            new_vertex_co = new_vertex.co.copy()
+
+            anchor = guide.guide_props.start
+            set_anchor(anchor, target, new_vertex_index)
+
+            self.assertEqual(anchor.vertex_index, new_vertex_index)
+            self.assertGreater(anchor.vertex_id, 0)
+            self.assertEqual(Vector(anchor.fallback_local_co), new_vertex_co)
+            self.assertEqual(resolve_anchor(anchor), new_vertex_co)
+        finally:
+            self._remove_edit_object(target, mesh)
+
     def test_transient_state_is_isolated_per_viewport(self):
         from unittest.mock import patch
 

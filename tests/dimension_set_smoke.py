@@ -82,6 +82,17 @@ class DimensionsSetTests(unittest.TestCase):
         self.assertEqual([round(item["value"], 3) for item in geometry], [0.5, 1.5])
         self.assertLess((geometry[0]["end_world"] - geometry[1]["start_world"]).length, 1e-6)
 
+    def test_deleting_chain_member_zero_trims_start(self):
+        obj = self._set("CHAIN", ((0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)))
+        props = obj.dimension_props
+        delete_set_member(props, 0)
+        geometry = dimension_set_world_geometry(props)
+        self.assertEqual(len(geometry), 2)
+        self.assertEqual(tuple(geometry[0]["start_world"]), (1.0, 0.0, 0.0))
+        self.assertEqual(tuple(geometry[0]["end_world"]), (2.0, 0.0, 0.0))
+        self.assertEqual(tuple(geometry[1]["start_world"]), (2.0, 0.0, 0.0))
+        self.assertEqual(tuple(geometry[1]["end_world"]), (3.0, 0.0, 0.0))
+
     def test_reordering_chain_points_preserves_the_original_datum_and_continuity(self):
         obj = self._set("CHAIN", ((0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)))
         props = obj.dimension_props

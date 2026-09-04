@@ -216,7 +216,9 @@ def pdf_bytes(document):
     points_per_mm = 72.0 / 25.4
     content = ["1 J", "1 j"]
     for stroke in document.strokes:
-        red, green, blue, _alpha = stroke.color
+        red = max(0.0, min(1.0, float(stroke.color[0])))
+        green = max(0.0, min(1.0, float(stroke.color[1])))
+        blue = max(0.0, min(1.0, float(stroke.color[2])))
         content.append(f"{red:.6f} {green:.6f} {blue:.6f} RG")
         content.append(f"{stroke.line_width_mm * points_per_mm:.6f} w")
         first_x, first_y = stroke.points[0]

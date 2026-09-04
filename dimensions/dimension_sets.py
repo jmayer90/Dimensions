@@ -142,7 +142,10 @@ def delete_set_member(props, member_index):
         raise IndexError("dimension-set member index out of range")
     if props.set_kind == "CHAIN":
         anchors = _anchors_from_chain(props)
-        anchors.pop(member_index + 1)
+        if member_index == 0 and len(props.set_members) > 1:
+            anchors.pop(0)
+        else:
+            anchors.pop(member_index + 1)
         _rebuild_chain(props, anchors)
     else:
         props.set_members.remove(member_index)

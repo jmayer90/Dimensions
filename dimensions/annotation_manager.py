@@ -19,7 +19,7 @@ from .coordinate_dimensions import (
     signed_number,
 )
 from .properties import is_dimension_object, is_guide_object, resolve_dimension_style
-from .units import format_area, format_length
+from .units import format_area, format_dual_length, format_length
 
 
 _index_sync_active = False
@@ -186,7 +186,15 @@ def annotation_display_value(scene, obj):
         return coordinate_label(
             props,
             result["values"],
-            lambda value: format_length(context, value, style.precision, style.unit_style),
+            lambda value: format_dual_length(
+                context,
+                value,
+                style.precision,
+                style.unit_style,
+                getattr(style, "secondary_unit_style", "NONE"),
+                getattr(style, "secondary_precision", 2),
+                getattr(style, "dual_unit_arrangement", "BRACKETS"),
+            ),
         ).replace("\n", " · ")
     if kind == "ELEVATION":
         result = elevation_value(props)

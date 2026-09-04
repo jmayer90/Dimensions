@@ -4,6 +4,24 @@ All notable user-visible changes are recorded here. Versions before 0.2.0 were r
 
 ## 0.6.0 — Unreleased
 
+- Fixed vertex anchoring immediately after Edit Mode topology changes such as Extrude, Inset, and Poke. Newly created vertices are now validated against Blender's live Edit Mode BMesh instead of the not-yet-synchronized object mesh, so dimensions can bind to them without an out-of-range error.
+
+- Hardened snapping against degenerate or zero-scaled objects by using safe matrix inversion (`inverted_safe`), preventing divide-by-zero crashes during raycasts. Extended snapping in Mesh Edit Mode to support multi-object edit sessions through `context.objects_in_mode` across raycasting, projected vertex queries, and projected edit mesh element lookups.
+
+- Expanded single-line stroke font glyph coverage with clean vector representations for `:`, `,`, `[`, `]`, `_`, `=`, `%`, `&`, and `#`, preventing missing or skipped characters in title blocks, coordinate expressions, and custom dimension prefixes/suffixes.
+
+- Guaranteed PDF color specification compliance by strictly clamping RGB color channels to `[0.0, 1.0]` before generating PDF `RG` commands.
+
+- Enhanced Edit Mode anchor resolution and repair workflows by validating vertex bounds against live Edit Mode BMesh topology, and upgraded guided vertex and area repair candidate suggestions to search live BMesh vertices and faces.
+
+- Fixed Chain dimension set member deletion when trimming the chain start: deleting member zero now correctly trims the start of the chain rather than inadvertently merging its anchor into member one.
+
+- Wired dual-unit formatting through coordinate and elevation annotations, supporting secondary unit style, precision, and bracket, parenthesis, or stacked arrangements across the 3D viewport overlay, Annotation Manager list, Grease Pencil output, and SVG/PDF export.
+
+- Centralized annotation stroke generation into `output_geometry.build_annotation_output_spec`, removing duplicate linework code across Grease Pencil generation and SVG/PDF export pipelines.
+
+- Added drawing sheet quick actions: `dimensions.sheet_populate_date` to populate the sheet title block with the current ISO date, and `dimensions.sheet_sync_scale` to automatically calculate and set the drawing scale denominator fitted to the active orthographic camera.
+
 - Restored predictable snapping for ordinary dimensions and sets. Native geometry now owns the full configured snap radius ahead of unlocked drafting inference, closer edges/faces no longer lose to unrelated far vertices solely by target type, changed click coordinates are requeried instead of committing stale hover data, and the add-on Snap Radius is honored until Scene Override is enabled. Chain/Baseline capture one preview/commit plane, keep inference references through the session, fix their direction after the first member, and refuse duplicate, reverse, or off-axis points before they can create spoke-like witnesses or overlapping projected members. Existing invalid set members display as bounded Needs Repair geometry and remain blocked from output.
 
 - Repaired Chain and Baseline as complete shared-placement workflows. Multi-member sessions no longer cancel after selecting their own set; Object and Mesh Edit modes now honor snap-target cycling, inference lock, active construction planes, axis constraints, typed distance, step-back, and per-member undo. Sets retain the first valid shared direction, keep Chain joints and Baseline datums coherent through reorder/reattach/repair, preserve larger explicit baseline pitch, hit-test through their members, and use measured labels for alternating outside placement. Zero-projection members remain visible as Needs Repair and cannot enter Grease Pencil or vector output.

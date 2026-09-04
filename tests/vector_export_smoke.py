@@ -293,6 +293,24 @@ class DimensionsVectorExportTests(unittest.TestCase):
             self.assertLess(elapsed, 5.0)
             print(f"OUT-05 exported 100 annotations with a drawing sheet in {elapsed:.3f} s")
 
+    def test_sheet_populate_date_sets_today_iso_date(self):
+        import datetime
+        self.scene.dimensions_settings.sheet_date = "1970-01-01"
+        self.assertEqual(bpy.ops.dimensions.sheet_populate_date(), {"FINISHED"})
+        self.assertEqual(
+            self.scene.dimensions_settings.sheet_date,
+            datetime.date.today().isoformat(),
+        )
+
+    def test_sheet_sync_scale_updates_denominator_from_ortho_camera(self):
+        self.camera.data.ortho_scale = 2.0
+        settings = self.scene.dimensions_settings
+        settings.vector_paper_size = "A4"
+        settings.vector_orientation = "PORTRAIT"
+        settings.sheet_border_enabled = False
+        self.assertEqual(bpy.ops.dimensions.sheet_sync_scale(), {"FINISHED"})
+        self.assertAlmostEqual(settings.vector_scale_denominator, 9.52, places=2)
+
 
 def main():
     dimensions.register()

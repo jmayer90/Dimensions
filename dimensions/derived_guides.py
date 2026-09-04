@@ -4,23 +4,39 @@ from math import floor
 from mathutils import Quaternion, Vector
 
 from .anchors import anchor_resolution, resolve_anchor, set_world_anchor
-from .area_binding import _evaluate_faces, _faces_by_id, ensure_mesh_face_ids
+from .area_binding import _evaluate_faces, _faces_by_id, ensure_bmesh_face_ids, ensure_mesh_face_ids
 
 
 EPSILON = 1e-6
 
 
 def bind_edge_source(source, obj, edge_index):
-    if obj is None or obj.type != "MESH" or not (0 <= edge_index < len(obj.data.edges)):
+    if obj is None or obj.type != "MESH":
         return False
     from .anchors import set_anchor
 
-    edge = obj.data.edges[edge_index]
+    if obj.mode == "EDIT":
+        import bmesh
+
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.edges.ensure_lookup_table()
+        if not (0 <= edge_index < len(bm.edges)):
+            return False
+        edge = bm.edges[edge_index]
+        v0 = edge.verts[0].index
+        v1 = edge.verts[1].index
+    else:
+        if not (0 <= edge_index < len(obj.data.edges)):
+            return False
+        edge = obj.data.edges[edge_index]
+        v0 = edge.vertices[0]
+        v1 = edge.vertices[1]
+
     source.kind = "EDGE"
     source.target_object = obj
     source.guide_object = None
-    set_anchor(source.start, obj, edge.vertices[0])
-    set_anchor(source.end, obj, edge.vertices[1])
+    set_anchor(source.start, obj, v0)
+    set_anchor(source.end, obj, v1)
     source.source_name = obj.name
     return True
 
@@ -36,7 +52,28 @@ def bind_guide_source(source, guide):
 
 
 def bind_face_source(source, obj, face_index):
-    if obj is None or obj.type != "MESH" or not (0 <= face_index < len(obj.data.polygons)):
+    if obj is None or obj.type != "MESH":
+        return False
+
+    if obj.mode == "EDIT":
+        import bmesh
+
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.faces.ensure_lookup_table()
+        if not (0 <= face_index < len(bm.faces)):
+            return False
+        face = bm.faces[face_index]
+        source.kind = "FACE"
+        source.target_object = obj
+        source.guide_object = None
+        source.face_id = ensure_bmesh_face_ids(obj, [face_index])[0]
+        source.face_vertex_count = len(face.verts)
+        source.fallback_center = tuple(face.calc_center_median())
+        source.fallback_normal = tuple(face.normal)
+        source.source_name = obj.name
+        return True
+
+    if not (0 <= face_index < len(obj.data.polygons)):
         return False
     polygon = obj.data.polygons[face_index]
     source.kind = "FACE"

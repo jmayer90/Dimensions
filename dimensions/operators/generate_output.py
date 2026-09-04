@@ -1,6 +1,5 @@
 """Generate disposable Grease Pencil output from visible linear dimensions."""
 
-from dataclasses import replace
 from math import atan, tan
 from uuid import uuid4
 
@@ -19,16 +18,8 @@ from ..grease_pencil_output import (
     remove_generated_output,
 )
 from ..output_geometry import (
+    build_annotation_output_spec,
     WorldSizingPolicy,
-    angle_dimension_label_strokes,
-    angle_dimension_output_spec,
-    area_dimension_label_strokes,
-    area_dimension_output_spec,
-    linear_dimension_label_layout,
-    linear_dimension_output_spec,
-    dimension_set_output_spec,
-    circle_dimension_output_spec,
-    coordinate_elevation_output_spec,
     annotation_output_state,
 )
 from ..properties import is_dimension_object, resolve_dimension_style
@@ -327,76 +318,16 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
                 continue
             annotation_kind = getattr(annotation.dimension_props, "annotation_kind", "LINEAR")
             text_height = output_text_height_for_annotation(context.scene, annotation, settings)
-            if annotation_kind == "DIMENSION_SET":
-                spec = dimension_set_output_spec(
-                    context, resolved_annotation, output_keys[annotation.name], sizing,
-                    text_height, context.scene.camera,
-                )
-                if spec is None:
-                    removed += remove_generated_output(context.scene, output_keys[annotation.name])
-                    skipped += 1
-                    continue
-                generate_grease_pencil_output(context.scene, spec)
-                generated += 1
-                continue
-            if annotation_kind == "CIRCLE":
-                spec = circle_dimension_output_spec(
-                    context, resolved_annotation, output_keys[annotation.name], sizing,
-                    text_height, context.scene.camera,
-                )
-                if spec is None:
-                    removed += remove_generated_output(context.scene, output_keys[annotation.name])
-                    skipped += 1
-                    continue
-                generate_grease_pencil_output(context.scene, spec)
-                generated += 1
-                continue
-            if annotation_kind in {"COORDINATE", "ELEVATION"}:
-                spec = coordinate_elevation_output_spec(
-                    context, resolved_annotation, output_keys[annotation.name], sizing,
-                    text_height, context.scene.camera,
-                )
-                if spec is None:
-                    removed += remove_generated_output(context.scene, output_keys[annotation.name])
-                    skipped += 1
-                    continue
-                generate_grease_pencil_output(context.scene, spec)
-                generated += 1
-                continue
-            spec_builder = {
-                "LINEAR": linear_dimension_output_spec,
-                "ANGLE": angle_dimension_output_spec,
-                "AREA": area_dimension_output_spec,
-            }.get(annotation_kind)
-            spec = spec_builder(resolved_annotation, output_keys[annotation.name], sizing)
+            spec = build_annotation_output_spec(
+                context, resolved_annotation, output_keys[annotation.name], sizing,
+                text_height, context.scene.camera,
+            )
             if spec is None:
                 removed += remove_generated_output(context.scene, output_keys[annotation.name])
                 skipped += 1
                 if annotation_kind == "AREA" and annotation.dimension_props.measurement_state == "NEEDS_REPAIR":
                     skipped_repair += 1
                 continue
-            if annotation_kind == "LINEAR":
-                label_layout = linear_dimension_label_layout(
-                    context,
-                    resolved_annotation,
-                    text_height,
-                    sizing.line_width,
-                    sizing.arrow_size,
-                    context.scene.camera,
-                )
-                line_strokes = label_layout.dimension_line_strokes
-                base_strokes = spec.strokes[1:] if line_strokes else spec.strokes
-                label_strokes = label_layout.strokes
-                output_strokes = line_strokes + base_strokes + label_strokes
-            elif annotation_kind == "ANGLE":
-                output_strokes = spec.strokes + angle_dimension_label_strokes(
-                    context, resolved_annotation, text_height, sizing.line_width, context.scene.camera
-                )
-            else:
-                output_strokes = spec.strokes + area_dimension_label_strokes(
-                    context, resolved_annotation, text_height, sizing.line_width, context.scene.camera
-                )
-            spec = replace(spec, strokes=output_strokes)
             generate_grease_pencil_output(context.scene, spec)
             generated += 1
 

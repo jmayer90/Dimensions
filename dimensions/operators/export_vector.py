@@ -1,6 +1,5 @@
 """Camera-framed, scale-correct SVG and PDF export operators."""
 
-from dataclasses import replace
 from types import SimpleNamespace
 
 import bpy
@@ -9,15 +8,7 @@ from bpy_extras.io_utils import ExportHelper
 from .. import messages
 from ..output_geometry import (
     WorldSizingPolicy,
-    angle_dimension_label_strokes,
-    angle_dimension_output_spec,
-    area_dimension_label_strokes,
-    area_dimension_output_spec,
-    linear_dimension_label_layout,
-    linear_dimension_output_spec,
-    dimension_set_output_spec,
-    circle_dimension_output_spec,
-    coordinate_elevation_output_spec,
+    build_annotation_output_spec,
     annotation_output_state,
 )
 from ..operators.generate_output import annotations_for_output
@@ -25,6 +16,7 @@ from ..properties import resolve_dimension_style
 from ..sheet_layout import SheetLayoutError, SheetMetadata, build_sheet_layout
 from ..vector_export import (
     VectorExportError,
+    _camera_frame_world_size,
     build_vector_document,
     paper_dimensions_mm,
     paper_mm_to_model,
@@ -61,68 +53,13 @@ def vector_output_strokes(context):
             name=annotation.name,
             dimension_props=resolve_dimension_style(settings, props),
         )
-        if annotation_kind == "DIMENSION_SET":
-            spec = dimension_set_output_spec(
-                context, resolved, f"vector-{index}", sizing, text_height, scene.camera,
-            )
-            if spec is None:
-                skipped += 1
-                continue
-            strokes.extend(spec.strokes)
-            exported += 1
-            continue
-        if annotation_kind == "CIRCLE":
-            spec = circle_dimension_output_spec(
-                context, resolved, f"vector-{index}", sizing, text_height, scene.camera,
-            )
-            if spec is None:
-                skipped += 1
-                continue
-            strokes.extend(spec.strokes)
-            exported += 1
-            continue
-        if annotation_kind in {"COORDINATE", "ELEVATION"}:
-            spec = coordinate_elevation_output_spec(
-                context, resolved, f"vector-{index}", sizing, text_height, scene.camera,
-            )
-            if spec is None:
-                skipped += 1
-                continue
-            strokes.extend(spec.strokes)
-            exported += 1
-            continue
-        builder = {
-            "LINEAR": linear_dimension_output_spec,
-            "ANGLE": angle_dimension_output_spec,
-            "AREA": area_dimension_output_spec,
-        }.get(annotation_kind)
-        if builder is None:
-            skipped += 1
-            continue
-        spec = builder(resolved, f"vector-{index}", sizing)
+        spec = build_annotation_output_spec(
+            context, resolved, f"vector-{index}", sizing, text_height, scene.camera,
+        )
         if spec is None:
             skipped += 1
             continue
-        if annotation_kind == "LINEAR":
-            label_layout = linear_dimension_label_layout(
-                context,
-                resolved,
-                text_height,
-                sizing.line_width,
-                sizing.arrow_size,
-                scene.camera,
-            )
-            base_strokes = spec.strokes[1:] if label_layout.dimension_line_strokes else spec.strokes
-            output_strokes = label_layout.dimension_line_strokes + base_strokes + label_layout.strokes
-        elif annotation_kind == "ANGLE":
-            output_strokes = spec.strokes + angle_dimension_label_strokes(
-                context, resolved, text_height, sizing.line_width, scene.camera,
-            )
-        else:
-            output_strokes = spec.strokes + area_dimension_label_strokes(
-                context, resolved, text_height, sizing.line_width, scene.camera,
-            )
-        strokes.extend(replace(spec, strokes=output_strokes).strokes)
+        strokes.extend(spec.strokes)
         exported += 1
     return tuple(strokes), exported, skipped
 
@@ -222,4 +159,59 @@ class DIMENSIONS_OT_ExportPDF(bpy.types.Operator, ExportHelper, _VectorExportOpe
     format_label = "PDF"
 
 
-classes = (DIMENSIONS_OT_ExportSVG, DIMENSIONS_OT_ExportPDF)
+class DIMENSIONS_OT_SheetPopulateDate(bpy.types.Operator):
+    """Set the title block date to today's date"""
+    bl_idname = "dimensions.sheet_populate_date"
+    bl_label = "Today's Date"
+    bl_description = "Populate the title block date with today's date (YYYY-MM-DD)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        import datetime
+        context.scene.dimensions_settings.sheet_date = datetime.date.today().isoformat()
+        return {"FINISHED"}
+
+
+class DIMENSIONS_OT_SheetSyncScale(bpy.types.Operator):
+    """Fit drawing scale denominator to active orthographic camera"""
+    bl_idname = "dimensions.sheet_sync_scale"
+    bl_label = "Fit Scale to Camera"
+    bl_description = "Calculate and set drawing scale denominator from active orthographic camera"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        camera = context.scene.camera
+        return (
+            camera is not None
+            and camera.type == "CAMERA"
+            and getattr(camera.data, "type", None) == "ORTHO"
+        )
+
+    def execute(self, context):
+        scene = context.scene
+        settings = scene.dimensions_settings
+        camera = scene.camera
+        try:
+            width_mm, height_mm = paper_dimensions_mm(
+                settings.vector_paper_size, settings.vector_orientation
+            )
+            if settings.sheet_border_enabled:
+                margin = settings.sheet_margin_mm * 2.0
+                width_mm = max(10.0, width_mm - margin)
+                height_mm = max(10.0, height_mm - margin)
+
+            frame_w, frame_h = _camera_frame_world_size(scene, camera)
+            scale_length = float(getattr(scene.unit_settings, "scale_length", 1.0))
+            denom_w = (frame_w * scale_length * 1000.0) / width_mm
+            denom_h = (frame_h * scale_length * 1000.0) / height_mm
+            denominator = round(max(denom_w, denom_h), 2)
+            settings.vector_scale_denominator = max(0.01, denominator)
+            self.report(messages.INFO, messages.set_drawing_scale(denominator))
+            return {"FINISHED"}
+        except Exception as error:
+            self.report(messages.WARNING, messages.vector_export_failed(str(error)))
+            return {"CANCELLED"}
+
+
+classes = (DIMENSIONS_OT_ExportSVG, DIMENSIONS_OT_ExportPDF, DIMENSIONS_OT_SheetPopulateDate, DIMENSIONS_OT_SheetSyncScale)

@@ -5,7 +5,7 @@ with the live annotation. It emits dimension linework and legible vector-font
 labels as world-space strokes for the Grease Pencil backend.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import cos, degrees, sin, tau
 
 from mathutils import Vector
@@ -93,7 +93,19 @@ def coordinate_elevation_output_spec(context, dimension_object, source_key, sizi
         ))
         text = f"{props.elevation_prefix}{signed_number(result['value'], props.elevation_precision, props.elevation_show_plus)}{props.elevation_suffix}"
     else:
-        text = coordinate_label(props, result["values"], lambda value: format_length(context, value, props.precision, props.unit_style))
+        text = coordinate_label(
+            props,
+            result["values"],
+            lambda value: format_dual_length(
+                context,
+                value,
+                props.precision,
+                props.unit_style,
+                getattr(props, "secondary_unit_style", "NONE"),
+                getattr(props, "secondary_precision", 2),
+                getattr(props, "dual_unit_arrangement", "BRACKETS"),
+            ),
+        )
     strokes.extend(_text_strokes_at(text, label, text_height, sizing.line_width, color, camera))
     return GreasePencilOutputSpec(source_key=source_key, strokes=tuple(strokes), name=dimension_object.name)
 
@@ -787,3 +799,58 @@ def linear_dimension_label_strokes(
         arrow_size,
         camera,
     ).strokes
+
+def build_annotation_output_spec(
+    context,
+    resolved,
+    source_key,
+    sizing,
+    text_height,
+    camera=None,
+):
+    """Build a complete output spec with linework and labels for any annotation kind."""
+    props = resolved.dimension_props
+    kind = getattr(props, "annotation_kind", "LINEAR")
+    if kind == "DIMENSION_SET":
+        return dimension_set_output_spec(context, resolved, source_key, sizing, text_height, camera)
+    if kind == "CIRCLE":
+        return circle_dimension_output_spec(context, resolved, source_key, sizing, text_height, camera)
+    if kind in {"COORDINATE", "ELEVATION"}:
+        return coordinate_elevation_output_spec(context, resolved, source_key, sizing, text_height, camera)
+    if kind == "LINEAR":
+        spec = linear_dimension_output_spec(resolved, source_key, sizing)
+        if spec is None:
+            return None
+        label_layout = linear_dimension_label_layout(
+            context,
+            resolved,
+            text_height,
+            sizing.line_width,
+            sizing.arrow_size,
+            camera,
+        )
+        line_strokes = label_layout.dimension_line_strokes
+        base_strokes = spec.strokes[1:] if line_strokes else spec.strokes
+        output_strokes = line_strokes + base_strokes + label_layout.strokes
+        return replace(spec, strokes=output_strokes)
+    if kind == "ANGLE":
+        spec = angle_dimension_output_spec(resolved, source_key, sizing)
+        if spec is None:
+            return None
+        return replace(
+            spec,
+            strokes=spec.strokes + angle_dimension_label_strokes(
+                context, resolved, text_height, sizing.line_width, camera,
+            ),
+        )
+    if kind == "AREA":
+        spec = area_dimension_output_spec(resolved, source_key, sizing)
+        if spec is None:
+            return None
+        return replace(
+            spec,
+            strokes=spec.strokes + area_dimension_label_strokes(
+                context, resolved, text_height, sizing.line_width, camera,
+            ),
+        )
+    return None

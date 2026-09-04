@@ -72,6 +72,13 @@ class StrokeFontSmokeTests(unittest.TestCase):
             self.assertTrue(strokes)
             self.assertNotEqual(strokes, fallback)
 
+    def test_drafting_punctuation_symbols_have_native_glyphs(self):
+        fallback = text_strokes("?", (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0)
+        for symbol in (":", ",", "[", "]", "_", "=", "%", "&", "#"):
+            strokes = text_strokes(symbol, (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0)
+            self.assertTrue(strokes, f"Glyph {symbol} produced no strokes")
+            self.assertNotEqual(strokes, fallback, f"Glyph {symbol} matched fallback")
+
     def test_height_and_axes_must_be_positive_and_usable(self):
         with self.assertRaises(ValueError):
             text_strokes("1", (0, 0, 0), (1, 0, 0), (0, 1, 0), 0.0)

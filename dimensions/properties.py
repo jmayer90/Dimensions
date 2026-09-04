@@ -66,6 +66,16 @@ def poll_mesh_objects(_self, obj):
     return obj is not None and obj.type == "MESH"
 
 
+def _anchor_vertex_count(obj):
+    if obj.mode != "EDIT":
+        return len(obj.data.vertices)
+    import bmesh
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    return len(bm.verts)
+
+
 def clamp_anchor_vertex_index(anchor):
     if getattr(anchor, "anchor_type", "VERTEX") != "VERTEX":
         if anchor.vertex_index != -1:
@@ -79,7 +89,7 @@ def clamp_anchor_vertex_index(anchor):
             anchor.vertex_index = -1
         return
 
-    vertex_count = len(obj.data.vertices)
+    vertex_count = _anchor_vertex_count(obj)
     if vertex_count == 0:
         if anchor.vertex_index != -1:
             anchor.vertex_index = -1
@@ -108,7 +118,7 @@ def _refresh_anchor_vertex_id(anchor):
         return
     obj = anchor.target_object
     vertex_index = anchor.vertex_index
-    if obj is None or obj.type != "MESH" or not (0 <= vertex_index < len(obj.data.vertices)):
+    if obj is None or obj.type != "MESH" or not (0 <= vertex_index < _anchor_vertex_count(obj)):
         anchor.vertex_id = 0
         return
     from .anchors import ensure_object_vertex_id

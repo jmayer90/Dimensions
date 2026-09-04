@@ -91,9 +91,25 @@ def repair_issues(annotation):
 def suggest_vertex_candidate(anchor):
     _world, status = anchor_resolution(anchor)
     obj = anchor.target_object
-    if status == "BY_ID" or obj is None or obj.type != "MESH" or not obj.data.vertices:
+    if status == "BY_ID" or obj is None or obj.type != "MESH":
         return None
     fallback = Vector(anchor.fallback_local_co)
+    if obj.mode == "EDIT":
+        import bmesh
+
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.verts.ensure_lookup_table()
+        if not bm.verts:
+            return None
+        vertex = min(bm.verts, key=lambda item: (item.co - fallback).length_squared)
+        return {
+            "object": obj,
+            "vertex_index": vertex.index,
+            "world_co": obj.matrix_world @ vertex.co,
+            "label": f"{obj.name} vertex {vertex.index}",
+        }
+    if not obj.data.vertices:
+        return None
     vertex = min(obj.data.vertices, key=lambda item: (item.co - fallback).length_squared)
     return {
         "object": obj,
@@ -115,7 +131,41 @@ def area_last_known_world(props):
 def suggest_area_candidate(props):
     obj = props.area_source_object
     bindings = list(props.area_faces)
-    if obj is None or obj.type != "MESH" or not bindings or not obj.data.polygons:
+    if obj is None or obj.type != "MESH" or not bindings:
+        return None
+    if obj.mode == "EDIT":
+        import bmesh
+
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.faces.ensure_lookup_table()
+        if not bm.faces:
+            return None
+        remaining = set(range(len(bm.faces)))
+        chosen = []
+        for binding in bindings:
+            candidates = [bm.faces[index] for index in remaining]
+            if not candidates:
+                return None
+            compatible = [face for face in candidates if len(face.verts) == binding.vertex_count]
+            candidates = compatible or candidates
+            center = Vector(binding.fallback_center)
+            normal = Vector(binding.fallback_normal)
+            area = max(binding.fallback_area, 1e-12)
+            face = min(candidates, key=lambda item: (
+                (item.calc_center_median() - center).length_squared
+                + (1.0 - abs(item.normal.dot(normal)))
+                + abs(item.calc_area() - area) / area
+            ))
+            chosen.append(face.index)
+            remaining.discard(face.index)
+        center = sum((bm.faces[index].calc_center_median() for index in chosen), Vector()) / len(chosen)
+        return {
+            "object": obj,
+            "face_indices": tuple(chosen),
+            "world_co": obj.matrix_world @ center,
+            "label": f"{obj.name} face" if len(chosen) == 1 else f"{obj.name} {len(chosen)} faces",
+        }
+    if not obj.data.polygons:
         return None
     remaining = set(range(len(obj.data.polygons)))
     chosen = []

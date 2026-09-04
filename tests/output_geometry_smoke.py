@@ -422,6 +422,16 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
         self.assertEqual(len(elevation_spec.strokes[1].points), 3)
         self.assertEqual(len(elevation_spec.strokes[2].points), 2)
 
+        props.annotation_kind = "COORDINATE"
+        props.secondary_unit_style = "MILLIMETERS"
+        props.secondary_precision = 0
+        props.dual_unit_arrangement = "BRACKETS"
+        dual_spec = coordinate_elevation_output_spec(
+            self.context, coordinate, "coordinate-dual", WorldSizingPolicy(0.02, 0.2), 0.15,
+        )
+        self.assertIsNotNone(dual_spec)
+        self.assertGreater(len(dual_spec.strokes), len(coordinate_spec.strokes))
+
 
 def main():
     dimensions.register()
