@@ -169,6 +169,12 @@ Set `DIMENSIONS_SNAP_PROFILE=1` for the add-on's own per-stage build, reproject,
 3. **Snapshot output.** Generated objects are snapshots and intentionally lose hand edits when regenerated. Each generation pass removes artifacts that no longer have an authoritative source, but source changes do not update a snapshot until the operator runs again. Measurements and construction guides remain viewport/construction data.
 4. **Circle-fit source semantics.** Circular dimensions fit base-mesh points, not evaluated modifiers or Curve/NURBS data. Mixed or concentric boundaries intentionally exceed the fit threshold rather than guessing which feature was intended.
 5. **Duplicated set-joint storage.** Chain joints and Baseline datums are duplicated across adjacent member property groups. Supported operators synchronize every duplicate, but direct external RNA edits can bypass that invariant. Normalizing this representation requires a schema migration with released-file coverage.
+6. **Open external-audit hardening.** The September 2026 audit found confirmed crash,
+   unbounded-allocation, vector-layout, migration, and modal-cleanup paths. They are
+   accepted under [FND-12](tickets/FND-12-critical-stability-hardening.md),
+   [OUT-06](tickets/OUT-06-vector-typography-page-bounds.md), and
+   [FND-13](tickets/FND-13-lifecycle-modal-cleanup.md). Until those tickets close,
+   the 1.0 “no known data-loss or crash defects” gate remains open.
 
 ## Lifecycle behavior matrix
 
@@ -222,6 +228,9 @@ The canonical ticket status, milestone rollup, and status legend live in the [wo
 | 8 | [CON-02](tickets/CON-02-offset-guides.md) | ✅ Complete | Persistent edge/guide/face offsets and centerlines, detach, repair, and cycle refusal delivered in 0.4.3. |
 | 9 | [DIM-03](tickets/DIM-03-coordinate-elevation.md), [CON-03](tickets/CON-03-guide-planes.md), and [CON-04](tickets/CON-04-angular-guides-spacing.md) | ✅ Complete | Validated datums, coordinate/elevation annotations, active planes, angular guides, and repeated spacing in 0.5.0. |
 | 10 | [OUT-05](tickets/OUT-05-drawing-sheet.md) | ✅ Complete | Composed the existing physical-page SVG/PDF export into a bounded single drawing sheet in 0.6.0. |
+| 11 | [FND-12](tickets/FND-12-critical-stability-hardening.md) | ⏭ Next | Close confirmed crash, unbounded spacing, ray/frame, newline, color, and fit-scale defects. |
+| 12a | [OUT-06](tickets/OUT-06-vector-typography-page-bounds.md) | ⬜ Planned | Keep annotations inside the printable sheet and complete deterministic drafting typography. |
+| 12b | [FND-13](tickets/FND-13-lifecycle-modal-cleanup.md) | ⬜ Planned | Close migration, linked-data, Chain, manager, viewport-cleanup, and API-compatibility defects. |
 
 Early public feedback reinforces the product definition rather than expanding it: every request concerns faster annotation, clearer presentation, or usable output. None requires mesh authoring. The disposition is:
 

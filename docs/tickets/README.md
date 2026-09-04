@@ -38,6 +38,7 @@ Acceptance checkboxes inside a ticket define its intended scope; they are not ma
 | M3 — Construction | ✅ Complete | `CON-01`, `CON-02` in 0.4.3; validated `CON-03` and `CON-04` in 0.5.0 | — |
 | M4 — Output | ✅ Complete | Render/vector output through `OUT-04`; single-sheet `OUT-05` in 0.6.0 | — |
 | M5 — Documentation-grade | ✅ Complete | Architectural ticks in 0.3.2; Outside Start placement in 0.4.1; `DIM-01`, `DIM-02`, `DIM-04` in 0.4.3; validated `DIM-03` in 0.5.0 | — |
+| M6 — 1.0 gate | ⏭ Next | External-audit hardening is tracked by `FND-12`, `OUT-06`, and `FND-13` | No known crash/data-loss defects; compatibility promise |
 
 ## Index
 
@@ -109,9 +110,21 @@ Milestone numbers group related work; they are not a strict delivery queue. The 
 | [DIM-03](DIM-03-coordinate-elevation.md) | Coordinate and elevation dimensions | ✅ Complete | 0.5.0; explicit datum/point acquisition hardened in 0.6.0 candidate | M | — |
 | [DIM-04](DIM-04-presentation-controls.md) | Drafting presentation controls: ticks, arrows, units, and alignment | ✅ Complete | 0.4.3 | M | OUT-03 |
 
+### M6 — 1.0 gate
+
+Focused hardening required before the compatibility promise is made.
+
+| ID | Title | Status | Delivered | Effort | Depends on |
+| --- | --- | --- | --- | --- | --- |
+| [FND-12](FND-12-critical-stability-hardening.md) | Critical stability and bounded geometry hardening | ⏭ Next | — | M | — |
+| [OUT-06](OUT-06-vector-typography-page-bounds.md) | Vector typography and printable-area correctness | ⬜ Planned | — | M | FND-12, OUT-05 |
+| [FND-13](FND-13-lifecycle-modal-cleanup.md) | Lifecycle, modal cleanup, and Blender API hardening | ⬜ Planned | — | M | FND-12, FND-07 |
+
 ## Suggested order
 
-M1 through M5 and every indexed implementation ticket are delivered. Remaining work is the explicit 1.0 release gate in `VERSIONING.md`, not an untracked feature ticket.
+M1 through M5 are delivered. For M6, complete `FND-12` first, then `OUT-06` and
+`FND-13` may proceed independently before the final 1.0 release-gate review in
+`VERSIONING.md`.
 
 ## Effort key
 

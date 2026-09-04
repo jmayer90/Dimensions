@@ -82,7 +82,7 @@ Every item must be true before 1.0. Checked items are already satisfied in the c
 **Quality**
 
 - [x] Modal operators have automated coverage — `FND-06`.
-- [ ] No known data-loss or crash defects.
+- [ ] No known data-loss or crash defects — `FND-12`, `OUT-06`, `FND-13`.
 - [x] README, DESIGN, and CONTRIBUTING describe shipped behavior, with the limitations list current.
 
 ## After 1.0
