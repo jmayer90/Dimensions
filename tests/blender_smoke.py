@@ -60,6 +60,7 @@ from dimensions.coordinate_dimensions import (
 from dimensions.transform_policy import annotation_world_location, enforce_annotation_transform_policy, has_ignored_rotation_or_scale
 from dimensions.snapping import _guide_line_snap_candidate
 from dimensions.derived_guides import (
+    MAX_SPACING_GUIDE_LINES,
     bind_edge_source,
     bind_face_source,
     bind_guide_source,
@@ -137,7 +138,13 @@ from dimensions.projected_snap import (
     _project_sources,
 )
 from dimensions.scene_sync import sync_scene_objects
-from dimensions.repair import apply_suggested_repairs, repair_issues
+from dimensions.repair import (
+    apply_suggested_repairs,
+    repair_issues,
+    rebind_area_preserving_presentation,
+    suggest_area_candidate,
+    suggest_vertex_candidate,
+)
 from dimensions.manipulation import angle_radius_from_world, linear_offset_from_world
 from dimensions.snapping import (
     _add_edge_snap_candidates,
@@ -558,6 +565,30 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         attribute.data[1].value = persistent_id
         world = resolve_anchor(anchor)
         self.assertEqual(world, Vector((1.0, 0.0, 0.0)))
+
+    def test_anchor_attribute_collisions_bind_and_resolve_through_fallback(self):
+        guide = create_guide_object(bpy.context, "DimensionsAnchorCollisionSmoke")
+        self.addCleanup(bpy.data.objects.remove, guide, do_unlink=True)
+        target = self._make_object(
+            "DimensionsAnchorCollisionTargetSmoke",
+            [(1.0, 2.0, 3.0), (4.0, 5.0, 6.0)],
+            edges=[(0, 1)],
+        )
+        anchor = guide.guide_props.start
+        set_anchor(anchor, target, 0)
+        attribute = target.data.attributes["dimensions_anchor_id"]
+        target.data.attributes.remove(attribute)
+
+        for data_type, domain in (("FLOAT", "POINT"), ("INT", "EDGE")):
+            with self.subTest(data_type=data_type, domain=domain):
+                collision = target.data.attributes.new("dimensions_anchor_id", data_type, domain)
+                set_anchor(anchor, target, 1)
+                world, status = anchor_resolution(anchor)
+                self.assertEqual(anchor.vertex_id, 0)
+                self.assertEqual(anchor.resolution_status, "BY_FALLBACK")
+                self.assertEqual(world, Vector((4.0, 5.0, 6.0)))
+                self.assertEqual(status, "BY_FALLBACK")
+                target.data.attributes.remove(collision)
 
     def test_edit_mode_anchor_accepts_vertex_created_in_live_bmesh(self):
         guide = create_guide_object(bpy.context, "DimensionsNewEditVertexAnchorSmoke")
@@ -2541,6 +2572,52 @@ class DimensionsGuidedRepairTests(unittest.TestCase):
         self.assertEqual(anchor_resolution(annotation.dimension_props.start)[1], "BY_ID")
         self.assertEqual(tuple(annotation.dimension_props.end.world_co), original_end)
 
+    def test_live_edit_repair_candidates_update_new_bmesh_indices(self):
+        source = self._mesh(
+            "Repair Live BMesh Source",
+            vertices=[(0, 0, 0), (2, 0, 0), (0, 2, 0)],
+            faces=[(0, 1, 2)],
+        )
+        annotation = self._dimension("DIM Repair Live BMesh", source)
+        anchor = annotation.dimension_props.start
+        self._remove_anchor_id(anchor)
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.context.view_layer.objects.active = source
+        source.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            bm = bmesh.from_edit_mesh(source.data)
+            first, second = bm.verts[0], bm.verts[1]
+            first.co = (10, 0, 0)
+            new_vertex = bm.verts.new((0, 1, 0))
+            new_face = bm.faces.new((first, second, new_vertex))
+            bm.normal_update()
+
+            vertex_candidate = suggest_vertex_candidate(anchor)
+            self.assertGreaterEqual(vertex_candidate["vertex_index"], 0)
+            self.assertEqual(vertex_candidate["vertex_index"], new_vertex.index)
+            set_anchor(anchor, source, vertex_candidate["vertex_index"])
+            self.assertEqual(anchor_resolution(anchor)[1], "BY_ID")
+
+            props = annotation.dimension_props
+            props.annotation_kind = "AREA"
+            props.area_source_object = source
+            binding = props.area_faces.add()
+            binding.vertex_count = 3
+            binding.fallback_center = tuple(new_face.calc_center_median())
+            binding.fallback_normal = tuple(new_face.normal)
+            binding.fallback_area = new_face.calc_area()
+            area_candidate = suggest_area_candidate(props)
+            self.assertTrue(area_candidate["face_indices"])
+            self.assertTrue(all(index >= 0 for index in area_candidate["face_indices"]))
+            self.assertEqual(area_candidate["face_indices"], (new_face.index,))
+            self.assertTrue(rebind_area_preserving_presentation(
+                props, source, area_candidate["face_indices"],
+            ))
+            self.assertEqual(props.area_faces[0].vertex_count, 3)
+        finally:
+            bpy.ops.object.mode_set(mode="OBJECT")
+
     def test_angle_suggestion_preserves_presentation_and_other_sources(self):
         source = self._mesh("Repair Angle Source")
         annotation = create_dimension_object(bpy.context, "ANGLE Repair")
@@ -3404,6 +3481,34 @@ class DimensionsGuidePlaneTests(unittest.TestCase):
         self.assertFalse(point_within_plane_extent(origin + axis_u * 2.01, frame, 2))
         self.assertFalse(point_within_plane_extent(origin + axis_v * -2.01, frame, 2))
 
+    def test_plane_frame_uses_a_nonparallel_fallback_axis(self):
+        frame = plane_frame((0, 0, 0), (0, 1, 0), (0, 1, 0))
+        self.assertIsNotNone(frame)
+        _origin, axis_u, axis_v, normal = frame
+        self.assertAlmostEqual(axis_u.dot(normal), 0.0, places=6)
+        self.assertAlmostEqual(axis_v.dot(normal), 0.0, places=6)
+        self.assertAlmostEqual(axis_u.dot(axis_v), 0.0, places=6)
+        self.assertAlmostEqual(axis_u.length, 1.0, places=6)
+        self.assertAlmostEqual(axis_v.length, 1.0, places=6)
+
+    def test_guide_plane_behind_the_mouse_ray_is_not_a_snap_candidate(self):
+        plane = SimpleNamespace(
+            guide_props=SimpleNamespace(kind="PLANE", plane_extent=10.0),
+        )
+        context = SimpleNamespace(
+            scene=SimpleNamespace(objects=[plane]), region=object(), region_data=object(),
+        )
+        frame = plane_frame((0, 0, -1), (0, 0, 1), (1, 0, 0))
+        with (
+            patch("dimensions.snapping.has_view3d_window_region", return_value=True),
+            patch("dimensions.snapping.get_mouse_ray", return_value=(Vector(), Vector((0, 0, 1)))),
+            patch("dimensions.snapping.guide_is_visible", return_value=True),
+            patch("dimensions.guide_planes.resolve_guide_plane", return_value=frame),
+        ):
+            self.assertIsNone(
+                find_nearest_guide_point(context, 0, 0, enabled_targets={"guide_plane"}),
+            )
+
 
 class DimensionsAngularSpacingTests(unittest.TestCase):
     def test_angle_parsing_degrees_radians_and_invalid(self):
@@ -3444,6 +3549,11 @@ class DimensionsAngularSpacingTests(unittest.TestCase):
             self.assertEqual([round(line[0].y, 5) for line in spaced_guide_lines(spaced)], [0, 1, 2, 3])
             props.spacing_mode, props.spacing_extent = "EXTENT", 2.5
             self.assertEqual(spacing_definition(props), (1.0, 3))
+            props.spacing_interval, props.spacing_extent = 0.000001, 1e20
+            interval, count = spacing_definition(props)
+            self.assertEqual(interval, 0.000001)
+            self.assertEqual(count, MAX_SPACING_GUIDE_LINES)
+            self.assertEqual(len(spaced_guide_lines(spaced)), MAX_SPACING_GUIDE_LINES)
             props.spacing_mode, props.spacing_count, props.spacing_extent = "DISTRIBUTE", 3, 10.0
             self.assertEqual(spacing_definition(props), (5.0, 3))
             set_world_anchor(props.spacing_end, Vector((3, 8, 0)))

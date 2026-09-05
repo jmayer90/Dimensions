@@ -5,14 +5,22 @@ VERTEX_ID_ATTRIBUTE = "dimensions_anchor_id"
 VERTEX_ID_COUNTER = "dimensions_anchor_next_id"
 
 
+def _valid_vertex_id_attribute(attribute):
+    return (
+        attribute is not None
+        and attribute.data_type == "INT"
+        and attribute.domain == "POINT"
+    )
+
+
 def ensure_vertex_id(mesh, vertex_index):
     if vertex_index < 0 or vertex_index >= len(mesh.vertices):
         raise ValueError("Anchor vertex index is out of range")
     attribute = mesh.attributes.get(VERTEX_ID_ATTRIBUTE)
     if attribute is None:
         attribute = mesh.attributes.new(VERTEX_ID_ATTRIBUTE, "INT", "POINT")
-    elif attribute.data_type != "INT" or attribute.domain != "POINT":
-        raise ValueError(f"Reserved attribute {VERTEX_ID_ATTRIBUTE!r} must be an INT POINT attribute")
+    elif not _valid_vertex_id_attribute(attribute):
+        return 0
     value = attribute.data[vertex_index].value
     if value > 0:
         return value
@@ -36,6 +44,9 @@ def anchor_vertex_count(obj):
 
 
 def ensure_object_vertex_id(obj, vertex_index):
+    attribute = obj.data.attributes.get(VERTEX_ID_ATTRIBUTE)
+    if attribute is not None and not _valid_vertex_id_attribute(attribute):
+        return 0
     if obj.mode != "EDIT":
         return ensure_vertex_id(obj.data, vertex_index)
     import bmesh
@@ -83,7 +94,7 @@ def set_anchor(anchor, obj, vertex_index):
     anchor.fallback_local_co = tuple(vertex_co)
     anchor.world_co = tuple(obj.matrix_world @ vertex_co)
     anchor.source_object_name = obj.name
-    anchor.resolution_status = "BY_ID"
+    anchor.resolution_status = "BY_ID" if anchor.vertex_id > 0 else "BY_FALLBACK"
 
 
 def set_world_anchor(anchor, world_co):
@@ -149,6 +160,9 @@ def anchor_resolution(anchor):
     mesh = obj.data
     vertex_index = anchor.vertex_index
     vertex_id = getattr(anchor, "vertex_id", 0)
+    attribute = mesh.attributes.get(VERTEX_ID_ATTRIBUTE)
+    if attribute is not None and not _valid_vertex_id_attribute(attribute):
+        return obj.matrix_world @ Vector(anchor.fallback_local_co), "BY_FALLBACK"
     if obj.mode == "EDIT":
         import bmesh
 
@@ -162,8 +176,7 @@ def anchor_resolution(anchor):
             return obj.matrix_world @ bm.verts[vertex_index].co, "BY_ID"
         return obj.matrix_world @ Vector(anchor.fallback_local_co), "BY_FALLBACK"
     elif vertex_id > 0:
-        attribute = mesh.attributes.get(VERTEX_ID_ATTRIBUTE)
-        matches = [] if attribute is None else [
+        matches = [] if not _valid_vertex_id_attribute(attribute) else [
             mesh.vertices[index]
             for index, item in enumerate(attribute.data)
             if item.value == vertex_id
@@ -260,7 +273,7 @@ def migrate_anchor_identity(anchor):
     if obj is None or obj.type != "MESH" or not (0 <= vertex_index < anchor_vertex_count(obj)):
         return False
     anchor.vertex_id = ensure_object_vertex_id(obj, vertex_index)
-    return True
+    return anchor.vertex_id > 0
 
 
 def _resolved_vertex_matches(obj, anchor, matches):

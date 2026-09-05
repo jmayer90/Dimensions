@@ -1,5 +1,6 @@
 """Camera-framed, scale-correct SVG and PDF export operators."""
 
+from math import ceil
 from types import SimpleNamespace
 
 import bpy
@@ -18,6 +19,7 @@ from ..vector_export import (
     VectorExportError,
     _camera_frame_world_size,
     build_vector_document,
+    camera_frame_fits_page,
     paper_dimensions_mm,
     paper_mm_to_model,
     write_pdf,
@@ -205,8 +207,12 @@ class DIMENSIONS_OT_SheetSyncScale(bpy.types.Operator):
             scale_length = float(getattr(scene.unit_settings, "scale_length", 1.0))
             denom_w = (frame_w * scale_length * 1000.0) / width_mm
             denom_h = (frame_h * scale_length * 1000.0) / height_mm
-            denominator = round(max(denom_w, denom_h), 2)
-            settings.vector_scale_denominator = max(0.01, denominator)
+            denominator = max(0.01, ceil(max(denom_w, denom_h) * 100.0) / 100.0)
+            if not camera_frame_fits_page(scene, camera, width_mm, height_mm, denominator):
+                denominator = round(denominator + 0.01, 2)
+            if not camera_frame_fits_page(scene, camera, width_mm, height_mm, denominator):
+                raise VectorExportError("The fitted drawing scale could not be validated")
+            settings.vector_scale_denominator = denominator
             self.report(messages.INFO, messages.set_drawing_scale(denominator))
             return {"FINISHED"}
         except Exception as error:

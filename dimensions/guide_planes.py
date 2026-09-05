@@ -15,12 +15,16 @@ def plane_frame(origin, normal, preferred_axis=None):
     if normal.length < EPSILON:
         return None
     normal.normalize()
-    axis_u = Vector(preferred_axis or (1.0, 0.0, 0.0))
-    axis_u -= normal * axis_u.dot(normal)
-    if axis_u.length < EPSILON:
-        axis_u = Vector((0.0, 1.0, 0.0))
-        axis_u -= normal * axis_u.dot(normal)
-    if axis_u.length < EPSILON:
+    candidates = (preferred_axis,) if preferred_axis is not None else ()
+    candidates += ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    axis_u = None
+    for candidate in candidates:
+        projected = Vector(candidate)
+        projected -= normal * projected.dot(normal)
+        if projected.length >= EPSILON:
+            axis_u = projected
+            break
+    if axis_u is None:
         return None
     axis_u.normalize()
     axis_v = normal.cross(axis_u)

@@ -98,6 +98,7 @@ def suggest_vertex_candidate(anchor):
         import bmesh
 
         bm = bmesh.from_edit_mesh(obj.data)
+        bm.verts.index_update()
         bm.verts.ensure_lookup_table()
         if not bm.verts:
             return None
@@ -137,6 +138,7 @@ def suggest_area_candidate(props):
         import bmesh
 
         bm = bmesh.from_edit_mesh(obj.data)
+        bm.faces.index_update()
         bm.faces.ensure_lookup_table()
         if not bm.faces:
             return None

@@ -116,7 +116,7 @@ Focused hardening required before the compatibility promise is made.
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [FND-12](FND-12-critical-stability-hardening.md) | Critical stability and bounded geometry hardening | ⏭ Next | — | M | — |
+| [FND-12](FND-12-critical-stability-hardening.md) | Critical stability and bounded geometry hardening | 🟨 Partial | 0.6.0 candidate; Blender 5.1/5.2 validation pending | M | — |
 | [OUT-06](OUT-06-vector-typography-page-bounds.md) | Vector typography and printable-area correctness | ⬜ Planned | — | M | FND-12, OUT-05 |
 | [FND-13](FND-13-lifecycle-modal-cleanup.md) | Lifecycle, modal cleanup, and Blender API hardening | ⬜ Planned | — | M | FND-12, FND-07 |
 

@@ -39,6 +39,18 @@ class VectorDocument:
     skipped_count: int = 0
 
 
+def _normalized_color(color):
+    try:
+        channels = tuple(float(channel) for channel in color)
+    except (TypeError, ValueError):
+        raise VectorExportError("Stroke color must contain three or four numeric channels") from None
+    if len(channels) not in {3, 4} or not all(isfinite(channel) for channel in channels):
+        raise VectorExportError("Stroke color must contain three or four finite numeric channels")
+    if len(channels) == 3:
+        channels += (1.0,)
+    return tuple(max(0.0, min(1.0, channel)) for channel in channels)
+
+
 def paper_dimensions_mm(paper_size, orientation):
     try:
         width, height = PAPER_SIZES_MM[paper_size]
@@ -82,6 +94,15 @@ def _camera_frame_world_size(scene, camera):
     if x_delta <= 1e-12 or y_delta <= 1e-12:
         raise VectorExportError("The active camera frame could not be resolved")
     return 1.0 / x_delta, 1.0 / y_delta
+
+
+def camera_frame_fits_page(scene, camera, width_mm, height_mm, scale_denominator):
+    factor = model_to_paper_factor(scene, scale_denominator)
+    frame_width_world, frame_height_world = _camera_frame_world_size(scene, camera)
+    return (
+        frame_width_world * factor <= float(width_mm) + 1e-6
+        and frame_height_world * factor <= float(height_mm) + 1e-6
+    )
 
 
 def _clip_segment(first, second):
@@ -128,7 +149,9 @@ def build_vector_document(
     frame_width_world, frame_height_world = _camera_frame_world_size(scene, camera)
     frame_width_mm = frame_width_world * factor
     frame_height_mm = frame_height_world * factor
-    if frame_width_mm > width_mm + 1e-6 or frame_height_mm > height_mm + 1e-6:
+    if not camera_frame_fits_page(
+        scene, camera, width_mm, height_mm, scale_denominator,
+    ):
         raise VectorExportError(
             f"Camera frame is {frame_width_mm:.1f} × {frame_height_mm:.1f} mm at 1:{scale_denominator:g}; "
             f"choose a larger page, a larger scale denominator, or a tighter camera frame"
@@ -140,6 +163,7 @@ def build_vector_document(
     for stroke in strokes:
         if not isinstance(stroke, OutputStroke):
             raise TypeError("strokes must contain OutputStroke values")
+        color = _normalized_color(stroke.color)
         projected = [world_to_camera_view(scene, camera, Vector(point)) for point in stroke.points]
         for first, second in zip(projected, projected[1:]):
             if first.z < 0.0 or second.z < 0.0:
@@ -156,7 +180,7 @@ def build_vector_document(
             )
             page_strokes.append(PageStroke(
                 points=page_points,
-                color=tuple(float(channel) for channel in stroke.color),
+                color=color,
                 line_width_mm=float(stroke.line_width) * factor,
             ))
     if not page_strokes:
@@ -166,7 +190,7 @@ def build_vector_document(
             raise TypeError("sheet_strokes must contain SheetStroke values")
         page_strokes.append(PageStroke(
             points=stroke.points,
-            color=stroke.color,
+            color=_normalized_color(stroke.color),
             line_width_mm=stroke.line_width_mm,
             role=stroke.role,
         ))

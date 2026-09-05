@@ -10,7 +10,9 @@ All notable user-visible changes are recorded here. Versions before 0.2.0 were r
 
 - Expanded single-line stroke font glyph coverage with clean vector representations for `:`, `,`, `[`, `]`, `_`, `=`, `%`, `&`, and `#`, preventing missing or skipped characters in title blocks, coordinate expressions, and custom dimension prefixes/suffixes.
 
-- Guaranteed PDF color specification compliance by strictly clamping RGB color channels to `[0.0, 1.0]` before generating PDF `RG` commands.
+- Normalized valid RGB and RGBA stroke colors to one clamped four-channel page representation before SVG/PDF serialization, and now reject invalid channel counts or non-finite values with an actionable export error.
+
+- Hardened the remaining critical geometry boundaries: colliding reserved anchor attributes now fall back truthfully, live Edit Mode repair refreshes BMesh indices, repeated Spacing emits at most 10,000 lines, guide planes behind the view ray are ignored, and axis-aligned plane frames always choose a valid basis. Stroke-font CRLF/CR input now matches LF, and Fit Scale rounds upward so its chosen denominator is never immediately rejected for being too small.
 
 - Enhanced Edit Mode anchor resolution and repair workflows by validating vertex bounds against live Edit Mode BMesh topology, and upgraded guided vertex and area repair candidate suggestions to search live BMesh vertices and faces.
 

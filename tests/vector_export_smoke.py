@@ -117,6 +117,41 @@ class DimensionsVectorExportTests(unittest.TestCase):
         self.assertEqual(paper_dimensions_mm("A3", "PORTRAIT"), (297.0, 420.0))
         self.assertEqual(paper_dimensions_mm("LETTER", "LANDSCAPE"), (279.4, 215.9))
 
+    def test_rgb_and_rgba_colors_normalize_before_serialization(self):
+        points = (Vector((-0.05, 0.0, 0.0)), Vector((0.05, 0.0, 0.0)))
+        rgb = self._document_for_stroke(OutputStroke(
+            points=points, color=(0.2, 0.4, 0.6), line_width=0.0025,
+        ))
+        rgba = self._document_for_stroke(OutputStroke(
+            points=points, color=(0.2, 0.4, 0.6, 1.0), line_width=0.0025,
+        ))
+        self.assertEqual(rgb.strokes, rgba.strokes)
+        self.assertEqual(svg_text(rgb), svg_text(rgba))
+        self.assertEqual(pdf_bytes(rgb), pdf_bytes(rgba))
+
+    def test_invalid_color_channel_counts_fail_before_serialization(self):
+        for color in (
+            (0.2, 0.4),
+            (0.2, 0.4, 0.6, 0.8, 1.0),
+            (float("nan"), 0.4, 0.6),
+            (float("inf"), 0.4, 0.6, 1.0),
+        ):
+            with self.subTest(color=color), self.assertRaisesRegex(
+                VectorExportError, "three or four",
+            ):
+                self._document_for_stroke(OutputStroke(
+                    points=(Vector((-0.05, 0, 0)), Vector((0.05, 0, 0))),
+                    color=color,
+                    line_width=0.0025,
+                ))
+
+        with self.assertRaisesRegex(VectorExportError, "three or four"):
+            self._document_for_stroke(OutputStroke(
+                points=(Vector((100, 100, 0)), Vector((101, 100, 0))),
+                color=(0.2, 0.4),
+                line_width=0.0025,
+            ))
+
     def test_pdf_is_single_page_with_the_selected_media_box(self):
         document = self._document_for_stroke(OutputStroke(
             points=(Vector((-0.05, 0.0, 0.0)), Vector((0.05, 0.0, 0.0))),
@@ -309,7 +344,17 @@ class DimensionsVectorExportTests(unittest.TestCase):
         settings.vector_orientation = "PORTRAIT"
         settings.sheet_border_enabled = False
         self.assertEqual(bpy.ops.dimensions.sheet_sync_scale(), {"FINISHED"})
-        self.assertAlmostEqual(settings.vector_scale_denominator, 9.52, places=2)
+        self.assertAlmostEqual(settings.vector_scale_denominator, 9.53, places=2)
+        build_vector_document(
+            self.scene,
+            self.camera,
+            (OutputStroke(
+                points=(Vector((-0.05, 0, 0)), Vector((0.05, 0, 0))),
+                color=(0.0, 0.0, 0.0),
+                line_width=0.0025,
+            ),),
+            scale_denominator=settings.vector_scale_denominator,
+        )
 
 
 def main():

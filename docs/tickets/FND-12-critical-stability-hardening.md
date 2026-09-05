@@ -1,7 +1,7 @@
 # FND-12 — Critical stability and bounded geometry hardening
 
 **Milestone:** M6 1.0 gate
-**Status:** ⏭ Next — accepted from the September 2026 external audit.
+**Status:** 🟨 Partial — implementation and regression coverage complete; Blender 5.1/5.2 validation pending.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch.

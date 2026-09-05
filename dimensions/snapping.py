@@ -811,8 +811,12 @@ def find_nearest_guide_point(
                 ray_origin, ray_origin + ray_direction * 100000.0,
                 origin, normal, False,
             )
-            if world_co is None or not point_within_plane_extent(
-                world_co, frame, obj.guide_props.plane_extent,
+            if (
+                world_co is None
+                or (world_co - ray_origin).dot(ray_direction) < 0.0
+                or not point_within_plane_extent(
+                    world_co, frame, obj.guide_props.plane_extent,
+                )
             ):
                 continue
             screen_co = view3d_utils.location_3d_to_region_2d(

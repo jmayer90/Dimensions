@@ -8,6 +8,7 @@ from .area_binding import _evaluate_faces, _faces_by_id, ensure_bmesh_face_ids, 
 
 
 EPSILON = 1e-6
+MAX_SPACING_GUIDE_LINES = 10000
 
 
 def bind_edge_source(source, obj, edge_index):
@@ -19,6 +20,8 @@ def bind_edge_source(source, obj, edge_index):
         import bmesh
 
         bm = bmesh.from_edit_mesh(obj.data)
+        bm.verts.index_update()
+        bm.edges.index_update()
         bm.edges.ensure_lookup_table()
         if not (0 <= edge_index < len(bm.edges)):
             return False
@@ -59,6 +62,7 @@ def bind_face_source(source, obj, face_index):
         import bmesh
 
         bm = bmesh.from_edit_mesh(obj.data)
+        bm.faces.index_update()
         bm.faces.ensure_lookup_table()
         if not (0 <= face_index < len(bm.faces)):
             return False
@@ -240,11 +244,14 @@ def _angular_line(source, pivot, angle, plane_normal):
 
 
 def spacing_definition(props):
-    count = max(2, int(props.spacing_count))
+    count = min(MAX_SPACING_GUIDE_LINES, max(2, int(props.spacing_count)))
     interval = max(EPSILON, float(props.spacing_interval))
     extent = max(EPSILON, float(props.spacing_extent))
     if props.spacing_mode == "EXTENT":
-        count = max(2, floor(extent / interval) + 1)
+        if extent >= interval * (MAX_SPACING_GUIDE_LINES - 1):
+            count = MAX_SPACING_GUIDE_LINES
+        else:
+            count = max(2, floor(extent / interval) + 1)
     elif props.spacing_mode == "DISTRIBUTE":
         interval = extent / (count - 1)
     return interval, count

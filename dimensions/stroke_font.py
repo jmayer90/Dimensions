@@ -143,7 +143,7 @@ def text_block_dimensions(text, height):
         raise ValueError("height must be greater than zero")
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    lines = text.split("\n")
+    lines = _normalized_lines(text)
     width = max(
         (sum(_advance(character.upper()) for character in line) for line in lines),
         default=0.0,
@@ -157,6 +157,10 @@ def _world_point(origin, x_axis, y_axis, local_x, local_y, height):
         origin[index] + (x_axis[index] * local_x + y_axis[index] * local_y) * height
         for index in range(3)
     )
+
+
+def _normalized_lines(text):
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
 
 def text_strokes(text, origin, x_axis, y_axis, height, align="CENTER"):
@@ -182,7 +186,7 @@ def text_strokes(text, origin, x_axis, y_axis, height, align="CENTER"):
     x_axis = _unit_vector(x_axis, "x_axis")
     y_axis = _unit_vector(y_axis, "y_axis")
     strokes = []
-    for line_index, line in enumerate(text.split("\n")):
+    for line_index, line in enumerate(_normalized_lines(text)):
         characters = [character.upper() for character in line]
         line_width = sum(_advance(character) for character in characters)
         if align == "CENTER":

@@ -47,6 +47,16 @@ class StrokeFontSmokeTests(unittest.TestCase):
         self.assertLess(lower[1], -2.0)
         self.assertAlmostEqual(upper[1], 2.0)
 
+    def test_newline_variants_have_identical_metrics_and_strokes(self):
+        expected_dimensions = text_block_dimensions("A\nB", 1.0)
+        expected_strokes = text_strokes("A\nB", (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0)
+        for text in ("A\r\nB", "A\rB"):
+            self.assertEqual(text_block_dimensions(text, 1.0), expected_dimensions)
+            self.assertEqual(
+                text_strokes(text, (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0),
+                expected_strokes,
+            )
+
     def test_axes_orient_points_in_world_space(self):
         strokes = text_strokes("I", (1, 2, 3), (0, 1, 0), (0, 0, 1), 2.0, "LEFT")
         lower, upper = _bounds(strokes)
