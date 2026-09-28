@@ -178,9 +178,9 @@ class DIMENSIONS_AddonPreferences(bpy.types.AddonPreferences):
         snapping = layout.box()
         snapping.label(text="Snapping")
         snapping.prop(self, "snap_pixel_threshold")
-        from .snap_targets import draw_snap_target_row
+        from .snap_targets import draw_snap_target_controls
 
-        draw_snap_target_row(snapping, self)
+        draw_snap_target_controls(snapping, self)
         inference = layout.box()
         inference.label(text="Drafting Inference")
         from .inference import draw_inference_preferences

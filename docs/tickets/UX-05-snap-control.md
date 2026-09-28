@@ -1,7 +1,7 @@
 # UX-05 — User control over which snap targets are active
 
 **Milestone:** M2 Fluency
-**Status:** ✅ Complete — delivered in 0.4.2; foreground disable/re-enable QA completed on Blender 5.2 for the 0.6.0 candidate.
+**Status:** ✅ Complete — delivered in 0.4.2; foreground disable/re-enable QA and labeled sidebar controls completed for the 0.6.0 candidate.
 **Effort:** S
 **Depends on:** FND-04
 **Version impact:** Patch.
@@ -26,7 +26,7 @@ Small, cheap, and directly addresses the most common precision-tool complaint. I
 
 **Expose it in two places, both necessary:**
 
-- A compact row of toggle icons in the Dimensions sidebar panel, mirroring how Blender presents its own snap targets in the header. This is where users set it up.
+- Labeled Mesh, Guide, and Measurement toggles in a collapsible Snap Targets sidebar panel. The same controls appear in add-on preferences; a compact icon row proved too hard to discover at the default sidebar width.
 - A modal key to cycle or toggle target types during acquisition, because the need usually becomes apparent mid-operation. Coordinate with `FND-05` so this is rebindable.
 
 **Filter at candidate generation, not at scoring.** Skipping disabled types before generating candidates is both faster and simpler than generating then discarding, and it means disabling types measurably improves performance on dense scenes.

@@ -66,7 +66,7 @@ This is the same definition-versus-instance decision as `CON-04`'s spaced guides
 ## Verification
 
 - Geometry tests asserting members share a dimension line and correct stacked offsets.
-- Tests for insert, delete, and reorder, asserting the set stays coherent.
+- Tests for insert and delete, asserting the set stays coherent; arbitrary member reordering is outside the supported interaction.
 - A test that moving source geometry keeps members aligned.
 - A test that a member entering a repair state does not break the rest of the set.
 - Label collision tests at small segment lengths.
@@ -79,7 +79,7 @@ opens the released schema-v2 fixture through the sequential v6 → v7 → v8 pat
 and performs a real save/reload of a populated chain set.
 
 The 0.6.0 hardening pass adds stable-direction and invalid-projection geometry
-coverage, shared-anchor repair propagation, reorder/hit/collision regressions, and
+coverage, shared-anchor repair propagation, hit/collision regressions, and
 adapter tests for continued creation, inference, active planes, axis/typed input,
 step-back, Edit Mode, and insert cleanup. Foreground follow-up makes the first
 member's axis/plane authoritative for preview and commit, restores the native

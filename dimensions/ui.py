@@ -56,19 +56,28 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
         for value, label in (("ALIGNED", "Auto"), ("X", "X"), ("Y", "Y"), ("Z", "Z")):
             direction_buttons.prop_enum(preferences, "default_axis_mode", value, text=label)
 
-        from .snap_targets import draw_snap_target_row
 
-        snap_box = self.layout.box()
-        snap_box.label(text="Snap Targets")
+class CADDIM_PT_SnapTargets(CADDIM_PT_PanelBase, bpy.types.Panel):
+    bl_label = "Snap Targets"
+    bl_idname = "CADDIM_PT_snap_targets"
+    bl_parent_id = CADDIM_PT_MainPanel.bl_idname
+    bl_order = 2
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        from .snap_targets import draw_snap_target_controls
+
+        layout = self.layout
         settings = context.scene.dimensions_settings
-        snap_box.prop(settings, "use_snap_target_override", text="Scene Override")
+        preferences = get_preferences(context)
+        layout.prop(settings, "use_snap_target_override", text="Scene Override")
         source = settings if settings.use_snap_target_override else preferences
-        snap_box.prop(
+        layout.prop(
             source,
             "snap_pixel_radius" if settings.use_snap_target_override else "snap_pixel_threshold",
             text="Snap Radius",
         )
-        draw_snap_target_row(snap_box, source)
+        draw_snap_target_controls(layout, source)
 
 
 class CADDIM_PT_MeshSelection(CADDIM_PT_PanelBase, bpy.types.Panel):
@@ -97,7 +106,7 @@ class CADDIM_PT_GlobalSettings(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Global Dimension Settings"
     bl_idname = "CADDIM_PT_global_settings"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 2
+    bl_order = 6
 
     def draw(self, context):
         layout = self.layout
@@ -130,7 +139,7 @@ class CADDIM_PT_MeshSizeHUD(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Selected Mesh Size HUD"
     bl_idname = "CADDIM_PT_mesh_size_hud"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 1
+    bl_order = 10
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -152,7 +161,7 @@ class CADDIM_PT_GlobalStyle(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Global Dimension Style"
     bl_idname = "CADDIM_PT_global_style"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 3
+    bl_order = 8
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -248,7 +257,7 @@ class CADDIM_PT_AnnotationManager(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Annotation Manager"
     bl_idname = "CADDIM_PT_annotation_manager"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 2
+    bl_order = 3
 
     def draw(self, context):
         layout = self.layout
@@ -323,7 +332,7 @@ class CADDIM_PT_GuidedRepair(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Guided Repair"
     bl_idname = "CADDIM_PT_guided_repair"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 3
+    bl_order = 4
 
     @classmethod
     def poll(cls, context):
@@ -387,7 +396,7 @@ class CADDIM_PT_AnnotationStyles(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Named Annotation Styles"
     bl_idname = "CADDIM_PT_annotation_styles"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 4
+    bl_order = 9
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -680,7 +689,7 @@ class CADDIM_PT_ConstructionGuides(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Construction Guides"
     bl_idname = "CADDIM_PT_construction_guides"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 4
+    bl_order = 7
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -788,7 +797,7 @@ class CADDIM_PT_Output(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_label = "Output"
     bl_idname = "CADDIM_PT_output"
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
-    bl_order = 6
+    bl_order = 1
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
@@ -801,21 +810,21 @@ class CADDIM_PT_Output(CADDIM_PT_PanelBase, bpy.types.Panel):
         grease_pencil.label(text="Grease Pencil", icon="GREASEPENCIL")
         grease_pencil.prop(settings, "output_sizing_mode")
         if settings.output_sizing_mode == "CAMERA":
-            grease_pencil.prop(settings, "output_line_width")
-            grease_pencil.prop(settings, "output_text_height")
-            grease_pencil.prop(settings, "output_arrow_size")
+            grease_pencil.prop(settings, "output_line_width", text="Line Width")
+            grease_pencil.prop(settings, "output_text_height", text="Text Height")
+            grease_pencil.prop(settings, "output_arrow_size", text="Arrow Size")
         else:
-            grease_pencil.prop(settings, "output_world_line_width")
-            grease_pencil.prop(settings, "output_world_text_height")
-            grease_pencil.prop(settings, "output_world_arrow_size")
+            grease_pencil.prop(settings, "output_world_line_width", text="Line Width")
+            grease_pencil.prop(settings, "output_world_text_height", text="Text Height")
+            grease_pencil.prop(settings, "output_world_arrow_size", text="Arrow Size")
         grease_pencil.operator("dimensions.generate_output", icon="GREASEPENCIL")
-        grease_pencil.label(text="Disposable: regeneration replaces hand edits", icon="ERROR")
+        grease_pencil.label(text="Rebuild replaces hand edits", icon="ERROR")
 
         vector = layout.box()
         vector.label(text="Scale-Correct SVG / PDF", icon="FILE_IMAGE")
         vector.prop(settings, "vector_paper_size")
         vector.prop(settings, "vector_orientation")
-        vector.prop(settings, "vector_scale_denominator")
+        vector.prop(settings, "vector_scale_denominator", text="Scale 1:N")
         vector.operator("dimensions.sheet_sync_scale", text="Fit Scale to Camera", icon="CAMERA_DATA")
         vector.prop(settings, "vector_line_width_mm")
         vector.prop(settings, "vector_text_height_mm")
@@ -827,10 +836,10 @@ class CADDIM_PT_Output(CADDIM_PT_PanelBase, bpy.types.Panel):
         if settings.sheet_border_enabled or settings.sheet_title_block_enabled:
             sheet.prop(settings, "sheet_margin_mm")
         if settings.sheet_title_block_enabled:
-            sheet.prop(settings, "sheet_title_block_width_mm")
-            sheet.prop(settings, "sheet_title_block_height_mm")
+            sheet.prop(settings, "sheet_title_block_width_mm", text="Block Width")
+            sheet.prop(settings, "sheet_title_block_height_mm", text="Block Height")
             sheet.prop(settings, "sheet_drawing_title")
-            sheet.prop(settings, "sheet_drawing_number")
+            sheet.prop(settings, "sheet_drawing_number", text="Drawing No.")
             sheet.prop(settings, "sheet_revision")
             sheet.prop(settings, "sheet_author")
             sheet.prop(settings, "sheet_date")
@@ -860,6 +869,7 @@ classes = (
     CADDIM_UL_AnnotationStyles,
     CADDIM_PT_MainPanel,
     CADDIM_PT_MeshSelection,
+    CADDIM_PT_SnapTargets,
     CADDIM_PT_MeshSizeHUD,
     CADDIM_PT_GlobalSettings,
     CADDIM_PT_AnnotationManager,

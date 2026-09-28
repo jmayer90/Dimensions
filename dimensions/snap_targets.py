@@ -80,15 +80,21 @@ def handle_snap_target_event(context, event):
     return True
 
 
-def draw_snap_target_row(layout, source):
-    row = layout.row(align=True)
-    for identifier, _label, icon in TARGETS:
-        row.prop(
-            source,
-            f"snap_{identifier}",
-            text="",
-            icon=icon,
-            toggle=True,
-            emboss=True,
-        )
-    return row
+def draw_snap_target_controls(layout, source):
+    """Expose target names without crowding Blender's default sidebar width."""
+    groups = (
+        ("Mesh", (("vertex", "Vertex"), ("edge", "Edge"),
+                  ("midpoint", "Midpoint"), ("face_center", "Face Center"),
+                  ("face_point", "Face Point"))),
+        ("Guides", (("guide", "Line"), ("guide_point", "Point"),
+                    ("guide_plane", "Plane"))),
+        ("Measurements", (("measurement_endpoint", "End"),
+                          ("measurement_midpoint", "Mid"),
+                          ("measurement_segment", "Segment"))),
+    )
+    for group_name, targets in groups:
+        layout.label(text=group_name)
+        for start in range(0, len(targets), 2 if group_name == "Mesh" else 3):
+            row = layout.row(align=True)
+            for identifier, label in targets[start:start + (2 if group_name == "Mesh" else 3)]:
+                row.prop(source, f"snap_{identifier}", text=label, toggle=True)

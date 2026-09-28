@@ -72,7 +72,7 @@ The difference between a tool that works and one people keep using.
 | [UX-02](UX-02-annotation-manager.md) | Annotation manager: list, search, isolate, repair, restyle | ✅ Complete | 0.4.2; redraw/repair routing hardened in 0.6.0 candidate | L | — |
 | [UX-03](UX-03-inference-engine.md) | Inference: parallel, perpendicular, extension, intersection, local axis | ✅ Complete | 0.4.2 | L | FND-08 |
 | [UX-04](UX-04-direct-handles.md) | Direct viewport handles for placement, radius, and offset | ✅ Complete | 0.4.3 | M | FND-01 |
-| [UX-05](UX-05-snap-control.md) | User control over which snap targets are active | ✅ Complete | 0.4.2; foreground QA in 0.6.0 candidate | S | FND-04 |
+| [UX-05](UX-05-snap-control.md) | User control over which snap targets are active | ✅ Complete | 0.4.2; foreground QA and labeled controls in 0.6.0 candidate | S | FND-04 |
 | [UX-06](UX-06-hover-measurement.md) | Transient hover measurement with delta X/Y/Z | ✅ Complete | 0.4.3 | M | — |
 | [UX-07](UX-07-guided-repair.md) | Guided repair for broken anchors and area bindings | ✅ Complete | 0.4.2 | M | UX-02 |
 | [UX-08](UX-08-stable-overlay-sizing.md) | Verify and enforce stable screen-space label sizing | ✅ Complete | 0.3.1 | S | — |
@@ -118,7 +118,7 @@ Focused hardening required before the compatibility promise is made.
 | --- | --- | --- | --- | --- | --- |
 | [FND-12](FND-12-critical-stability-hardening.md) | Critical stability and bounded geometry hardening | ✅ Complete | 0.6.0 candidate; Blender 5.1.2/5.2.2 validated | M | — |
 | [OUT-06](OUT-06-vector-typography-page-bounds.md) | Vector typography and printable-area correctness | ✅ Complete | 0.6.0 candidate; Blender 5.1.2/5.2.2 validated | M | FND-12, OUT-05 |
-| [FND-13](FND-13-lifecycle-modal-cleanup.md) | Lifecycle, modal cleanup, and Blender API hardening | ✅ Complete | 0.6.0 candidate; Blender 5.1.2/5.2.2 validated | M | FND-12, FND-07 |
+| [FND-13](FND-13-lifecycle-modal-cleanup.md) | Lifecycle, modal cleanup, and Blender API hardening | ✅ Complete | 0.6.0 candidate; Blender 5.1.2/5.2.2 validated; reorder helper removed | M | FND-12, FND-07 |
 
 ## Suggested order
 

@@ -154,21 +154,6 @@ def delete_set_member(props, member_index):
         )
 
 
-def move_set_member(props, member_index, direction):
-    target = member_index + direction
-    if not (0 <= member_index < len(props.set_members) and 0 <= target < len(props.set_members)):
-        return False
-    if props.set_kind == "CHAIN":
-        # Permuting one chain point can reverse a segment or move it off the
-        # shared axis. Insertion and deletion have defined geometric meaning;
-        # arbitrary reordering does not.
-        return False
-    else:
-        props.set_members.move(member_index, target)
-        props.active_set_member_index = target
-    return True
-
-
 def resolved_set_members(props):
     result = []
     for index, member in enumerate(props.set_members):

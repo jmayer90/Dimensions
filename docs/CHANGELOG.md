@@ -4,13 +4,17 @@ All notable user-visible changes are recorded here. Versions before 0.2.0 were r
 
 ## 0.6.0 — Unreleased
 
+- Focused the release sidebar: Output now sits directly below creation tools, and Snap Targets opens as a compact child panel with labeled Mesh, Guide, and Measurement toggles instead of eleven unexplained icons. Removed the unexposed member-reorder helper; Chain and Baseline editing keeps insertion, deletion, reattachment, and repair with defined geometric behavior.
+
+- Corrected the POSIX validation script's archive check so a valid ZIP with `LICENSE` is not rejected when `unzip` receives a closed pipe from `grep -q`.
+
 - Corrected SVG/PDF sheet placement: the camera frame now fits inside an explicit rectangle clear of margins, border, and title block; Fit Scale uses the same bounds. The minimum title block width is 80 mm, ISO dates and supported default scale text fit at the configured drafting height, and overflowing metadata names its field with a corrective action. Expected export and fit refusals use catalog warnings.
 
 - Completed the stroke font's printable ASCII coverage and native `×`, `Ø`/`⌀`, `µ`, `≤`, `≥`, and `∠` glyphs. Text metrics and left, center, and right alignment now use exact drawn ink bounds without a trailing inter-character gap.
 
 - Completed lifecycle hardening: settings-only legacy scenes migrate step by step before first annotation creation, linked and overridden objects and meshes are skipped during migrations, and modal previews clear from their invoking viewport on finish, cancellation, editor or file change, or exception. A local annotation can now be created beside linked Dimensions collections without writing to them; local and linked annotations remain visible together. Vertex anchors into linked meshes reuse existing point IDs or remain truthful fallbacks without writing the library. All modal operators now have an explicit idempotent external cancel path. The Annotation Manager's bulk-style actions and vector sheet quick actions now have readable labels at Blender's default sidebar width.
 
-- Hardened dimension-set and manager lifecycle: deleting the final set member removes its manager entry immediately, isolate restores annotation visibility even when its collection is excluded, and unsafe Chain member reordering is refused. Grease Pencil material generation no longer writes Blender's deprecated `show_stroke` property.
+- Hardened dimension-set and manager lifecycle: deleting the final set member removes its manager entry immediately, and isolate restores annotation visibility even when its collection is excluded. Grease Pencil material generation no longer writes Blender's deprecated `show_stroke` property.
 
 - Made the sidebar usable at Blender's default narrow width: construction creation buttons now show their full names, and Annotation Manager rows prioritize readable annotation names while selected-item details and actions appear below the list.
 

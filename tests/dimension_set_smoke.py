@@ -20,7 +20,7 @@ from dimensions.collections import create_dimension_object
 from dimensions.dimension_sets import (
     anchor_snapshot, automatic_baseline_spacing, delete_set_member,
     dimension_set_state, dimension_set_world_geometry, insert_chain_anchor,
-    move_set_member, synchronize_set_member_anchor,
+    synchronize_set_member_anchor,
 )
 from dimensions.drawing import _build_dimension_set_geometry, _geometry_hit_distance
 from dimensions.operators.dimension_set import DIMENSIONS_OT_CreateDimensionSet
@@ -92,20 +92,6 @@ class DimensionsSetTests(unittest.TestCase):
         self.assertEqual(tuple(geometry[0]["end_world"]), (2.0, 0.0, 0.0))
         self.assertEqual(tuple(geometry[1]["start_world"]), (2.0, 0.0, 0.0))
         self.assertEqual(tuple(geometry[1]["end_world"]), (3.0, 0.0, 0.0))
-
-    def test_chain_reordering_refuses_a_reverse_segment(self):
-        obj = self._set("CHAIN", ((0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)))
-        props = obj.dimension_props
-        before = [
-            (tuple(item["start_world"]), tuple(item["end_world"]))
-            for item in dimension_set_world_geometry(props)
-        ]
-        self.assertFalse(move_set_member(props, 0, 1))
-        geometry = dimension_set_world_geometry(props)
-        self.assertEqual(
-            [(tuple(item["start_world"]), tuple(item["end_world"])) for item in geometry],
-            before,
-        )
 
     def test_deleting_final_member_removes_manager_entry(self):
         obj = self._set("CHAIN", ((0, 0, 0), (1, 0, 0)))

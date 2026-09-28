@@ -71,7 +71,8 @@ if ! command -v unzip >/dev/null; then
     echo "Could not inspect extension archive: unzip is required on POSIX systems" >&2
     exit 1
 fi
-if ! unzip -Z1 "$archive" | grep -Fxq LICENSE; then
+archive_entries="$(unzip -Z1 "$archive")"
+if ! grep -Fxq LICENSE <<<"$archive_entries"; then
     echo "Extension archive does not contain LICENSE" >&2
     exit 1
 fi

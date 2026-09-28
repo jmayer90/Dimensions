@@ -41,8 +41,8 @@ per-viewport ownership contracts even though the broad FND-07 matrix is complete
   it must never jump over intermediate idempotent migrations.
 - Apply the shared read-only predicate before every migration mutation, including
   mesh identity creation, while still migrating local scene-owned settings.
-- Refuse Chain reordering unless a monotonic, semantics-preserving operation is
-  specified. Do not silently reorder anchors and manufacture invalid geometry.
+- Remove the unused member-reorder helper from the release line. Keep Chain
+  insertion and deletion, whose geometric meaning is defined.
 - Separate property visibility restoration from active-view-layer `hide_set()`
   restoration so excluded objects keep their saved property value and records are
   cleared deterministically.
@@ -63,8 +63,8 @@ per-viewport ownership contracts even though the broad FND-07 matrix is complete
   first new annotation is stamped current.
 - [x] Migration never mutates linked or overridden objects or their mesh data and
   completes without `RuntimeError`; local scene-owned settings still migrate.
-- [x] Chain member reordering cannot create a reverse or off-axis segment. If the
-  operation has no unambiguous semantic meaning, the UI refuses it actionably.
+- [x] No public member-reorder action or helper can create a reverse or off-axis
+  Chain segment; supported insertion and deletion preserve the shared axis.
 - [x] Isolate/restore preserves property visibility for objects excluded from the
   active view layer and restores `hide_set()` where the view layer permits it.
 - [x] Deleting the last set member removes the manager row in the same undoable
@@ -83,8 +83,8 @@ per-viewport ownership contracts even though the broad FND-07 matrix is complete
 
 - `dimensions/migrations.py`, `dimensions/properties.py` — scene-data detection and
   read-only migration boundaries.
-- `dimensions/dimension_sets.py`, `dimensions/operators/dimension_set.py` — reorder
-  semantics and manager synchronization.
+- `dimensions/dimension_sets.py`, `dimensions/operators/dimension_set.py` —
+  supported set edits and manager synchronization.
 - `dimensions/operators/annotation_manager.py` — isolate records and excluded
   collections.
 - `dimensions/drawing.py`, `dimensions/viewport_state.py`, and modal operators under
