@@ -1,6 +1,10 @@
 """Guided, explicitly confirmed annotation repair operators."""
 
 import bpy
+
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
 from mathutils import Vector
 
 from .. import messages
@@ -46,6 +50,7 @@ class DIMENSIONS_OT_RepairAcceptSuggestion(bpy.types.Operator):
     object_name: bpy.props.StringProperty()
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         return context.window_manager.invoke_confirm(self, _event)
 
     def execute(self, context):
@@ -65,7 +70,7 @@ class DIMENSIONS_OT_RepairAcceptSuggestion(bpy.types.Operator):
             self.report(messages.WARNING, messages.REPAIR_NO_SUGGESTION)
             return {"CANCELLED"}
         sync_scene_objects(context.scene)
-        clear_preview_state()
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
         self.report(messages.INFO, messages.accepted_repairs(count))
         return {"FINISHED"}
 
@@ -115,7 +120,7 @@ class DIMENSIONS_OT_RepairFrameIssue(bpy.types.Operator):
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
         context.region_data.view_location = Vector(issues[0]["world_co"])
-        set_preview_state({"state": "REPAIR", "repair_markers": _repair_markers(issues)})
+        set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None), "state": "REPAIR", "repair_markers": _repair_markers(issues)})
         return {"FINISHED"}
 
 
@@ -128,6 +133,7 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
     object_name: bpy.props.StringProperty()
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         annotation = _editable_annotation(context, self.object_name)
         if context.area is None or context.area.type != "VIEW_3D":
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
@@ -147,10 +153,18 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         annotation = bpy.data.objects.get(self.annotation_name)
         if annotation is None or context.area is None or context.area.type != "VIEW_3D":
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if event.type == "MOUSEMOVE":
             self._update_hover(context, event)
@@ -166,7 +180,7 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
             changed = rebind_area_preserving_presentation(
                 annotation.dimension_props, self.hover_source, (self.hover_face_index,),
             )
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             if not changed:
                 self.report(messages.WARNING, messages.AREA_SOURCE_INVALID)
                 return {"CANCELLED"}
@@ -174,11 +188,14 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
             self.report(messages.INFO, messages.accepted_repairs(1))
             return {"FINISHED"}
         if event.type in {"ESC", "RIGHTMOUSE"}:
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
+
+    def cancel(self, _context):
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _update_hover(self, context, event):
         snap = find_nearest_snap_point(
@@ -199,7 +216,7 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
         if self.hover_source is not None and 0 <= face_index < len(self.hover_source.data.polygons):
             polygon = self.hover_source.data.polygons[face_index]
             markers.append({"world_co": tuple(self.hover_source.matrix_world @ polygon.center), "candidate": True})
-        set_preview_state({"state": "REPAIR_AREA", "repair_markers": markers})
+        set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None), "state": "REPAIR_AREA", "repair_markers": markers})
 
 
 class DIMENSIONS_OT_RepairBulkCause(bpy.types.Operator):
@@ -211,6 +228,7 @@ class DIMENSIONS_OT_RepairBulkCause(bpy.types.Operator):
     object_name: bpy.props.StringProperty()
 
     def invoke(self, context, event):
+        self._session_viewport_key = viewport_key(context)
         return context.window_manager.invoke_confirm(self, event)
 
     def execute(self, context):
@@ -231,7 +249,7 @@ class DIMENSIONS_OT_RepairBulkCause(bpy.types.Operator):
             self.report(messages.WARNING, messages.REPAIR_NO_SUGGESTION)
             return {"CANCELLED"}
         sync_scene_objects(context.scene)
-        clear_preview_state()
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
         self.report(messages.INFO, messages.accepted_repairs(count))
         return {"FINISHED"}
 

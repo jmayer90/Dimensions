@@ -1,14 +1,14 @@
 # FND-13 — Lifecycle, modal cleanup, and Blender API hardening
 
 **Milestone:** M6 1.0 gate
-**Status:** ⬜ Planned — accepted after FND-12.
+**Status:** ✅ Complete — migration, linked-data, modal cleanup, set/manager, and Grease Pencil fixes validated on Blender 5.1.2 and 5.2.2 in the 0.6.0 candidate.
 **Effort:** M
 **Depends on:** FND-12, FND-07
 **Version impact:** Patch.
 
 ## Problem
 
-Eight confirmed state-management defects remain across migrations, dimension sets,
+The external audit identified eight state-management defects across migrations, dimension sets,
 the Annotation Manager, and modal overlays:
 
 - a scene with an older nonzero schema or custom styles but no annotation objects is
@@ -27,9 +27,9 @@ the Annotation Manager, and modal overlays:
 - modal operators do not all implement Blender's external `cancel()` cleanup path;
   the audit specifically reaches guide-point, guide-plane, anchor-reattach, and area
   repair workflows, with multiple modal classes in those files; and
-- Grease Pencil output writes the deprecated `show_stroke` property. The reported
-  `world.use_nodes` write is not present in the current tree, so it requires no code
-  change unless a failing compatibility test locates another call site.
+- Grease Pencil output wrote the deprecated `show_stroke` property. The extension
+  source has no `world.use_nodes` write; two render-test setup writes were removed
+  after verifying that new Worlds already provide node trees on Blender 5.1/5.2.
 
 These paths violate the project's existing lifecycle, truthful-state, and
 per-viewport ownership contracts even though the broad FND-07 matrix is complete.
@@ -58,25 +58,25 @@ per-viewport ownership contracts even though the broad FND-07 matrix is complete
 
 ## Acceptance criteria
 
-- [ ] A released older-schema fixture containing custom styles/settings but no
+- [x] A released older-schema fixture containing custom styles/settings but no
   annotation objects migrates through every schema step exactly once before its
   first new annotation is stamped current.
-- [ ] Migration never mutates linked or overridden objects or their mesh data and
+- [x] Migration never mutates linked or overridden objects or their mesh data and
   completes without `RuntimeError`; local scene-owned settings still migrate.
-- [ ] Chain member reordering cannot create a reverse or off-axis segment. If the
+- [x] Chain member reordering cannot create a reverse or off-axis segment. If the
   operation has no unambiguous semantic meaning, the UI refuses it actionably.
-- [ ] Isolate/restore preserves property visibility for objects excluded from the
+- [x] Isolate/restore preserves property visibility for objects excluded from the
   active view layer and restores `hide_set()` where the view layer permits it.
-- [ ] Deleting the last set member removes the manager row in the same undoable
+- [x] Deleting the last set member removes the manager row in the same undoable
   operation and leaves no dead pointer.
-- [ ] Every preview is cleared from the exact invoking viewport on confirm, normal
+- [x] Every preview is cleared from the exact invoking viewport on confirm, normal
   cancel, editor change, Blender external cancellation, file/window change, and
   operator exception.
-- [ ] Every modal operator has an idempotent external `cancel()` path covered by a
+- [x] Every modal operator has an idempotent external `cancel()` path covered by a
   source-level audit and representative behavioral tests.
-- [ ] Grease Pencil output creates equivalent visible strokes without deprecated
+- [x] Grease Pencil output creates equivalent visible strokes without deprecated
   `show_stroke`; no speculative `world.use_nodes` edit is made without evidence.
-- [ ] Save/reload, undo/redo, append/link, and two-scene lifecycle coverage remain
+- [x] Save/reload, undo/redo, append/link, and two-scene lifecycle coverage remain
   green on Blender 5.1 and 5.2.
 
 ## Code map

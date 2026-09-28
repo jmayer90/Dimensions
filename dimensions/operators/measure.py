@@ -1,5 +1,8 @@
 import bpy
 
+from ..interaction import modal_cleanup_on_exception
+from ..viewport_state import viewport_key
+
 from .. import messages
 from ..anchors import set_world_anchor
 from ..collections import create_measurement_object, ensure_measurement_snap_proxy
@@ -58,12 +61,20 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if context.area is None or context.area.type != "VIEW_3D":
-            clear_measure_state(context)
+            clear_measure_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if self.continuous_placement and session_context_changed(self, context):
-            clear_measure_state(context)
+            clear_measure_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             self._update_overlay(context)
@@ -137,7 +148,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
 
         if event.type == "ESC" and event.value == "PRESS":
             if self.continuous_placement:
-                clear_measure_state(context)
+                clear_measure_state(key=getattr(self, "_session_viewport_key", None))
                 return {"CANCELLED"}
             if self.distance_text:
                 self.distance_text = ""
@@ -147,11 +158,11 @@ class CADDIM_OT_Measure(bpy.types.Operator):
             if self.state != "PICK_START":
                 self._clear(context)
                 return {"RUNNING_MODAL"}
-            clear_measure_state(context)
+            clear_measure_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
 
         if event.type == "RIGHTMOUSE" and event.value == "PRESS":
-            clear_measure_state(context)
+            clear_measure_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
 
         if is_navigation_event(event):
@@ -159,7 +170,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_measure_state(_context)
+        clear_measure_state(key=getattr(self, "_session_viewport_key", None))
 
     def _update_effective_end(self, context):
         if self.start_world is None or self.hover_snap is None:
@@ -279,7 +290,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
 
     def _after_commit(self, context):
         if not self.continuous_placement:
-            clear_measure_state(context)
+            clear_measure_state(key=getattr(self, "_session_viewport_key", None))
             return {"FINISHED"}
         push_undo_step("Create Measurement")
         self._clear(context)
@@ -290,6 +301,7 @@ class CADDIM_OT_Measure(bpy.types.Operator):
 
     def _update_overlay(self, context):
         state = {
+            "viewport_key": getattr(self, "_session_viewport_key", None),
             "tool_label": "MEASURE" if self.persistent_mode else "TAPE",
             "state": self.state,
             "axis": self.axis,

@@ -10,6 +10,7 @@ from .properties import (
     configured_scene_unit_style,
     is_dimension_object,
     is_guide_object,
+    is_read_only_dimensions_object,
 )
 
 
@@ -17,15 +18,36 @@ _warned_newer_versions = set()
 
 
 def scene_has_dimensions_data(scene):
+    if scene is None:
+        return False
+    settings = scene.dimensions_settings
+    if settings.schema_version or len(settings.annotation_styles):
+        return True
+    if any(key not in {"annotation_manager_items", "active_annotation_manager_index"} for key in settings.keys()):
+        return True
     return any(
         is_dimension_object(obj) or is_guide_object(obj)
         for obj in scene.objects
     )
 
 
+def _writable_scene_objects(scene):
+    return (obj for obj in scene.objects if not is_read_only_dimensions_object(obj))
+
+
 def stamp_scene_if_needed(scene):
     """Stamp a scene when Dimensions first creates persistent data in it."""
     if scene is not None and scene_has_dimensions_data(scene):
+        migrate_scene(scene)
+
+
+def prepare_scene_for_write(scene):
+    """Advance saved settings before creating a new annotation in the scene."""
+    if scene is None:
+        return
+    if scene_has_dimensions_data(scene):
+        migrate_scene(scene)
+    else:
         scene.dimensions_settings.schema_version = CURRENT_SCHEMA_VERSION
 
 
@@ -62,7 +84,7 @@ def migrate_scene(scene):
 def migrate_v0_to_v1(scene):
     """Give legacy vertex anchors durable point IDs."""
     changed = False
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         anchors = []
         if is_dimension_object(obj):
             props = obj.dimension_props
@@ -76,6 +98,9 @@ def migrate_v0_to_v1(scene):
         elif is_guide_object(obj):
             anchors.extend((obj.guide_props.start, obj.guide_props.end))
         for anchor in anchors:
+            source = getattr(anchor, "target_object", None)
+            if is_read_only_dimensions_object(source):
+                continue
             changed = migrate_anchor_identity(anchor) or changed
     return changed
 
@@ -142,7 +167,7 @@ def migrate_v2_to_v3(scene):
 def migrate_v3_to_v4(scene):
     """Preserve every existing annotation value as an explicit style override."""
     changed = False
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         if not is_dimension_object(obj):
             continue
         props = obj.dimension_props
@@ -160,7 +185,7 @@ def migrate_v3_to_v4(scene):
 def migrate_v4_to_v5(scene):
     """Record truthful anchor resolution state and last-known source names."""
     changed = False
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         anchors = []
         if is_dimension_object(obj):
             props = obj.dimension_props
@@ -212,7 +237,7 @@ def migrate_v6_to_v7(scene):
     collections and the automatic-spacing default for files written by v6.
     """
     changed = False
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         if not is_dimension_object(obj):
             continue
         props = obj.dimension_props
@@ -267,7 +292,7 @@ def migrate_v8_to_v9(scene):
         style.label_orientation = "HORIZONTAL"
         style.label_line_mode = line_mode
 
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         if not is_dimension_object(obj):
             continue
         props = obj.dimension_props
@@ -296,7 +321,7 @@ def migrate_v9_to_v10(scene):
     if not settings.annotation_manager_kind_circle:
         settings.annotation_manager_kind_circle = True
         changed = True
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         if not is_dimension_object(obj):
             continue
         props = obj.dimension_props
@@ -311,7 +336,7 @@ def migrate_v9_to_v10(scene):
 def migrate_v10_to_v11(scene):
     """Initialize additive derived-guide relationship storage as fixed/live."""
     changed = False
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         if not is_guide_object(obj):
             continue
         props = obj.guide_props
@@ -334,7 +359,7 @@ def migrate_v11_to_v12(scene):
         if not getattr(settings, property_name):
             setattr(settings, property_name, True)
             changed = True
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         if is_guide_object(obj) and getattr(obj.guide_props, "kind", "GUIDE") == "POINT":
             props = obj.guide_props
             if props.is_datum and not props.datum_name.strip():
@@ -360,7 +385,7 @@ def migrate_v12_to_v13(scene):
         if not getattr(settings, property_name):
             setattr(settings, property_name, True)
             changed = True
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         if not is_guide_object(obj) or getattr(obj.guide_props, "kind", "GUIDE") != "PLANE":
             continue
         props = obj.guide_props
@@ -376,7 +401,7 @@ def migrate_v12_to_v13(scene):
 def migrate_v13_to_v14(scene):
     """Initialize additive angular and repeated-spacing guide definitions."""
     changed = False
-    for obj in scene.objects:
+    for obj in _writable_scene_objects(scene):
         if not is_guide_object(obj):
             continue
         props = obj.guide_props
@@ -446,6 +471,9 @@ def migrate_open_scenes():
 
 @persistent
 def _load_post_handler(_dummy):
+    from .viewport_state import clear_all_states
+
+    clear_all_states()
     migrate_open_scenes()
 
 

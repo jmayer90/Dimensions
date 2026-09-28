@@ -1,14 +1,14 @@
 # OUT-06 — Vector typography and printable-area correctness
 
 **Milestone:** M6 1.0 gate
-**Status:** ⬜ Planned — accepted after FND-12.
+**Status:** ✅ Complete — validated on Blender 5.1.2 and 5.2.2 in the 0.6.0 candidate.
 **Effort:** M
 **Depends on:** FND-12, OUT-05
 **Version impact:** Patch.
 
 ## Problem
 
-The drawing-sheet and vector-font paths have five confirmed correctness gaps:
+The external audit identified five drawing-sheet and vector-font correctness gaps:
 
 - the minimum 60 mm title block can be accepted even though its fixed Date cell
   cannot hold the supported ten-character ISO date at the configured text height;
@@ -43,22 +43,22 @@ one explicit printable annotation rectangle.
 
 ## Acceptance criteria
 
-- [ ] Every title-block size accepted by validation fits all fixed labels plus the
+- [x] Every title-block size accepted by validation fits all fixed labels plus the
   documented default metadata, including an ISO `YYYY-MM-DD` date.
-- [ ] User metadata that cannot fit is refused before writing a file and identifies
+- [x] User metadata that cannot fit is refused before writing a file and identifies
   the field and corrective action; text is not silently scaled below the configured
   drafting height.
-- [ ] With margins or a title block enabled, every annotation stroke lies inside the
+- [x] With margins or a title block enabled, every annotation stroke lies inside the
   explicit printable annotation rectangle and never crosses sheet furniture.
-- [ ] Fit Scale and export use the identical bounds calculation, so a successful fit
+- [x] Fit Scale and export use the identical bounds calculation, so a successful fit
   cannot be rejected by the subsequent export.
-- [ ] All printable ASCII characters render native glyphs; `×`, `Ø`/`⌀`, `µ`, `≤`,
+- [x] All printable ASCII characters render native glyphs; `×`, `Ø`/`⌀`, `µ`, `≤`,
   `≥`, and `∠` have intentional drafting glyphs or documented equivalent aliases.
-- [ ] Left, center, and right alignment share exact metrics, with no trailing-gap
+- [x] Left, center, and right alignment share exact metrics, with no trailing-gap
   offset for single- or multi-character lines.
-- [ ] Expected layout/export refusals use the shared message catalog and remain
+- [x] Expected layout/export refusals use the shared message catalog and remain
   warnings; unexpected I/O failures remain errors.
-- [ ] SVG and PDF remain geometrically equivalent and the 100-annotation export
+- [x] SVG and PDF remain geometrically equivalent and the 100-annotation export
   benchmark remains within the documented budget.
 
 ## Code map

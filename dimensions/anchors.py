@@ -47,6 +47,10 @@ def ensure_object_vertex_id(obj, vertex_index):
     attribute = obj.data.attributes.get(VERTEX_ID_ATTRIBUTE)
     if attribute is not None and not _valid_vertex_id_attribute(attribute):
         return 0
+    if obj.library is not None or obj.override_library is not None or obj.data.library is not None:
+        if attribute is None or not (0 <= vertex_index < len(obj.data.vertices)):
+            return 0
+        return max(0, int(attribute.data[vertex_index].value))
     if obj.mode != "EDIT":
         return ensure_vertex_id(obj.data, vertex_index)
     import bmesh

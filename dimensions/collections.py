@@ -26,11 +26,20 @@ def _get_or_create_scene_collection(context, base_name, role):
     scene = context.scene
 
     for collection in scene.collection.children_recursive:
-        if collection.get("dimensions_collection_role") == role:
+        if (
+            collection.get("dimensions_collection_role") == role
+            and collection.library is None
+            and collection.override_library is None
+        ):
             return collection
 
     named_collection = bpy.data.collections.get(base_name)
-    if named_collection is not None and _collection_in_scene(scene, named_collection):
+    if (
+        named_collection is not None
+        and named_collection.library is None
+        and named_collection.override_library is None
+        and _collection_in_scene(scene, named_collection)
+    ):
         named_collection["dimensions_collection_role"] = role
         return named_collection
 
@@ -56,17 +65,40 @@ def get_scene_collection(scene, role):
     """Return a Dimensions-owned collection without creating data during drawing."""
     if scene is None:
         return None
-    return next(
-        (
-            collection
-            for collection in scene.collection.children_recursive
-            if collection.get("dimensions_collection_role") == role
-        ),
-        None,
+    collections = tuple(
+        collection for collection in scene.collection.children_recursive
+        if collection.get("dimensions_collection_role") == role
     )
+    for collection in collections:
+        if collection.library is None and collection.override_library is None:
+            return collection
+    return collections[0] if collections else None
+
+
+def iter_scene_role_objects(scene, role):
+    """Yield each owned object once across local and linked role collections."""
+    if scene is None:
+        return
+    collections = tuple(
+        collection for collection in scene.collection.children_recursive
+        if collection.get("dimensions_collection_role") == role
+    )
+    if len(collections) == 1:
+        yield from collections[0].all_objects
+        return
+    seen = set()
+    for collection in collections:
+        for obj in collection.all_objects:
+            pointer = obj.as_pointer()
+            if pointer not in seen:
+                seen.add(pointer)
+                yield obj
 
 
 def create_dimension_object(context, name="DIM Dimension"):
+    from .migrations import prepare_scene_for_write
+
+    prepare_scene_for_write(context.scene)
     collection = get_or_create_dimension_collection(context)
 
     dimension_object = bpy.data.objects.new(name, object_data=None)
@@ -107,6 +139,9 @@ def get_or_create_guide_collection(context):
 
 
 def create_guide_object(context, name="GUIDE Construction Line"):
+    from .migrations import prepare_scene_for_write
+
+    prepare_scene_for_write(context.scene)
     collection = get_or_create_guide_collection(context)
     guide_object = bpy.data.objects.new(name, object_data=None)
     guide_object.empty_display_type = DEFAULT_EMPTY_DISPLAY_TYPE

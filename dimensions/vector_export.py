@@ -96,9 +96,12 @@ def _camera_frame_world_size(scene, camera):
     return 1.0 / x_delta, 1.0 / y_delta
 
 
-def camera_frame_fits_page(scene, camera, width_mm, height_mm, scale_denominator):
+def camera_frame_fits_page(scene, camera, width_mm, height_mm, scale_denominator, annotation_bounds=None):
     factor = model_to_paper_factor(scene, scale_denominator)
     frame_width_world, frame_height_world = _camera_frame_world_size(scene, camera)
+    if annotation_bounds is not None:
+        left, top, right, bottom = annotation_bounds
+        width_mm, height_mm = right - left, bottom - top
     return (
         frame_width_world * factor <= float(width_mm) + 1e-6
         and frame_height_world * factor <= float(height_mm) + 1e-6
@@ -142,6 +145,7 @@ def build_vector_document(
     annotation_count=0,
     skipped_count=0,
     sheet_strokes=(),
+    annotation_bounds=None,
 ):
     """Project world strokes through an orthographic camera onto a physical page."""
     width_mm, height_mm = paper_dimensions_mm(paper_size, orientation)
@@ -149,16 +153,23 @@ def build_vector_document(
     frame_width_world, frame_height_world = _camera_frame_world_size(scene, camera)
     frame_width_mm = frame_width_world * factor
     frame_height_mm = frame_height_world * factor
+    if sheet_strokes and annotation_bounds is None:
+        raise VectorExportError("Specify printable annotation bounds when exporting sheet furniture")
+    if annotation_bounds is None:
+        annotation_bounds = (0.0, 0.0, width_mm, height_mm)
+    left_bound, top_bound, right_bound, bottom_bound = annotation_bounds
+    if not (0.0 <= left_bound < right_bound <= width_mm and 0.0 <= top_bound < bottom_bound <= height_mm):
+        raise VectorExportError("Printable annotation bounds must lie inside the page")
     if not camera_frame_fits_page(
-        scene, camera, width_mm, height_mm, scale_denominator,
+        scene, camera, width_mm, height_mm, scale_denominator, annotation_bounds,
     ):
         raise VectorExportError(
             f"Camera frame is {frame_width_mm:.1f} × {frame_height_mm:.1f} mm at 1:{scale_denominator:g}; "
-            f"choose a larger page, a larger scale denominator, or a tighter camera frame"
+            "increase the drawing scale denominator, enlarge the printable area, or tighten the camera frame"
         )
 
-    left = (width_mm - frame_width_mm) * 0.5
-    top = (height_mm - frame_height_mm) * 0.5
+    left = left_bound + (right_bound - left_bound - frame_width_mm) * 0.5
+    top = top_bound + (bottom_bound - top_bound - frame_height_mm) * 0.5
     page_strokes = []
     for stroke in strokes:
         if not isinstance(stroke, OutputStroke):

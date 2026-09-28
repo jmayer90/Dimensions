@@ -1,5 +1,9 @@
 import bpy
 
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
+
 from .. import messages
 from ..anchors import resolve_anchor, set_anchor_from_snap
 from ..dimension_sets import synchronize_set_member_anchor
@@ -32,6 +36,7 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
     member_index: bpy.props.IntProperty(default=-1)
 
     def invoke(self, context, event):
+        self._session_viewport_key = viewport_key(context)
         if context.area is None or context.area.type != "VIEW_3D":
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
@@ -56,9 +61,17 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if context.area is None or context.area.type != "VIEW_3D":
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             self._update_preview()
@@ -96,18 +109,21 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             from ..scene_sync import sync_scene_objects
 
             sync_scene_objects(context.scene)
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             self.report(messages.INFO, messages.reattached_anchor(self.anchor_name))
             return {"FINISHED"}
 
         if event.type in {"RIGHTMOUSE", "ESC"}:
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
 
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
             return {"PASS_THROUGH"}
 
         return {"RUNNING_MODAL"}
+
+    def cancel(self, _context):
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _get_target_anchor(self):
         if self.guide_point_object is not None:
@@ -139,7 +155,7 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
                     "hover_label": self.hover_snap.get("label", "Point"),
                     "hover_snap": copy_snap(self.hover_snap),
                 })
-            set_preview_state(preview)
+            set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))
             return
         props = self.dimension_object.dimension_props
         if self.anchor_name == "CIRCLE_VERTEX":
@@ -178,4 +194,4 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             preview["start_world"] = start_world
             preview["end_world"] = self.hover_snap["world_co"] if self.hover_snap is not None else end_world
 
-        set_preview_state(preview)
+        set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))

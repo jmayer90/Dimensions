@@ -38,7 +38,7 @@ Acceptance checkboxes inside a ticket define its intended scope; they are not ma
 | M3 — Construction | ✅ Complete | `CON-01`, `CON-02` in 0.4.3; validated `CON-03` and `CON-04` in 0.5.0 | — |
 | M4 — Output | ✅ Complete | Render/vector output through `OUT-04`; single-sheet `OUT-05` in 0.6.0 | — |
 | M5 — Documentation-grade | ✅ Complete | Architectural ticks in 0.3.2; Outside Start placement in 0.4.1; `DIM-01`, `DIM-02`, `DIM-04` in 0.4.3; validated `DIM-03` in 0.5.0 | — |
-| M6 — 1.0 gate | ⏭ Next | External-audit hardening is tracked by `FND-12`, `OUT-06`, and `FND-13` | No known crash/data-loss defects; compatibility promise |
+| M6 — 1.0 gate | 🔍 Release QA | `FND-12`, `OUT-06`, and `FND-13` pass Blender 5.1.2/5.2.2 Linux validation | Supported-platform review and deliberate schema freeze before 1.0 |
 
 ## Index
 
@@ -116,15 +116,15 @@ Focused hardening required before the compatibility promise is made.
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [FND-12](FND-12-critical-stability-hardening.md) | Critical stability and bounded geometry hardening | 🟨 Partial | 0.6.0 candidate; Blender 5.1/5.2 validation pending | M | — |
-| [OUT-06](OUT-06-vector-typography-page-bounds.md) | Vector typography and printable-area correctness | ⬜ Planned | — | M | FND-12, OUT-05 |
-| [FND-13](FND-13-lifecycle-modal-cleanup.md) | Lifecycle, modal cleanup, and Blender API hardening | ⬜ Planned | — | M | FND-12, FND-07 |
+| [FND-12](FND-12-critical-stability-hardening.md) | Critical stability and bounded geometry hardening | ✅ Complete | 0.6.0 candidate; Blender 5.1.2/5.2.2 validated | M | — |
+| [OUT-06](OUT-06-vector-typography-page-bounds.md) | Vector typography and printable-area correctness | ✅ Complete | 0.6.0 candidate; Blender 5.1.2/5.2.2 validated | M | FND-12, OUT-05 |
+| [FND-13](FND-13-lifecycle-modal-cleanup.md) | Lifecycle, modal cleanup, and Blender API hardening | ✅ Complete | 0.6.0 candidate; Blender 5.1.2/5.2.2 validated | M | FND-12, FND-07 |
 
 ## Suggested order
 
-M1 through M5 are delivered. For M6, complete `FND-12` first, then `OUT-06` and
-`FND-13` may proceed independently before the final 1.0 release-gate review in
-`VERSIONING.md`.
+M1 through M5 and all three M6 hardening tickets are implemented and validated on
+Linux Blender 5.1.2 and 5.2.2. The final 1.0 release-gate review in
+`VERSIONING.md` still covers the supported-platform matrix and schema freeze.
 
 ## Effort key
 

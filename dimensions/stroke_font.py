@@ -99,6 +99,30 @@ _GLYPHS = {
     "³": (((0.1, 0.95), (0.45, 0.95), (0.25, 0.75), (0.45, 0.55), (0.1, 0.55)),),
 }
 
+_GLYPHS.update({
+    "!": (((0.5, 1.0), (0.5, 0.25)), ((0.5, 0.04), (0.5, 0.0))),
+    "$": (((0.9, 0.85), (0.7, 1.0), (0.2, 1.0), (0.0, 0.75), (0.8, 0.25), (1.0, 0.1), (0.8, 0.0), (0.2, 0.0), (0.0, 0.15)), ((0.5, 1.1), (0.5, -0.1))),
+    "*": (((0.5, 0.25), (0.5, 0.85)), ((0.2, 0.35), (0.8, 0.75)), ((0.2, 0.75), (0.8, 0.35))),
+    ";": (((0.5, 0.7), (0.5, 0.65)), ((0.5, 0.25), (0.5, 0.0), (0.35, -0.15))),
+    "<": (((0.85, 0.85), (0.15, 0.5), (0.85, 0.15)),),
+    ">": (((0.15, 0.85), (0.85, 0.5), (0.15, 0.15)),),
+    "?": (((0.1, 0.8), (0.25, 1.0), (0.75, 1.0), (0.95, 0.8), (0.5, 0.45), (0.5, 0.3)), ((0.5, 0.04), (0.5, 0.0))),
+    "@": (((0.8, 0.15), (0.25, 0.0), (0.0, 0.25), (0.0, 0.75), (0.25, 1.0), (0.75, 1.0), (1.0, 0.75), (1.0, 0.35), (0.7, 0.35), (0.7, 0.75), (0.4, 0.75), (0.3, 0.5), (0.4, 0.35), (0.7, 0.35)),),
+    "\\": (((0.0, 1.0), (1.0, 0.0)),),
+    "^": (((0.15, 0.55), (0.5, 1.0), (0.85, 0.55)),),
+    "`": (((0.3, 1.0), (0.55, 0.7)),),
+    "{": (((0.8, 1.0), (0.45, 1.0), (0.4, 0.65), (0.2, 0.5), (0.4, 0.35), (0.45, 0.0), (0.8, 0.0)),),
+    "|": (((0.5, 1.0), (0.5, 0.0)),),
+    "}": (((0.2, 1.0), (0.55, 1.0), (0.6, 0.65), (0.8, 0.5), (0.6, 0.35), (0.55, 0.0), (0.2, 0.0)),),
+    "~": (((0.1, 0.4), (0.3, 0.6), (0.7, 0.4), (0.9, 0.6)),),
+    "×": (((0.15, 0.15), (0.85, 0.85)), ((0.15, 0.85), (0.85, 0.15))),
+    "µ": (((0.1, 0.75), (0.1, -0.2)), ((0.1, 0.15), (0.4, 0.0), (0.8, 0.2), (0.8, 0.75))),
+    "≤": (((0.85, 0.85), (0.15, 0.5), (0.85, 0.15)), ((0.15, 0.0), (0.85, 0.0))),
+    "≥": (((0.15, 0.85), (0.85, 0.5), (0.15, 0.15)), ((0.15, 0.0), (0.85, 0.0))),
+    "∠": (((0.15, 0.0), (0.15, 0.75)), ((0.15, 0.0), (0.95, 0.0))),
+})
+_GLYPHS["Ø"] = _GLYPHS["⌀"]
+
 _FALLBACK = (((0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.0)), ((0.15, 0.15), (0.85, 0.85)), ((0.15, 0.85), (0.85, 0.15)))
 _ADVANCE = 1.2
 _SPACE_ADVANCE = 0.65
@@ -113,6 +137,39 @@ def _glyph(character):
 
 def _advance(character):
     return _SPACE_ADVANCE if character == " " else _ADVANCE
+
+
+def _character(character):
+    return character if character in {"µ", "×", "≤", "≥", "∠", "⌀"} else character.upper()
+
+
+def _line_ink_bounds(line):
+    cursor = 0.0
+    minimum_x = maximum_x = minimum_y = maximum_y = None
+    for character in line:
+        if character != " ":
+            for polyline in _glyph(character):
+                for x, y in polyline:
+                    value = cursor + x
+                    minimum_x = value if minimum_x is None else min(minimum_x, value)
+                    maximum_x = value if maximum_x is None else max(maximum_x, value)
+                    minimum_y = y if minimum_y is None else min(minimum_y, y)
+                    maximum_y = y if maximum_y is None else max(maximum_y, y)
+        cursor += _advance(character)
+    return (0.0, 0.0, 0.0, 0.0) if minimum_x is None else (
+        minimum_x, maximum_x, minimum_y, maximum_y,
+    )
+
+
+def _block_ink_bounds(text):
+    bounds = [
+        _line_ink_bounds([_character(character) for character in line])
+        for line in _normalized_lines(text)
+    ]
+    width = max(right - left for left, right, _, _ in bounds)
+    top = max(bound[3] - index * _LINE_ADVANCE for index, bound in enumerate(bounds))
+    bottom = min(bound[2] - index * _LINE_ADVANCE for index, bound in enumerate(bounds))
+    return width, bottom, top
 
 
 def _vector(value, name):
@@ -143,13 +200,8 @@ def text_block_dimensions(text, height):
         raise ValueError("height must be greater than zero")
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-    lines = _normalized_lines(text)
-    width = max(
-        (sum(_advance(character.upper()) for character in line) for line in lines),
-        default=0.0,
-    )
-    block_height = 1.0 + max(0, len(lines) - 1) * _LINE_ADVANCE
-    return width * height, block_height * height
+    width, bottom, top = _block_ink_bounds(text)
+    return width * height, (top - bottom) * height
 
 
 def _world_point(origin, x_axis, y_axis, local_x, local_y, height):
@@ -187,14 +239,14 @@ def text_strokes(text, origin, x_axis, y_axis, height, align="CENTER"):
     y_axis = _unit_vector(y_axis, "y_axis")
     strokes = []
     for line_index, line in enumerate(_normalized_lines(text)):
-        characters = [character.upper() for character in line]
-        line_width = sum(_advance(character) for character in characters)
+        characters = [_character(character) for character in line]
+        ink_left, ink_right, _, _ = _line_ink_bounds(characters)
         if align == "CENTER":
-            cursor = -line_width * 0.5
+            cursor = -(ink_left + ink_right) * 0.5
         elif align == "RIGHT":
-            cursor = -line_width
+            cursor = -ink_right
         else:
-            cursor = 0.0
+            cursor = -ink_left
         baseline = -line_index * _LINE_ADVANCE
         for character in characters:
             if character != " ":

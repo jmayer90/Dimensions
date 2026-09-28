@@ -14,6 +14,7 @@ from dimensions.sheet_layout import (
     PageMargins,
     SheetLayoutError,
     SheetMetadata,
+    annotation_bounds_for_frame,
     build_sheet_layout,
 )
 from dimensions.vector_export import paper_dimensions_mm
@@ -156,6 +157,37 @@ class SheetLayoutSmokeTests(unittest.TestCase):
         roles = {stroke.role for stroke in layout.strokes}
         for field in ("TITLE", "DRAWING_NUMBER", "REVISION", "AUTHOR", "DATE", "SCALE"):
             self.assertIn(f"TEXT_{field}", roles)
+
+    def test_minimum_block_fits_iso_date_and_rejects_long_field_actionably(self):
+        metadata = SheetMetadata(date="2026-09-28", scale="1:100000")
+        layout = build_sheet_layout(
+            210, 297, title_block_width_mm=80, title_block_height_mm=24,
+            metadata=metadata,
+        )
+        self.assertEqual(layout.title_block_bounds[2] - layout.title_block_bounds[0], 80)
+        with self.assertRaisesRegex(SheetLayoutError, "at least 80"):
+            build_sheet_layout(210, 297, title_block_width_mm=79, metadata=metadata)
+        with self.assertRaisesRegex(SheetLayoutError, "Drawing Number.*shorten this field"):
+            build_sheet_layout(210, 297, metadata=SheetMetadata(
+                drawing_number="D-1234567890123456789012345", date="2026-09-28",
+            ))
+
+    def test_annotation_rectangles_clear_margins_and_title_block(self):
+        for width, height in ((210, 297), (297, 210), (297, 420), (420, 297), (215.9, 279.4)):
+            for border, title in ((True, False), (False, True), (True, True)):
+                layout = build_sheet_layout(
+                    width, height, metadata=METADATA,
+                    border_enabled=border, title_block_enabled=title,
+                )
+                for frame in ((1, 1), (4, 1), (1, 4)):
+                    left, top, right, bottom = annotation_bounds_for_frame(layout, *frame)
+                    self.assertGreaterEqual(left, layout.border_bounds[0] + 1)
+                    self.assertGreaterEqual(top, layout.border_bounds[1] + 1)
+                    self.assertLessEqual(right, layout.border_bounds[2] - 1)
+                    self.assertLessEqual(bottom, layout.border_bounds[3] - 1)
+                    if title:
+                        block_left, block_top, _, _ = layout.title_block_bounds
+                        self.assertTrue(bottom < block_top or right < block_left)
 
 
 def main():

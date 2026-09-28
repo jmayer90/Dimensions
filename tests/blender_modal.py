@@ -8,6 +8,7 @@ stage transitions, axis locks, typed distances, step-back, and cancellation. The
 suite instead of by a user.
 """
 
+import ast
 import sys
 import unittest
 from pathlib import Path
@@ -31,6 +32,9 @@ from dimensions.interaction import remember_session_context, session_axis, sessi
 from dimensions.inference import InferenceSession
 from dimensions.modal_state import HandleManipulationState, PointPlacementState
 from dimensions.operators.create_dimension import CADDIM_OT_CreateDimension
+from dimensions.operators.reattach_anchor import CADDIM_OT_ReattachAnchor
+from dimensions.operators.offset_guide import DIMENSIONS_OT_RepairDerivedGuideSource
+from dimensions.operators.guide_plane import DIMENSIONS_OT_RepairGuidePlane
 from dimensions.operators.create_angle import DIMENSIONS_OT_CreateAngle
 from dimensions.operators.create_area import DIMENSIONS_OT_CreateArea
 from dimensions.operators.create_coordinate import _CreateDatumAnnotation
@@ -40,7 +44,7 @@ from dimensions.operators.dimension_set import (
 )
 from dimensions.operators.measure import CADDIM_OT_Measure
 from dimensions.operators.angular_spacing import DIMENSIONS_OT_CreateSpacingGuide, angular_preview_state
-from dimensions.viewport_state import clear_state, get_state, set_state
+from dimensions.viewport_state import _states, clear_state, get_state, set_state
 from dimensions.ui import CADDIM_PT_MainPanel, CADDIM_PT_MeshSelection
 
 from support import (
@@ -56,6 +60,76 @@ from support import (
 PICK_START = PointPlacementState.PICK_START
 PICK_END = PointPlacementState.PICK_END
 PLACE = PointPlacementState.PLACE
+
+
+class ModalCleanupTests(unittest.TestCase):
+    def tearDown(self):
+        for states in _states.values():
+            states.clear()
+
+    def test_every_modal_operator_declares_external_cancel(self):
+        for path in (REPOSITORY_ROOT / "dimensions" / "operators").glob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for item in tree.body:
+                if not isinstance(item, ast.ClassDef):
+                    continue
+                methods = {
+                    child.name for child in item.body if isinstance(child, ast.FunctionDef)
+                }
+                if "modal" in methods:
+                    with self.subTest(operator=item.name):
+                        self.assertIn("cancel", methods)
+                        modal = next(
+                            child for child in item.body
+                            if isinstance(child, ast.FunctionDef) and child.name == "modal"
+                        )
+                        self.assertTrue(any(
+                            isinstance(decorator, ast.Name)
+                            and decorator.id == "modal_cleanup_on_exception"
+                            for decorator in modal.decorator_list
+                        ))
+
+    def test_external_cancel_clears_only_owned_viewport_and_is_idempotent(self):
+        owner = (1, 2, 3)
+        neighbor = (4, 5, 6)
+        for kind, operator_class in (
+            ("DIMENSION", CADDIM_OT_ReattachAnchor),
+            ("GUIDE", DIMENSIONS_OT_RepairDerivedGuideSource),
+        ):
+            with self.subTest(kind=kind):
+                _states[kind][owner] = {"state": "PREVIEW"}
+                _states[kind][neighbor] = {"state": "OTHER"}
+                operator = make_operator_harness(operator_class, _session_viewport_key=owner)
+                operator.cancel(None)
+                operator.cancel(None)
+                self.assertNotIn(owner, _states[kind])
+                self.assertIn(neighbor, _states[kind])
+
+    def test_editor_change_and_exception_clear_original_viewport(self):
+        owner = (1, 2, 3)
+        _states["DIMENSION"][owner] = {"state": "PREVIEW"}
+        operator = make_operator_harness(CADDIM_OT_ReattachAnchor, _session_viewport_key=owner)
+        context = make_context(scene=bpy.context.scene)
+        result = operator.modal(context, make_event("MOUSEMOVE"))
+        self.assertEqual(result, {"CANCELLED"})
+        self.assertNotIn(owner, _states["DIMENSION"])
+
+        _states["DIMENSION"][owner] = {"state": "PREVIEW"}
+        operator = make_operator_harness(CADDIM_OT_ReattachAnchor, _session_viewport_key=owner)
+        with patch("dimensions.operators.reattach_anchor.viewport_key", return_value=owner), patch(
+            "dimensions.operators.reattach_anchor.handle_snap_target_event",
+            side_effect=RuntimeError("injected modal failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "injected modal failure"):
+                operator.modal(context, make_event("MOUSEMOVE"))
+        self.assertNotIn(owner, _states["DIMENSION"])
+
+    def test_guide_plane_external_cancel_discards_partial_acquisition(self):
+        operator = make_operator_harness(DIMENSIONS_OT_RepairGuidePlane)
+        operator.pending_snaps = [object()]
+        operator.cancel(None)
+        operator.cancel(None)
+        self.assertEqual(operator.pending_snaps, [])
 
 
 class AngularGuideModalStateTests(unittest.TestCase):
@@ -285,11 +359,14 @@ class InteractionContextTests(unittest.TestCase):
             (preferences, "default_axis_mode", "Y", {"text": "Y"}),
             (preferences, "default_axis_mode", "Z", {"text": "Z"}),
         ])
-        self.assertEqual(layout.events.count("COLUMN"), 2)
-        self.assertLess(
-            layout.events.index(("OPERATOR", "dimensions.create_dimension")),
-            layout.events.index(("PROPERTY_ENUM", "default_axis_mode", "ALIGNED")),
-        )
+        direction_index = layout.events.index(("PROPERTY_ENUM", "default_axis_mode", "ALIGNED"))
+        for tool in (
+            "dimensions.create_dimension",
+            "dimensions.create_guide",
+            "dimensions.create_guide_point",
+            "dimensions.create_datum",
+        ):
+            self.assertLess(layout.events.index(("OPERATOR", tool)), direction_index)
 
     def test_mesh_selection_actions_use_an_edit_mode_child_panel(self):
         object_context = make_context(scene=bpy.context.scene)
@@ -1206,6 +1283,7 @@ def main():
             loader.loadTestsFromTestCase(case)
             for case in (
                 PointPlacementStateTests,
+                ModalCleanupTests,
                 AngularGuideModalStateTests,
                 HandleManipulationStateTests,
                 InteractionContextTests,

@@ -48,7 +48,7 @@ Delivery status is summarized here and maintained in detail in the [work-ticket 
 | **M3 — Construction** | ✅ Complete | `CON-01` and `CON-02` delivered in 0.4.3; validated guide planes, active-plane input, angular guides, and repeated spacing complete in 0.5.0. | `CON-03` deliberately remaps X/Y/Z while active, triggering 0.5.0 under rule 2; other construction work is additive. |
 | **M4 — Output** | ✅ Complete | Render, styles, scale-correct SVG/PDF, and the bounded `OUT-05` single-sheet surface are complete. | **`0.4.0`** established renderable output; **`0.6.0`** trips trigger 3 by turning export into an identified drawing-sheet surface. |
 | **M5 — Documentation-grade** | ✅ Complete | `DIM-01`, `DIM-02`, and `DIM-04` delivered in 0.4.3; coordinate and elevation validation completed in 0.5.0. | Additive dimension types remain patches when they reuse existing contracts. |
-| **M6 — 1.0 gate** | ⬜ Planned | Hardening, migration fixtures, compatibility promise. | **`1.0.0`**. |
+| **M6 — 1.0 gate** | 🔍 Release QA | Hardening and migration fixtures pass Blender 5.1.2/5.2.2 Linux validation; supported-platform review and schema freeze remain. | **`1.0.0`**. |
 
 Milestone numbers group related work and version impact; they are not a strict delivery queue. M1 gates everything else, because building on an unversioned schema and an unsound selection architecture just increases what has to be unwound later. Early public work delivered continuous placement and stable overlays in 0.3.x, established renderable/vector output in 0.4.x, and completed active-plane construction plus angular/repeated guides in 0.5.0. Schema v14 is the immutable 0.5.0 release shape. Schema v15 adds only scene-owned sheet-layout settings; existing export stays furniture-free by default. `OUT-05` moves to 0.6.0 because composing an identified drawing sheet is a new product surface, not because the additive migration loses data.
 
@@ -82,7 +82,7 @@ Every item must be true before 1.0. Checked items are already satisfied in the c
 **Quality**
 
 - [x] Modal operators have automated coverage — `FND-06`.
-- [ ] No known data-loss or crash defects — `FND-12`, `OUT-06`, `FND-13`.
+- [x] No known data-loss or crash defects in the validated Blender 5.1.2/5.2.2 Linux paths — `FND-12`, `OUT-06`, `FND-13`. Final supported-platform release QA remains before the 1.0 promise.
 - [x] README, DESIGN, and CONTRIBUTING describe shipped behavior, with the limitations list current.
 
 ## After 1.0

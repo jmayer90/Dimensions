@@ -41,12 +41,13 @@ class CADDIM_PT_MainPanel(CADDIM_PT_PanelBase, bpy.types.Panel):
         datum_row.operator("dimensions.create_coordinate", text="Coordinate", icon="ORIENTATION_GLOBAL")
         datum_row.operator("dimensions.create_elevation", text="Elevation", icon="EMPTY_SINGLE_ARROW")
         annotation_tools.operator("dimensions.measure", icon="DRIVER_DISTANCE")
-        guide_row = self.layout.row()
-        guide_row.enabled = context.mode == "OBJECT"
-        guide_row.operator("dimensions.create_guide", icon="EMPTY_AXIS")
+        guide_tools = self.layout.column(align=True)
+        guide_tools.enabled = context.mode == "OBJECT"
+        guide_row = guide_tools.row(align=True)
+        guide_row.operator("dimensions.create_guide", text="Create Guide", icon="EMPTY_AXIS")
         point = guide_row.operator("dimensions.create_guide_point", text="Guide Point", icon="SNAP_ON")
         point.placement_mode = "DIRECT"
-        guide_row.operator("dimensions.create_datum", text="Datum", icon="EMPTY_AXIS")
+        guide_tools.operator("dimensions.create_datum", text="Create Datum", icon="EMPTY_AXIS")
 
         direction = self.layout.column(align=True)
         direction.label(text="Direction")
@@ -201,13 +202,8 @@ class CADDIM_UL_AnnotationManager(bpy.types.UIList):
         row.label(text="", icon=_MANAGER_KIND_ICONS.get(item.kind, "OBJECT_DATA"))
         select = row.operator("dimensions.manager_select", text=obj.name, emboss=False)
         select.object_name = obj.name
-        row.label(text=item.display_value)
         if item.state in {"NEEDS_REPAIR", "FALLBACK"}:
-            repair = row.operator(
-                "dimensions.manager_repair_entry", text="",
-                icon="ERROR" if item.state == "NEEDS_REPAIR" else "QUESTION",
-            )
-            repair.object_name = obj.name
+            row.label(text="", icon="ERROR" if item.state == "NEEDS_REPAIR" else "QUESTION")
         elif item.state == "CAPTURED":
             row.label(text="", icon="REC")
         else:
@@ -217,14 +213,6 @@ class CADDIM_UL_AnnotationManager(bpy.types.UIList):
             icon="HIDE_ON" if annotation_is_hidden(obj) else "HIDE_OFF",
         )
         visibility.object_name = obj.name
-        jump = row.operator("dimensions.manager_jump_to", text="", icon="VIEWZOOM")
-        jump.object_name = obj.name
-        edit_row = row.row(align=True)
-        edit_row.enabled = not is_read_only_dimensions_object(obj)
-        rename = edit_row.operator("dimensions.manager_rename", text="", icon="GREASEPENCIL")
-        rename.object_name = obj.name
-        delete = edit_row.operator("dimensions.manager_delete", text="", icon="TRASH")
-        delete.object_name = obj.name
 
     def draw_filter(self, context, layout):
         settings = context.scene.dimensions_settings
@@ -267,14 +255,38 @@ class CADDIM_PT_AnnotationManager(CADDIM_PT_PanelBase, bpy.types.Panel):
         settings = context.scene.dimensions_settings
         layout.template_list(
             "CADDIM_UL_AnnotationManager", "", settings, "annotation_manager_items",
-            settings, "active_annotation_manager_index", rows=7,
+            settings, "active_annotation_manager_index", rows=4,
         )
         if not settings.annotation_manager_items:
             layout.label(text="No annotations or guides in this scene")
             return
         index = settings.active_annotation_manager_index
         if 0 <= index < len(settings.annotation_manager_items):
-            managed = settings.annotation_manager_items[index].annotation
+            item = settings.annotation_manager_items[index]
+            managed = item.annotation
+            if managed is not None:
+                detail = layout.box()
+                detail.label(text=item.display_value, icon=_MANAGER_KIND_ICONS.get(item.kind, "OBJECT_DATA"))
+                detail.label(text=item.state.replace("_", " ").title())
+                actions = detail.row(align=True)
+                select = actions.operator("dimensions.manager_select", text="Select")
+                select.object_name = managed.name
+                frame = actions.operator("dimensions.manager_jump_to", text="Frame")
+                frame.object_name = managed.name
+                visibility = actions.operator(
+                    "dimensions.manager_toggle_visibility",
+                    text="Show" if annotation_is_hidden(managed) else "Hide",
+                )
+                visibility.object_name = managed.name
+                edits = detail.row(align=True)
+                edits.enabled = not is_read_only_dimensions_object(managed)
+                rename = edits.operator("dimensions.manager_rename", text="Rename")
+                rename.object_name = managed.name
+                delete = edits.operator("dimensions.manager_delete", text="Delete")
+                delete.object_name = managed.name
+                if item.state in {"NEEDS_REPAIR", "FALLBACK"}:
+                    repair = detail.operator("dimensions.manager_repair_entry", text="Repair", icon="TOOL_SETTINGS")
+                    repair.object_name = managed.name
             if is_dimension_object(managed) and managed.dimension_props.annotation_kind == "DIMENSION_SET":
                 props = managed.dimension_props
                 member_box = layout.box()
@@ -302,9 +314,8 @@ class CADDIM_PT_AnnotationManager(CADDIM_PT_PanelBase, bpy.types.Panel):
         if settings.annotation_manager_isolate_active:
             restore = layout.operator("dimensions.manager_bulk_visibility", text="Exit Isolate", icon="LOOP_BACK")
             restore.action = "RESTORE"
-        actions = layout.row(align=True)
-        actions.operator("dimensions.manager_bulk_style", text="Apply Named Style", icon="BRUSH_DATA")
-        actions.operator("dimensions.manager_bulk_reset_style", text="Reset Global", icon="LOOP_BACK")
+        layout.operator("dimensions.manager_bulk_style", text="Apply Named Style", icon="BRUSH_DATA")
+        layout.operator("dimensions.manager_bulk_reset_style", text="Reset to Global Style", icon="LOOP_BACK")
         layout.operator("dimensions.manager_bulk_delete", text="Delete Scope", icon="TRASH")
 
 
@@ -804,9 +815,8 @@ class CADDIM_PT_Output(CADDIM_PT_PanelBase, bpy.types.Panel):
         vector.label(text="Scale-Correct SVG / PDF", icon="FILE_IMAGE")
         vector.prop(settings, "vector_paper_size")
         vector.prop(settings, "vector_orientation")
-        row = vector.row(align=True)
-        row.prop(settings, "vector_scale_denominator")
-        row.operator("dimensions.sheet_sync_scale", text="", icon="CAMERA_DATA")
+        vector.prop(settings, "vector_scale_denominator")
+        vector.operator("dimensions.sheet_sync_scale", text="Fit Scale to Camera", icon="CAMERA_DATA")
         vector.prop(settings, "vector_line_width_mm")
         vector.prop(settings, "vector_text_height_mm")
         vector.prop(settings, "vector_arrow_size_mm")
@@ -823,9 +833,8 @@ class CADDIM_PT_Output(CADDIM_PT_PanelBase, bpy.types.Panel):
             sheet.prop(settings, "sheet_drawing_number")
             sheet.prop(settings, "sheet_revision")
             sheet.prop(settings, "sheet_author")
-            row = sheet.row(align=True)
-            row.prop(settings, "sheet_date")
-            row.operator("dimensions.sheet_populate_date", text="", icon="TIME")
+            sheet.prop(settings, "sheet_date")
+            sheet.operator("dimensions.sheet_populate_date", text="Today's Date", icon="TIME")
         actions = vector.row(align=True)
         actions.operator("dimensions.export_svg", icon="EXPORT")
         actions.operator("dimensions.export_pdf", icon="EXPORT")

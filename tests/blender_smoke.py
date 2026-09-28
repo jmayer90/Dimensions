@@ -2410,6 +2410,26 @@ class DimensionsAnnotationManagerTests(unittest.TestCase):
         self.assertFalse(second.hide_get())
         self.assertTrue(third.hide_get())
 
+    def test_isolate_restores_property_visibility_when_collection_is_excluded(self):
+        dimension = self._dimension("DIM Isolate Excluded")
+        dimension.dimension_props.visible = False
+        sync_annotation_manager(self.scene)
+        layer_collection = bpy.context.view_layer.layer_collection.children.get("Dimensions")
+        self.assertIsNotNone(layer_collection)
+        isolate_annotations(bpy.context, (dimension,))
+        self.assertTrue(dimension.dimension_props.visible)
+        try:
+            layer_collection.exclude = True
+            excluded_context = SimpleNamespace(
+                scene=self.scene,
+                view_layer=SimpleNamespace(objects={}),
+            )
+            restore_annotation_visibility(excluded_context)
+            self.assertFalse(dimension.dimension_props.visible)
+            self.assertFalse(self.settings.annotation_manager_isolate_active)
+        finally:
+            layer_collection.exclude = False
+
     def test_row_delete_removes_measurement_proxy_and_registry_entry(self):
         measurement = self._guide("MEASURE Manager Delete", measurement=True)
         set_world_anchor(measurement.guide_props.start, Vector((0.0, 0.0, 0.0)))

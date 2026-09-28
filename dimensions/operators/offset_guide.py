@@ -1,6 +1,10 @@
 """Offset and centerline construction-guide operators."""
 
 import bpy
+
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
 from mathutils import Vector
 
 from .. import messages
@@ -46,6 +50,7 @@ class DIMENSIONS_OT_CreateDerivedGuide(bpy.types.Operator):
     )
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         if context.area is None or context.area.type != "VIEW_3D" or context.mode != "OBJECT":
             self.report(messages.WARNING, messages.GUIDE_REQUIRE_OBJECT_MODE)
             return {"CANCELLED"}
@@ -62,9 +67,17 @@ class DIMENSIONS_OT_CreateDerivedGuide(bpy.types.Operator):
         self._update_preview(context)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if context.area is None or context.area.type != "VIEW_3D":
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             return {"RUNNING_MODAL"}
@@ -94,14 +107,14 @@ class DIMENSIONS_OT_CreateDerivedGuide(bpy.types.Operator):
         if is_confirm_event(event):
             return self._accept(context)
         if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_guide_preview_state()
+        clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _accept(self, context):
         if self.state == "SOURCE_A":
@@ -129,7 +142,7 @@ class DIMENSIONS_OT_CreateDerivedGuide(bpy.types.Operator):
                 self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
             return {"RUNNING_MODAL"}
         self._commit(context)
-        clear_guide_preview_state()
+        clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
         return {"FINISHED"}
 
     def _distance(self, context):
@@ -230,7 +243,7 @@ class DIMENSIONS_OT_CreateDerivedGuide(bpy.types.Operator):
             state["end_world"] = line[0] + line[1]
             if self.mode == "OFFSET":
                 state["derived_label"] = format_length(context, self._distance(context), 3)
-        set_guide_preview_state(state)
+        set_guide_preview_state(state, key=getattr(self, "_session_viewport_key", None))
 
 
 class DIMENSIONS_OT_DetachDerivedGuide(bpy.types.Operator):
@@ -264,6 +277,7 @@ class DIMENSIONS_OT_RepairDerivedGuideSource(bpy.types.Operator):
     )
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         obj = context.view_layer.objects.active
         if (
             obj is None
@@ -277,7 +291,15 @@ class DIMENSIONS_OT_RepairDerivedGuideSource(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if event.type == "MOUSEMOVE":
             repairs_anchor = self.source_slot in {"PIVOT", "SPACING_END"}
             snap = find_nearest_snap_point(
@@ -289,7 +311,7 @@ class DIMENSIONS_OT_RepairDerivedGuideSource(bpy.types.Operator):
                 if snap is not None and (repairs_anchor or eligible_offset_source(snap))
                 else None
             )
-            set_guide_preview_state({
+            set_guide_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None),
                 "state": "REPAIR_DERIVED_GUIDE",
                 "hover_screen": None if self.hover_snap is None else self.hover_snap["screen_co"],
                 "hover_type": "WORLD" if self.hover_snap is None else self.hover_snap.get("type", "WORLD"),
@@ -304,7 +326,7 @@ class DIMENSIONS_OT_RepairDerivedGuideSource(bpy.types.Operator):
                 )
                 set_anchor_from_snap(anchor, self.hover_snap)
                 resolve_derived_guide(self.guide)
-                clear_guide_preview_state()
+                clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
                 self.report(messages.INFO, messages.REATTACHED_DERIVED_GUIDE_SOURCE)
                 return {"FINISHED"}
             source_guide = self.hover_snap.get("guide_object")
@@ -314,13 +336,16 @@ class DIMENSIONS_OT_RepairDerivedGuideSource(bpy.types.Operator):
             source = self.guide.guide_props.source_a if self.source_slot == "A" else self.guide.guide_props.source_b
             bind_source_from_snap(source, self.hover_snap)
             resolve_derived_guide(self.guide)
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             self.report(messages.INFO, messages.REATTACHED_DERIVED_GUIDE_SOURCE)
             return {"FINISHED"}
         if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         return {"PASS_THROUGH"} if is_navigation_event(event) else {"RUNNING_MODAL"}
+
+    def cancel(self, _context):
+        clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
 
 
 classes = (

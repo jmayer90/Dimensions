@@ -1,6 +1,8 @@
 """Creation and activation operators for non-destructive construction planes."""
 
 import bpy
+
+from ..interaction import modal_cleanup_on_exception
 import bmesh
 from mathutils import Vector
 
@@ -11,6 +13,7 @@ from ..derived_guides import bind_face_source, bind_guide_source
 from ..guide_planes import resolve_guide_plane, would_create_plane_cycle
 from ..properties import is_read_only_dimensions_object
 from ..snapping import find_nearest_snap_point, raycast_from_mouse
+from ..viewport_state import viewport_key
 
 
 def _selected_vertex_indices(context):
@@ -208,6 +211,7 @@ class DIMENSIONS_OT_RepairGuidePlane(bpy.types.Operator):
     object_name: bpy.props.StringProperty()
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         self.plane = context.scene.objects.get(self.object_name)
         if (
             self.plane is None
@@ -223,7 +227,11 @@ class DIMENSIONS_OT_RepairGuidePlane(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        if viewport_key(context) != getattr(self, "_session_viewport_key", None):
+            self.cancel(context)
+            return {"CANCELLED"}
         if event.type in {"ESC", "RIGHTMOUSE"}:
             return {"CANCELLED"}
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
@@ -290,6 +298,9 @@ class DIMENSIONS_OT_RepairGuidePlane(bpy.types.Operator):
         sync_scene_objects(context.scene)
         self.report(messages.INFO, messages.GUIDE_PLANE_REPAIRED)
         return {"FINISHED"}
+
+    def cancel(self, _context):
+        self.pending_snaps = []
 
 
 classes = (

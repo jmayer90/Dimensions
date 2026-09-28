@@ -1,6 +1,10 @@
 """Angular and repeated-spacing construction guide operators."""
 
 import bpy
+
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
 from math import degrees
 from mathutils import Vector
 
@@ -84,6 +88,7 @@ class DIMENSIONS_OT_CreateAngularGuide(bpy.types.Operator):
     flip: bpy.props.BoolProperty(name="Flip Direction", default=False)
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         self._source = active_source(context)
         if self._source is None:
             self.report(messages.WARNING, messages.SELECT_GUIDE_SOURCE)
@@ -100,7 +105,15 @@ class DIMENSIONS_OT_CreateAngularGuide(bpy.types.Operator):
         self._update_preview(context)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if (
             (event.type == "F" and event.value == "PRESS")
             or modal_action_from_event(event) == "FLIP_OFFSET"
@@ -117,17 +130,17 @@ class DIMENSIONS_OT_CreateAngularGuide(bpy.types.Operator):
             if not self.angle_input_valid:
                 return {"RUNNING_MODAL"}
             result = self.execute(context)
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return result
         if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_guide_preview_state()
+        clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _resolved_angle(self, context):
         if not self.angle_text.strip():
@@ -151,7 +164,7 @@ class DIMENSIONS_OT_CreateAngularGuide(bpy.types.Operator):
             state = {"state": "ANGULAR", "derived_guide": "ANGULAR", "axis": "ALIGNED"}
         state["distance_text"] = self.angle_text
         state["distance_input_valid"] = self.angle_input_valid
-        set_guide_preview_state(state)
+        set_guide_preview_state(state, key=getattr(self, "_session_viewport_key", None))
 
     def execute(self, context):
         source = getattr(self, "_source", None) or active_source(context)
@@ -188,6 +201,7 @@ class DIMENSIONS_OT_CreateSpacingGuide(bpy.types.Operator):
     extent: bpy.props.FloatProperty(name="Extent", default=4.0, min=0.000001, subtype="DISTANCE")
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         if context.area is None or context.area.type != "VIEW_3D":
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
@@ -205,12 +219,20 @@ class DIMENSIONS_OT_CreateSpacingGuide(bpy.types.Operator):
         self._update_preview()
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if context.area is None or context.area.type != "VIEW_3D" or session_context_changed(self, context):
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             self._update_preview()
@@ -239,14 +261,14 @@ class DIMENSIONS_OT_CreateSpacingGuide(bpy.types.Operator):
             else:
                 self._end_snap = copy_snap(self._hover_snap)
             result = self._create(context, self._source, self._origin_snap, self._end_snap)
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return result
         if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_guide_preview_state()
+        clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _find_snap(self, context, event):
         from ..guide_planes import active_plane_frame
@@ -282,7 +304,7 @@ class DIMENSIONS_OT_CreateSpacingGuide(bpy.types.Operator):
             end_snap = self._hover_snap if self._spacing_state == "PICK_END" else self._origin_snap
             if end_snap is not None:
                 state["end_world"] = end_snap["world_co"]
-        set_guide_preview_state(state)
+        set_guide_preview_state(state, key=getattr(self, "_session_viewport_key", None))
 
     def execute(self, context):
         source = getattr(self, "_source", None) or active_source(context)

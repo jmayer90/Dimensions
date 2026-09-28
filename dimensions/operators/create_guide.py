@@ -1,5 +1,9 @@
 import bpy
 
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
+
 from .. import messages
 from ..anchors import set_anchor_from_snap
 from ..collections import (
@@ -34,6 +38,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def invoke(self, context, event):
+        self._session_viewport_key = viewport_key(context)
         if context.area is None or context.area.type != "VIEW_3D" or context.mode != "OBJECT":
             self.report(messages.WARNING, messages.GUIDE_REQUIRE_OBJECT_MODE)
             return {"CANCELLED"}
@@ -52,12 +57,20 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if context.area is None or context.area.type != "VIEW_3D":
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if self.continuous_placement and session_context_changed(self, context):
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             self._update_preview(context)
@@ -146,7 +159,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
 
         if event.type == "ESC" and event.value == "PRESS":
             if self.continuous_placement:
-                clear_guide_preview_state()
+                clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
                 return {"CANCELLED"}
             if self.distance_text:
                 self.distance_text = ""
@@ -157,17 +170,17 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
                 self._reset_to_start()
                 self._update_preview(context)
                 return {"RUNNING_MODAL"}
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if event.type == "RIGHTMOUSE" and event.value == "PRESS":
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_guide_preview_state()
+        clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _commit(self, context):
         end_snap = self._effective_end_snap(context)
@@ -219,7 +232,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
 
     def _after_commit(self, context):
         if not self.continuous_placement:
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"FINISHED"}
         push_undo_step("Create Construction Guide")
         self._reset_to_start()
@@ -276,7 +289,7 @@ class CADDIM_OT_CreateGuide(bpy.types.Operator):
             end_snap = self._effective_end_snap(context)
             if end_snap is not None:
                 state["end_world"] = end_snap["world_co"]
-        set_guide_preview_state(state)
+        set_guide_preview_state(state, key=getattr(self, "_session_viewport_key", None))
 
     @staticmethod
     def _copy_snap(snap):

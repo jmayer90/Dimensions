@@ -3,11 +3,11 @@
 from dataclasses import dataclass
 from math import isfinite
 
-from .stroke_font import text_block_dimensions, text_strokes
+from .stroke_font import _block_ink_bounds, text_block_dimensions, text_strokes
 
 
 DEFAULT_COLOR = (0.0, 0.0, 0.0, 1.0)
-MINIMUM_BLOCK_WIDTH_MM = 60.0
+MINIMUM_BLOCK_WIDTH_MM = 80.0
 MINIMUM_BLOCK_HEIGHT_MM = 24.0
 
 
@@ -49,6 +49,31 @@ class SheetLayout:
     border_bounds: tuple
     title_block_bounds: tuple
     strokes: tuple
+
+
+def annotation_bounds_for_frame(layout, frame_width, frame_height):
+    """Choose the largest useful rectangle clear of margins and sheet furniture."""
+    if frame_width <= 0.0 or frame_height <= 0.0:
+        raise SheetLayoutError("Camera frame must have positive dimensions")
+    left, top, right, bottom = layout.border_bounds
+    clearance = max(1.0, max((stroke.line_width_mm for stroke in layout.strokes), default=0.0) + 0.1)
+    candidates = [(left + clearance, top + clearance, right - clearance, bottom - clearance)]
+    if layout.title_block_bounds is not None:
+        block_left, block_top, _, _ = layout.title_block_bounds
+        candidates = [
+            (left + clearance, top + clearance, right - clearance, block_top - clearance),
+            (left + clearance, top + clearance, block_left - clearance, bottom - clearance),
+        ]
+    candidates = [bounds for bounds in candidates if bounds[2] > bounds[0] and bounds[3] > bounds[1]]
+    if not candidates:
+        raise SheetLayoutError("Sheet furniture leaves no printable annotation area")
+    return min(
+        candidates,
+        key=lambda bounds: max(
+            frame_width / (bounds[2] - bounds[0]),
+            frame_height / (bounds[3] - bounds[1]),
+        ),
+    )
 
 
 def build_sheet_layout(
@@ -149,8 +174,12 @@ def build_sheet_layout(
             available_height = cell_bottom - cell_top - padding * 2.0
             text_width, text_block_height = text_block_dimensions(label, text_height)
             if text_width > available_width + 1e-9 or text_block_height > available_height + 1e-9:
-                raise SheetLayoutError(f"{name.replace('_', ' ').title()} does not fit in the title block")
-            origin = (cell_left + padding, cell_top + padding + text_height, 0.0)
+                raise SheetLayoutError(
+                    f"{name.replace('_', ' ').title()} does not fit in the title block; "
+                    "increase its width or height, or shorten this field"
+                )
+            _, _, ink_top = _block_ink_bounds(label)
+            origin = (cell_left + padding, cell_top + padding + ink_top * text_height, 0.0)
             for points in text_strokes(
                 label, origin, (1.0, 0.0, 0.0), (0.0, -1.0, 0.0), text_height, "LEFT",
             ):

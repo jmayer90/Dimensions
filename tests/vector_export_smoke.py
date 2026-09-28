@@ -20,6 +20,7 @@ from dimensions.anchors import set_world_anchor
 from dimensions.collections import create_dimension_object
 from dimensions.grease_pencil_output import OutputStroke
 from dimensions.operators.export_vector import build_scene_vector_document, vector_output_strokes
+from dimensions.sheet_layout import SheetMetadata
 from dimensions.vector_export import (
     VectorExportError,
     build_vector_document,
@@ -226,7 +227,7 @@ class DimensionsVectorExportTests(unittest.TestCase):
         self.assertEqual(pdf.count(b"\nS\n"), len(document.strokes))
         self.assertIn(b"/Count 1", pdf)
 
-    def test_sheet_geometry_is_physical_and_does_not_change_annotation_projection(self):
+    def test_sheet_geometry_is_physical_and_moves_annotations_clear_of_furniture(self):
         self._dimension("DIM OUT-05 Physical Invariance")
         settings = self.scene.dimensions_settings
         self.camera.data.ortho_scale = 0.1
@@ -243,10 +244,26 @@ class DimensionsVectorExportTests(unittest.TestCase):
         settings.sheet_author = "ADA"
         settings.sheet_date = "2026-08-29"
         with_sheet = build_scene_vector_document(bpy.context)
-        self.assertEqual(
-            tuple(stroke for stroke in with_sheet.strokes if stroke.role == "ANNOTATION"),
-            baseline_annotations,
+        shifted_annotations = tuple(
+            stroke for stroke in with_sheet.strokes if stroke.role == "ANNOTATION"
         )
+        self.assertEqual(len(shifted_annotations), len(baseline_annotations))
+        self.assertNotEqual(shifted_annotations, baseline_annotations)
+        from dimensions.sheet_layout import annotation_bounds_for_frame, build_sheet_layout
+        from dimensions.vector_export import _camera_frame_world_size
+
+        frame_width, frame_height = _camera_frame_world_size(self.scene, self.camera)
+        layout = build_sheet_layout(210, 297, metadata=SheetMetadata(
+            title="PART", drawing_number="D-1", revision="A", author="ADA",
+            date="2026-08-29", scale="1:10",
+        ))
+        left, top, right, bottom = annotation_bounds_for_frame(layout, frame_width, frame_height)
+        for stroke in shifted_annotations:
+            for x, y in stroke.points:
+                self.assertGreaterEqual(x, left - 1e-6)
+                self.assertLessEqual(x, right + 1e-6)
+                self.assertGreaterEqual(y, top - 1e-6)
+                self.assertLessEqual(y, bottom + 1e-6)
 
         invariant_roles = {"BORDER", "TITLE_BLOCK", "TITLE_GRID"}
         layouts = []
@@ -355,6 +372,18 @@ class DimensionsVectorExportTests(unittest.TestCase):
             ),),
             scale_denominator=settings.vector_scale_denominator,
         )
+
+    def test_fit_scale_and_export_share_the_title_block_rectangle(self):
+        self._dimension("DIM OUT-06 Fitted Sheet")
+        self.camera.data.ortho_scale = 2.0
+        settings = self.scene.dimensions_settings
+        settings.sheet_border_enabled = True
+        settings.sheet_title_block_enabled = True
+        settings.sheet_date = "2026-09-28"
+        self.assertEqual(bpy.ops.dimensions.sheet_sync_scale(), {"FINISHED"})
+        document = build_scene_vector_document(bpy.context)
+        self.assertTrue(any(stroke.role == "ANNOTATION" for stroke in document.strokes))
+        self.assertTrue(any(stroke.role == "TITLE_BLOCK" for stroke in document.strokes))
 
 
 def main():

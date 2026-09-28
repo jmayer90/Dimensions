@@ -1,6 +1,10 @@
 import bmesh
 import bpy
 
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
+
 from mathutils import Vector
 
 from .. import messages
@@ -68,6 +72,7 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
     replace_active: bpy.props.BoolProperty(default=False, options={"SKIP_SAVE"})
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         if not has_view3d_window_region(context):
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
@@ -109,12 +114,20 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if not has_view3d_window_region(context):
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if self.continuous_placement and session_context_changed(self, context):
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             self._update_preview()
@@ -171,7 +184,7 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
             return self._commit(context)
         if event.type == "ESC" and event.value == "PRESS":
             if self.continuous_placement:
-                clear_preview_state()
+                clear_preview_state(key=getattr(self, "_session_viewport_key", None))
                 return {"CANCELLED"}
             if self.state == "PICK_RADIUS":
                 self.edge_b_snap = None
@@ -180,19 +193,19 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
                 self.edge_a_snap = None
                 self.state = "PICK_EDGE_A"
             else:
-                clear_preview_state()
+                clear_preview_state(key=getattr(self, "_session_viewport_key", None))
                 return {"CANCELLED"}
             self._update_preview()
             return {"RUNNING_MODAL"}
         if event.type == "RIGHTMOUSE" and event.value == "PRESS":
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_preview_state()
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _derived_source(self):
         a = _edge_world_points(self.edge_a_snap)
@@ -228,7 +241,7 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
 
     def _after_commit(self, context):
         if not self.continuous_placement or self.target_name:
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"FINISHED"}
         push_undo_step("Create Angle Dimension")
         self.state = "PICK_EDGE_A"
@@ -257,7 +270,7 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
             preview["start_world"] = source["start"]
             preview["center_world"] = source["center"]
             preview["end_world"] = source["end"]
-        set_preview_state(preview)
+        set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))
 
 
 class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
@@ -279,18 +292,27 @@ class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
         )
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         self.annotation_name = context.view_layer.objects.active.name
         self.hover_snap = None
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         annotation = bpy.data.objects.get(self.annotation_name)
         if annotation is None or not has_view3d_window_region(context):
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
-            set_preview_state({
+            set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None),
                 "state": f"REPLACE_EDGE_{self.edge_slot}",
                 "hover_screen": None if self.hover_snap is None else self.hover_snap["screen_co"],
                 "hover_type": "EDGE",
@@ -306,7 +328,7 @@ class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
                 include_free=False,
             )
             self.hover_snap = copy_snap(snap) if _valid_edge_snap(snap) else None
-            set_preview_state({
+            set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None),
                 "state": f"REPLACE_EDGE_{self.edge_slot}",
                 "hover_screen": None if self.hover_snap is None else self.hover_snap["screen_co"],
                 "hover_type": "EDGE",
@@ -321,11 +343,14 @@ class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
                 self.hover_snap["edge_vertices"],
             )
             annotation.dimension_props.measurement_state = "LIVE"
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"FINISHED"}
         if event.type in {"RIGHTMOUSE", "ESC"} and event.value == "PRESS":
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
+
+    def cancel(self, _context):
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))

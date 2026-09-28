@@ -14,7 +14,9 @@ from ..output_geometry import (
 )
 from ..operators.generate_output import annotations_for_output
 from ..properties import resolve_dimension_style
-from ..sheet_layout import SheetLayoutError, SheetMetadata, build_sheet_layout
+from ..sheet_layout import (
+    SheetLayoutError, SheetMetadata, annotation_bounds_for_frame, build_sheet_layout,
+)
 from ..vector_export import (
     VectorExportError,
     _camera_frame_world_size,
@@ -71,36 +73,19 @@ def build_scene_vector_document(context):
     settings = scene.dimensions_settings
     if scene.camera is None:
         raise VectorExportError(messages.VECTOR_CAMERA_REQUIRED)
+    width_mm, height_mm = paper_dimensions_mm(
+        settings.vector_paper_size, settings.vector_orientation,
+    )
+    try:
+        sheet_strokes, annotation_bounds = _sheet_geometry(
+            settings, width_mm, height_mm, scene, scene.camera,
+            settings.vector_scale_denominator,
+        )
+    except SheetLayoutError as error:
+        raise VectorExportError(str(error)) from error
     strokes, exported, skipped = vector_output_strokes(context)
     if exported == 0:
         raise VectorExportError(messages.VECTOR_NO_VALID_ANNOTATIONS)
-    sheet_strokes = ()
-    if settings.sheet_border_enabled or settings.sheet_title_block_enabled:
-        width_mm, height_mm = paper_dimensions_mm(
-            settings.vector_paper_size, settings.vector_orientation,
-        )
-        metadata = SheetMetadata(
-            title=settings.sheet_drawing_title,
-            drawing_number=settings.sheet_drawing_number,
-            revision=settings.sheet_revision,
-            author=settings.sheet_author,
-            date=settings.sheet_date,
-            scale=f"1:{settings.vector_scale_denominator:g}",
-        )
-        try:
-            sheet_strokes = build_sheet_layout(
-                width_mm,
-                height_mm,
-                margins_mm=settings.sheet_margin_mm,
-                title_block_width_mm=settings.sheet_title_block_width_mm,
-                title_block_height_mm=settings.sheet_title_block_height_mm,
-                metadata=metadata,
-                line_width_mm=settings.vector_line_width_mm,
-                border_enabled=settings.sheet_border_enabled,
-                title_block_enabled=settings.sheet_title_block_enabled,
-            ).strokes
-        except SheetLayoutError as error:
-            raise VectorExportError(str(error)) from error
     return build_vector_document(
         scene,
         scene.camera,
@@ -111,7 +96,34 @@ def build_scene_vector_document(context):
         annotation_count=exported,
         skipped_count=skipped,
         sheet_strokes=sheet_strokes,
+        annotation_bounds=annotation_bounds,
     )
+
+
+def _sheet_geometry(settings, width_mm, height_mm, scene, camera, denominator):
+    if not (settings.sheet_border_enabled or settings.sheet_title_block_enabled):
+        return (), (0.0, 0.0, width_mm, height_mm)
+    metadata = SheetMetadata(
+        title=settings.sheet_drawing_title,
+        drawing_number=settings.sheet_drawing_number,
+        revision=settings.sheet_revision,
+        author=settings.sheet_author,
+        date=settings.sheet_date,
+        scale=f"1:{denominator:g}",
+    )
+    layout = build_sheet_layout(
+        width_mm,
+        height_mm,
+        margins_mm=settings.sheet_margin_mm,
+        title_block_width_mm=settings.sheet_title_block_width_mm,
+        title_block_height_mm=settings.sheet_title_block_height_mm,
+        metadata=metadata,
+        line_width_mm=settings.vector_line_width_mm,
+        border_enabled=settings.sheet_border_enabled,
+        title_block_enabled=settings.sheet_title_block_enabled,
+    )
+    frame_width, frame_height = _camera_frame_world_size(scene, camera)
+    return layout.strokes, annotation_bounds_for_frame(layout, frame_width, frame_height)
 
 
 class _VectorExportOperator:
@@ -127,7 +139,7 @@ class _VectorExportOperator:
             document = build_scene_vector_document(context)
             self.writer(self.filepath, document)
         except VectorExportError as error:
-            self.report(messages.WARNING, str(error))
+            self.report(messages.WARNING, messages.vector_export_invalid(str(error)))
             return {"CANCELLED"}
         except OSError as error:
             self.report(messages.ERROR, messages.vector_export_failed(str(error)))
@@ -198,25 +210,27 @@ class DIMENSIONS_OT_SheetSyncScale(bpy.types.Operator):
             width_mm, height_mm = paper_dimensions_mm(
                 settings.vector_paper_size, settings.vector_orientation
             )
-            if settings.sheet_border_enabled:
-                margin = settings.sheet_margin_mm * 2.0
-                width_mm = max(10.0, width_mm - margin)
-                height_mm = max(10.0, height_mm - margin)
-
             frame_w, frame_h = _camera_frame_world_size(scene, camera)
+            _, bounds = _sheet_geometry(
+                settings, width_mm, height_mm, scene, camera,
+                settings.vector_scale_denominator,
+            )
+            available_width = bounds[2] - bounds[0]
+            available_height = bounds[3] - bounds[1]
             scale_length = float(getattr(scene.unit_settings, "scale_length", 1.0))
-            denom_w = (frame_w * scale_length * 1000.0) / width_mm
-            denom_h = (frame_h * scale_length * 1000.0) / height_mm
+            denom_w = (frame_w * scale_length * 1000.0) / available_width
+            denom_h = (frame_h * scale_length * 1000.0) / available_height
             denominator = max(0.01, ceil(max(denom_w, denom_h) * 100.0) / 100.0)
-            if not camera_frame_fits_page(scene, camera, width_mm, height_mm, denominator):
+            _sheet_geometry(settings, width_mm, height_mm, scene, camera, denominator)
+            if not camera_frame_fits_page(scene, camera, width_mm, height_mm, denominator, bounds):
                 denominator = round(denominator + 0.01, 2)
-            if not camera_frame_fits_page(scene, camera, width_mm, height_mm, denominator):
+            if not camera_frame_fits_page(scene, camera, width_mm, height_mm, denominator, bounds):
                 raise VectorExportError("The fitted drawing scale could not be validated")
             settings.vector_scale_denominator = denominator
             self.report(messages.INFO, messages.set_drawing_scale(denominator))
             return {"FINISHED"}
-        except Exception as error:
-            self.report(messages.WARNING, messages.vector_export_failed(str(error)))
+        except (SheetLayoutError, VectorExportError, ValueError) as error:
+            self.report(messages.WARNING, messages.vector_fit_invalid(str(error)))
             return {"CANCELLED"}
 
 

@@ -1,7 +1,7 @@
 # FND-12 — Critical stability and bounded geometry hardening
 
 **Milestone:** M6 1.0 gate
-**Status:** 🟨 Partial — implementation and regression coverage complete; Blender 5.1/5.2 validation pending.
+**Status:** ✅ Complete — implementation and regression coverage pass full validation on Blender 5.1.2 and 5.2.2.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch.
@@ -53,23 +53,23 @@ Harden the boundaries rather than patching individual examples:
 
 ## Acceptance criteria
 
-- [ ] A colliding anchor attribute with the wrong data type or domain never raises,
+- [x] A colliding anchor attribute with the wrong data type or domain never raises,
   never indexes a non-point domain as vertices, and leaves the anchor in a truthful
   fallback/repair state.
-- [ ] Edit Mode vertex and area repair candidates created by extrude, subdivide, or
+- [x] Edit Mode vertex and area repair candidates created by extrude, subdivide, or
   knife always carry current non-negative BMesh indices and can be accepted.
-- [ ] Every repeated-spacing mode has a finite documented line budget; Extent mode
+- [x] Every repeated-spacing mode has a finite documented line budget; Extent mode
   cannot allocate above it, and normal-size definitions are unchanged.
-- [ ] A saved guide plane behind the view ray is not offered as a snap candidate.
-- [ ] `plane_frame()` returns a valid orthonormal frame for axis-aligned normals even
+- [x] A saved guide plane behind the view ray is not offered as a snap candidate.
+- [x] `plane_frame()` returns a valid orthonormal frame for axis-aligned normals even
   when the preferred axis is parallel to the normal.
-- [ ] Fit Scale always chooses a denominator that passes export for the selected
+- [x] Fit Scale always chooses a denominator that passes export for the selected
   page, orientation, margins, and orthographic camera frame.
-- [ ] LF, CRLF, and CR versions of the same text have identical metrics and strokes,
+- [x] LF, CRLF, and CR versions of the same text have identical metrics and strokes,
   with no carriage-return fallback glyph.
-- [ ] Valid RGB and RGBA strokes serialize identically apart from default alpha;
+- [x] Valid RGB and RGBA strokes serialize identically apart from default alpha;
   other channel counts fail early with an actionable validation error.
-- [ ] The full validation suite passes on the declared Blender 5.1 and 5.2 targets.
+- [x] The full validation suite passes on the declared Blender 5.1 and 5.2 targets.
 
 ## Code map
 

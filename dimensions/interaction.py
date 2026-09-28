@@ -31,16 +31,40 @@ def _active_object(context):
 
 def remember_session_context(operator, context):
     """Remember the user-controlled context that a modal session started in."""
+    from .viewport_state import viewport_key
+
     operator._session_mode = getattr(context, "mode", None)
     operator._session_active_object = _active_object(context)
+    operator._session_viewport_key = viewport_key(context)
 
 
 def session_context_changed(operator, context):
     """Return whether mode or active object changed outside the modal workflow."""
+    from .viewport_state import viewport_key
+
     return (
         getattr(context, "mode", None) != getattr(operator, "_session_mode", None)
         or _active_object(context) is not getattr(operator, "_session_active_object", None)
+        or viewport_key(context) != getattr(operator, "_session_viewport_key", None)
     )
+
+
+def modal_cleanup_on_exception(modal):
+    """Release an operator's transient state before surfacing a modal failure."""
+    from functools import wraps
+
+    @wraps(modal)
+    def wrapped(operator, context, event):
+        try:
+            return modal(operator, context, event)
+        except Exception:
+            try:
+                operator.cancel(context)
+            except Exception:
+                pass
+            raise
+
+    return wrapped
 
 
 def axis_label(axis):

@@ -24,3 +24,13 @@ blender --background --factory-startup --python scripts/create_schema_v14_fixtur
 ```
 
 It is the immutable starting point for migrations introduced after 0.5.0.
+
+The settings-only fixture uses the retained 0.4.2 archive and contains a custom
+style and scene settings, but no Dimensions objects:
+
+```bash
+blender --background --factory-startup --python scripts/create_schema_v6_settings_fixture.py
+```
+
+The lifecycle suite verifies that first annotation creation runs schema steps
+6 through the current version in order, once, while preserving those values.

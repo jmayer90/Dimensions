@@ -159,11 +159,10 @@ def move_set_member(props, member_index, direction):
     if not (0 <= member_index < len(props.set_members) and 0 <= target < len(props.set_members)):
         return False
     if props.set_kind == "CHAIN":
-        anchors = _anchors_from_chain(props)
-        moved_anchor = anchors.pop(member_index + 1)
-        anchors.insert(target + 1, moved_anchor)
-        _rebuild_chain(props, anchors)
-        props.active_set_member_index = target
+        # Permuting one chain point can reverse a segment or move it off the
+        # shared axis. Insertion and deletion have defined geometric meaning;
+        # arbitrary reordering does not.
+        return False
     else:
         props.set_members.move(member_index, target)
         props.active_set_member_index = target

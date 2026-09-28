@@ -1,6 +1,10 @@
 """Creation operators for named datums, coordinate, and elevation annotations."""
 
 import bpy
+
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
 from mathutils import Vector
 
 from .. import messages
@@ -98,6 +102,7 @@ class _CreateDatumAnnotation:
     )
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         if context.area is None or context.area.type != "VIEW_3D":
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
@@ -135,12 +140,20 @@ class _CreateDatumAnnotation:
             return self._begin_point_acquisition(context, datum)
         return self._create_annotation(context, datum, context.scene.cursor.location)
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if context.area is None or context.area.type != "VIEW_3D" or session_context_changed(self, context):
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             self._update_preview()
@@ -158,18 +171,18 @@ class _CreateDatumAnnotation:
                 return {"RUNNING_MODAL"}
             datum = _find_datum(context, self.datum_object_name)
             if datum is None:
-                clear_preview_state()
+                clear_preview_state(key=getattr(self, "_session_viewport_key", None))
                 self.report(messages.WARNING, messages.DATUM_REQUIRED)
                 return {"CANCELLED"}
             result = self._create_annotation(context, datum, snap["world_co"], snap=snap)
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return result
         if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_preview_state()
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _begin_point_acquisition(self, context, datum):
         self.datum_object_name = datum.name
@@ -210,7 +223,7 @@ class _CreateDatumAnnotation:
                 "hover_label": self.hover_snap.get("label", "Point"),
                 "hover_snap": copy_snap(self.hover_snap),
             })
-        set_preview_state(state)
+        set_preview_state(state, key=getattr(self, "_session_viewport_key", None))
 
     def _create_annotation(self, context, datum, point, *, snap=None, source=None, vertex_index=-1):
         obj = create_dimension_object(context, f"DIM {self.annotation_kind.title()}")

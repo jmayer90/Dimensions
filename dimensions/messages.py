@@ -208,6 +208,14 @@ def vector_export_failed(detail):
     return f"Vector export failed: {detail}"
 
 
+def vector_export_invalid(detail):
+    return f"Cannot export vector sheet: {detail}"
+
+
+def vector_fit_invalid(detail):
+    return f"Cannot fit drawing scale: {detail}"
+
+
 def set_drawing_scale(denominator):
     return f"Set drawing scale to 1:{denominator:g}"
 

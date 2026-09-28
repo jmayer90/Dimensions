@@ -3,6 +3,10 @@
 from math import cos, sin
 
 import bpy
+
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
 from mathutils import Vector
 
 from .. import messages
@@ -41,6 +45,7 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
     ])
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         if not has_view3d_window_region(context):
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
@@ -70,10 +75,18 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         annotation = bpy.data.objects.get(self.annotation_name)
         if annotation is None or not has_view3d_window_region(context):
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         axis = axis_from_event(event)
         if axis is not None:
@@ -107,7 +120,7 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
             if self.candidate_value is None and self.candidate_world is None:
                 return {"RUNNING_MODAL"}
             self._commit(annotation)
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             self.report(messages.INFO, messages.adjusted_handle(self.handle_kind))
             return {"FINISHED"}
         if event.type == "ESC" and event.value == "PRESS":
@@ -115,18 +128,18 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
                 self._update_candidate(context)
                 self._update_preview(context)
                 return {"RUNNING_MODAL"}
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if event.type == "RIGHTMOUSE" and event.value == "PRESS":
             self.state.cancel()
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_preview_state()
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _current_value(self, annotation):
         props = annotation.dimension_props
@@ -360,7 +373,7 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
                     "sweep": fit["sweep"],
                     "value": circle_value(props, fit),
                 })
-        set_preview_state(preview)
+        set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))
 
 
 classes = (DIMENSIONS_OT_DragAnnotationHandle,)

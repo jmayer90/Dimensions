@@ -93,17 +93,32 @@ class DimensionsSetTests(unittest.TestCase):
         self.assertEqual(tuple(geometry[1]["start_world"]), (2.0, 0.0, 0.0))
         self.assertEqual(tuple(geometry[1]["end_world"]), (3.0, 0.0, 0.0))
 
-    def test_reordering_chain_points_preserves_the_original_datum_and_continuity(self):
+    def test_chain_reordering_refuses_a_reverse_segment(self):
         obj = self._set("CHAIN", ((0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)))
         props = obj.dimension_props
-        self.assertTrue(move_set_member(props, 0, 1))
+        before = [
+            (tuple(item["start_world"]), tuple(item["end_world"]))
+            for item in dimension_set_world_geometry(props)
+        ]
+        self.assertFalse(move_set_member(props, 0, 1))
         geometry = dimension_set_world_geometry(props)
-        self.assertEqual(tuple(geometry[0]["start_world"]), (0.0, 0.0, 0.0))
-        self.assertEqual(tuple(geometry[0]["end_world"]), (2.0, 0.0, 0.0))
-        self.assertTrue(all(
-            (geometry[index]["end_world"] - geometry[index + 1]["start_world"]).length < 1e-6
-            for index in range(len(geometry) - 1)
-        ))
+        self.assertEqual(
+            [(tuple(item["start_world"]), tuple(item["end_world"])) for item in geometry],
+            before,
+        )
+
+    def test_deleting_final_member_removes_manager_entry(self):
+        obj = self._set("CHAIN", ((0, 0, 0), (1, 0, 0)))
+        name = obj.name
+        sync_annotation_manager(self.scene)
+        self.assertIn(name, {item.name for item in self.scene.dimensions_settings.annotation_manager_items})
+        self.assertEqual(
+            bpy.ops.dimensions.delete_dimension_set_member(object_name=name, member_index=0),
+            {"FINISHED"},
+        )
+        self.created.clear()
+        self.assertIsNone(bpy.data.objects.get(name))
+        self.assertNotIn(name, {item.name for item in self.scene.dimensions_settings.annotation_manager_items})
 
     def test_baseline_automatic_spacing_derives_from_text_and_is_adjustable(self):
         obj = self._set("BASELINE", ((0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)))

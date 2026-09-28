@@ -43,7 +43,7 @@ The extension may inspect Edit Mode topology to acquire anchors or calculate val
 | `units.py`, `volume.py` | Parse and format units and calculate evaluated closed-mesh volume. |
 | `stroke_font.py`, `output_geometry.py`, `grease_pencil_output.py`, `operators/generate_output.py` | Build vector labels and world-space annotation stroke specs, then generate isolated, replaceable Grease Pencil output artifacts. |
 | `vector_export.py`, `operators/export_vector.py` | Project valid world-space annotation strokes through an orthographic camera and serialize physical-page SVG/PDF output. |
-| `sheet_layout.py` | Compose optional physical-mm page borders and a fixed vector title block after camera projection, independent of model or drawing scale. |
+| `sheet_layout.py` | Compose optional physical-mm page borders and a fixed vector title block, validate field fit, and choose a printable annotation rectangle clear of furniture. |
 
 Annotations are Empty objects with presentation properties and an annotation kind. Linear annotations use two measurement anchors. Live Areas store persistent face IDs in `dimensions_area_face_id`, source metadata, a cached value, and explicit Live/Captured/Needs Repair state. Two-edge Angles store four persistent endpoint anchors and derive a shared or virtual center. Vertex anchors store integer IDs in the mesh's `dimensions_anchor_id` point attribute. Angle arcs are generated in world space before viewport projection. A canonical source frame plus user presentation offset keeps annotation transforms editable. Guides and measurements are Empty objects in a separate collection.
 
@@ -61,7 +61,7 @@ Angular and repeated-spacing guides extend the same derived-guide dependency gra
 
 Named annotation styles are scene-owned property-group entries. Each annotation stores a style name and independent override flags. Presentation resolves once per annotation invalidation in the strict order local override → named style → scene default, then the completed snapshot is cached with geometry and reused for drawing. A missing or deleted style falls back to scene defaults; deletion explicitly clears matching references. Styles contain presentation only and never measurement bindings or sources. They travel with their scene, but are not a cross-file library.
 
-The scene-owned Annotation Manager registry stores object pointers and display fields for dimensions, measurements, and guides. Scene synchronization updates fields in place and rebuilds membership only when managed objects change; sidebar redraws only filter cached name/kind/state fields and never mutate scene data. Viewport active-object changes schedule manager-index synchronization through Blender's message bus, outside panel drawing. Row state and value come from the same live bindings and formatting as the annotations. Bulk operations consume either the filtered pointer set or Blender's selected managed objects and execute as one undoable operator. Isolate records both object hiding and the existing annotation visibility flag, then restores both exactly.
+The scene-owned Annotation Manager registry stores object pointers and display fields for dimensions, measurements, and guides. Scene synchronization updates fields in place and rebuilds membership only when managed objects change; sidebar redraws only filter cached name/kind/state fields and never mutate scene data. Viewport active-object changes schedule manager-index synchronization through Blender's message bus, outside panel drawing. The list gives names enough room at the default sidebar width; the active row's state, value, and actions appear below it. Those fields come from the same live bindings and formatting as the annotations. Bulk operations consume either the filtered pointer set or Blender's selected managed objects and execute as one undoable operator. Isolate records both object hiding and the existing annotation visibility flag, then restores the property flag regardless of view-layer membership and the hide state where the active view layer permits it.
 
 Every anchor records whether it resolved uniquely by persistent identity, used its stored-position fallback, or became unresolvable because its source disappeared. Resolution returns the same fallback coordinate as before; only its state and presentation changed. The manager and overlay distinguish Fallback from Needs Repair. Guided repair keeps its candidate search separate from mutation: it shows the last-known point and nearest vertex/face, then changes a binding only after explicit acceptance or manual acquisition. Cause-scoped bulk repair repeats that confirmed rule, convert-to-world is limited to unresolvable point anchors, and linked annotations are never rewritten. Area repair replaces only source faces and preserves label/presentation state.
 
@@ -73,9 +73,9 @@ Camera Relative sizing converts configured render pixels to world units at each 
 
 Generated output resolves named style color, endpoint variant, precision, unit format, prefix, suffix, and tolerance. Line width, label height, and endpoint size intentionally come from the separate Camera Relative or World Scale output policy rather than viewport-pixel style fields; this keeps sheet output consistently scaled.
 
-Scale-correct SVG/PDF export reads the same resolved world-space strokes without first creating Grease Pencil objects. An orthographic camera defines the crop; scene-unit scale and the requested 1:N denominator map model coordinates into physical millimetres. The camera frame is centered without rescaling on A4, A3, or US Letter in portrait or landscape, and a frame that does not fit is rejected. Export presentation uses explicit paper-millimetre line, label, and endpoint sizes while preserving resolved annotation RGB colors. Fallback and Needs Repair annotations are omitted so a broken binding cannot appear authoritative. Labels use the bundled stroke font and are therefore vector outlines, not selectable text.
+Scale-correct SVG/PDF export reads the same resolved world-space strokes without first creating Grease Pencil objects. An orthographic camera defines the crop; scene-unit scale and the requested 1:N denominator map model coordinates into physical millimetres. The camera frame is centered without rescaling inside the selected printable annotation rectangle on A4, A3, or US Letter in portrait or landscape, and a frame that does not fit is rejected. Export presentation uses explicit paper-millimetre line, label, and endpoint sizes while preserving resolved annotation RGB colors. Fallback and Needs Repair annotations are omitted so a broken binding cannot appear authoritative. Labels use the bundled stroke font and are therefore vector outlines, not selectable text.
 
-The 0.6 single-sheet surface composes page-space furniture only after annotation projection. A scene may enable a rectangular border and a fixed lower-right title block with drawing title, number, revision, author, date, and the current scale. Margin and block dimensions are physical millimetres and therefore remain unchanged under camera, scene-unit, or drawing-scale changes. Invalid layouts fail before writing. This is deliberately one bounded sheet, not a multi-sheet registry or arbitrary template engine; it never shifts, rescales, or restyles annotation strokes.
+The 0.6 single-sheet surface composes page-space furniture and annotation projection from one shared layout. A scene may enable a rectangular border and a fixed lower-right title block with drawing title, number, revision, author, date, and the current scale. Margin and block dimensions are physical millimetres and therefore remain unchanged under camera, scene-unit, or drawing-scale changes. The camera frame is translated to the best-fitting rectangle above or left of the title block, with stroke-width clearance from the border and block. Fit Scale and export use the same rectangle. The 80 × 24 mm minimum block fits ISO dates at the default 2 mm title-block text height, while larger custom metadata is refused rather than silently shrunk. Invalid layouts fail before writing. This is deliberately one bounded sheet, not a multi-sheet registry or arbitrary template engine; sheet furniture does not change model geometry, camera framing, or annotation style.
 
 Persistent chain/baseline sets enter the same Grease Pencil and SVG/PDF pipelines as one source artifact containing all member strokes and labels. A set with any unresolved member is withheld from authoritative vector export until repaired.
 
@@ -145,6 +145,8 @@ Measures the per-frame CPU work the overlay performs before it uploads anything:
 
 Two results matter. Adding 10,000 non-annotation objects does not make draw cost scale with scene size, because the loop iterates the Dimensions collection rather than `scene.objects`; the small-case timing remains sub-millisecond-scale and unrelated to the 10,000 bystanders. And the documented budget of **500 visible dimensions at 30 fps or better** remains met after the hardening pass: 50 fps while rebuilding every annotation every frame, 269 fps in the steady state.
 
+On the September 28, 2026 Linux/Blender 5.2.2 review host, the same 500-dimension case measured 29.099 ms rebuilding (34 fps) and 5.110 ms cached. Ten dimensions measured 0.518 ms with 10 cubes and 0.498 ms with 10,000 cubes. The 30 fps rebuild margin is narrow on this host; keep this benchmark in the release gate when changing geometry or label layout.
+
 Annotations sharing a color and line width are drawn in one batch, so the common selected/unselected split collapses to roughly two GPU batches plus text regardless of annotation count. Font metrics are measured once per string and size, and label layout is cached per unchanged label and view.
 
 ### Projected snap cost — `tests/snap_benchmark.py`
@@ -160,6 +162,8 @@ Annotations sharing a color and line width are drawn in one batch, so the common
 
 The **under 8 ms per query**, **under 100 ms 1M-vertex build**, and **under 50 ms reprojection** budgets are all met. Query cost stays flat because the spatial grid bounds candidate count independently of scene size. Bulk coordinate reads and array projection retain every source, while the normal grid indexes only the viewport plus the maximum snap radius; an out-of-band query lazily builds the complete spatial index from the retained coordinates, preserving exact results without charging ordinary queries for unsnappable offscreen points.
 
+The September 28 Linux/Blender 5.2.2 run measured 60.707 ms build, 0.118 ms reprojection, and 0.019 ms steady query at 1 million vertices. These are supporting Linux measurements, separate from the Windows reference table.
+
 Set `DIMENSIONS_SNAP_PROFILE=1` for the add-on's own per-stage build, reproject, query, and occlusion timings. The instrumentation is inert when the variable is unset.
 
 ## Known risks
@@ -169,12 +173,12 @@ Set `DIMENSIONS_SNAP_PROFILE=1` for the add-on's own per-stage build, reproject,
 3. **Snapshot output.** Generated objects are snapshots and intentionally lose hand edits when regenerated. Each generation pass removes artifacts that no longer have an authoritative source, but source changes do not update a snapshot until the operator runs again. Measurements and construction guides remain viewport/construction data.
 4. **Circle-fit source semantics.** Circular dimensions fit base-mesh points, not evaluated modifiers or Curve/NURBS data. Mixed or concentric boundaries intentionally exceed the fit threshold rather than guessing which feature was intended.
 5. **Duplicated set-joint storage.** Chain joints and Baseline datums are duplicated across adjacent member property groups. Supported operators synchronize every duplicate, but direct external RNA edits can bypass that invariant. Normalizing this representation requires a schema migration with released-file coverage.
-6. **Open external-audit hardening.** The September 2026 audit found confirmed crash,
-   unbounded-allocation, vector-layout, migration, and modal-cleanup paths. They are
-   accepted under [FND-12](tickets/FND-12-critical-stability-hardening.md),
+6. **Release compatibility evidence.** The September 2026 audit defects are fixed
+   under [FND-12](tickets/FND-12-critical-stability-hardening.md),
    [OUT-06](tickets/OUT-06-vector-typography-page-bounds.md), and
-   [FND-13](tickets/FND-13-lifecycle-modal-cleanup.md). Until those tickets close,
-   the 1.0 “no known data-loss or crash defects” gate remains open.
+   [FND-13](tickets/FND-13-lifecycle-modal-cleanup.md). The full 374-test suite and
+   release archive pass on Linux Blender 5.1.2 and 5.2.2; final 1.0 release QA still
+   needs the supported platform matrix and a deliberate schema freeze.
 
 ## Lifecycle behavior matrix
 
@@ -228,9 +232,9 @@ The canonical ticket status, milestone rollup, and status legend live in the [wo
 | 8 | [CON-02](tickets/CON-02-offset-guides.md) | ✅ Complete | Persistent edge/guide/face offsets and centerlines, detach, repair, and cycle refusal delivered in 0.4.3. |
 | 9 | [DIM-03](tickets/DIM-03-coordinate-elevation.md), [CON-03](tickets/CON-03-guide-planes.md), and [CON-04](tickets/CON-04-angular-guides-spacing.md) | ✅ Complete | Validated datums, coordinate/elevation annotations, active planes, angular guides, and repeated spacing in 0.5.0. |
 | 10 | [OUT-05](tickets/OUT-05-drawing-sheet.md) | ✅ Complete | Composed the existing physical-page SVG/PDF export into a bounded single drawing sheet in 0.6.0. |
-| 11 | [FND-12](tickets/FND-12-critical-stability-hardening.md) | 🟨 Partial | Implementation and regression coverage close the confirmed crash, unbounded spacing, ray/frame, newline, color, and fit-scale defects; Blender 5.1/5.2 validation remains. |
-| 12a | [OUT-06](tickets/OUT-06-vector-typography-page-bounds.md) | ⬜ Planned | Keep annotations inside the printable sheet and complete deterministic drafting typography. |
-| 12b | [FND-13](tickets/FND-13-lifecycle-modal-cleanup.md) | ⬜ Planned | Close migration, linked-data, Chain, manager, viewport-cleanup, and API-compatibility defects. |
+| 11 | [FND-12](tickets/FND-12-critical-stability-hardening.md) | ✅ Complete | Crash, unbounded spacing, ray/frame, newline, color, and fit-scale fixes pass full Blender 5.1.2/5.2.2 validation. |
+| 12a | [OUT-06](tickets/OUT-06-vector-typography-page-bounds.md) | ✅ Complete | Printable bounds, field-fit validation, and deterministic drafting typography pass Blender 5.1.2/5.2.2 validation. |
+| 12b | [FND-13](tickets/FND-13-lifecycle-modal-cleanup.md) | ✅ Complete | Released settings-only migration fixture, read-only boundaries, exact viewport cleanup, and lifecycle matrix pass Blender 5.1.2/5.2.2 validation. |
 
 Early public feedback reinforces the product definition rather than expanding it: every request concerns faster annotation, clearer presentation, or usable output. None requires mesh authoring. The disposition is:
 

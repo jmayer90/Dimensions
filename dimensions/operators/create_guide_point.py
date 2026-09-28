@@ -1,6 +1,10 @@
 """Persistent guide-point creation through shared acquisition."""
 
 import bpy
+
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
 from mathutils import Vector
 
 from .. import messages
@@ -43,6 +47,7 @@ class DIMENSIONS_OT_CreateGuidePoint(CADDIM_OT_CreateGuide):
     )
 
     def invoke(self, context, event):
+        self._session_viewport_key = viewport_key(context)
         if context.area is None or context.area.type != "VIEW_3D" or context.mode not in {"OBJECT", "EDIT_MESH"}:
             self.report(messages.WARNING, messages.GUIDE_POINT_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
@@ -58,7 +63,15 @@ class DIMENSIONS_OT_CreateGuidePoint(CADDIM_OT_CreateGuide):
             return {"CANCELLED"}
         return super().invoke(context, event)
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if (
             self.placement_mode == "DIRECT" and self.state == "PICK_START"
             and event.type == "LEFTMOUSE" and event.value == "PRESS"
@@ -72,9 +85,12 @@ class DIMENSIONS_OT_CreateGuidePoint(CADDIM_OT_CreateGuide):
             self._create_from_snap(context, snap)
             from ..drawing import clear_guide_preview_state
 
-            clear_guide_preview_state()
+            clear_guide_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"FINISHED"}
         return super().modal(context, event)
+
+    def cancel(self, context):
+        super().cancel(context)
 
     def _create(self, context, end_snap):
         self._create_from_snap(context, end_snap)

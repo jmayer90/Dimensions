@@ -1,4 +1,8 @@
 import bpy
+
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
 from mathutils.geometry import intersect_line_plane
 from mathutils import Vector
 
@@ -74,6 +78,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self._state_machine.numeric_valid = bool(value)
 
     def invoke(self, context, event):
+        self._session_viewport_key = viewport_key(context)
         if context.area is None or context.area.type != "VIEW_3D":
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
@@ -108,12 +113,20 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if context.area is None or context.area.type != "VIEW_3D":
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if self.continuous_placement and session_context_changed(self, context):
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             self._update_preview()
@@ -244,7 +257,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
         if event.type == "ESC" and event.value == "PRESS":
             if self.continuous_placement:
-                clear_preview_state()
+                clear_preview_state(key=getattr(self, "_session_viewport_key", None))
                 return {"CANCELLED"}
             if self.distance_text:
                 self.distance_text = ""
@@ -255,11 +268,11 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 self._step_back()
                 self._update_preview()
                 return {"RUNNING_MODAL"}
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
 
         if event.type == "RIGHTMOUSE" and event.value == "PRESS":
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
 
         if is_navigation_event(event):
@@ -268,7 +281,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_preview_state()
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _accept_start(self):
         if self.hover_snap is None:
@@ -513,7 +526,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
     def _after_commit(self, context):
         if not self.continuous_placement:
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"FINISHED"}
         push_undo_step("Create Dimension")
         self._state_machine.restart()
@@ -569,7 +582,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         if self.offset_plane_normal is not None:
             preview["offset_plane_normal"] = tuple(self.offset_plane_normal)
 
-        set_preview_state(preview)
+        set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))
 
     @staticmethod
     def _copy_snap(snap):

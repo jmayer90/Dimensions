@@ -1277,7 +1277,7 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
         name="Title Block Width",
         description="Physical title-block width in millimetres",
         default=80.0,
-        min=60.0,
+        min=80.0,
         max=300.0,
         precision=2,
     )

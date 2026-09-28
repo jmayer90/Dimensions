@@ -2,6 +2,7 @@
 
 import unittest
 import importlib.util
+import string
 from pathlib import Path
 
 
@@ -71,9 +72,32 @@ class StrokeFontSmokeTests(unittest.TestCase):
             text_strokes("MM", (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0),
         )
         self.assertEqual(
-            text_strokes("@", (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0),
-            text_strokes("?", (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0),
+            text_strokes("☃", (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0),
+            text_strokes("☂", (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0),
         )
+
+    def test_printable_ascii_and_technical_symbols_are_intentional(self):
+        for character in string.printable[:95] + "×Ø⌀µ≤≥∠":
+            if character == " ":
+                continue
+            with self.subTest(character=character):
+                self.assertNotEqual(_MODULE._glyph(_MODULE._character(character)), _MODULE._FALLBACK)
+
+    def test_alignment_uses_exact_ink_bounds(self):
+        for label in ("I", "HI", "A B", "A\nHI", "Ø10"):
+            width, _ = text_block_dimensions(label, 2.0)
+            for line in label.split("\n"):
+                for alignment in ("LEFT", "CENTER", "RIGHT"):
+                    strokes = text_strokes(line, (0, 0, 0), (1, 0, 0), (0, 1, 0), 2.0, alignment)
+                    lower, upper = _bounds(strokes)
+                    actual_width = upper[0] - lower[0]
+                    self.assertLessEqual(actual_width, width + 1e-9)
+                    if alignment == "LEFT":
+                        self.assertAlmostEqual(lower[0], 0.0)
+                    elif alignment == "CENTER":
+                        self.assertAlmostEqual((lower[0] + upper[0]) / 2.0, 0.0)
+                    else:
+                        self.assertAlmostEqual(upper[0], 0.0)
 
     def test_circular_dimension_symbols_have_native_glyphs(self):
         fallback = text_strokes("?", (0, 0, 0), (1, 0, 0), (0, 1, 0), 1.0)

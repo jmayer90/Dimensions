@@ -397,7 +397,6 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
         camera = bpy.data.objects.new("Dimensions Mixed Output Camera", camera_data)
         self.scene.collection.objects.link(camera)
         world = bpy.data.worlds.new("Dimensions Mixed Output World")
-        world.use_nodes = True
         world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.0, 0.0, 0.0, 1.0)
         world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.0
         render = self.scene.render

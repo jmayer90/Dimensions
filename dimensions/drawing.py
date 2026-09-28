@@ -34,7 +34,7 @@ from .properties import (
     resolve_dimension_style,
 )
 from .preferences import get_preferences
-from .collections import get_scene_collection
+from .collections import iter_scene_role_objects
 from .snapping import construction_segment_world, find_nearest_guide_point, guide_is_visible, guide_segment_world
 from .scene_sync import register_scene_sync, unregister_scene_sync
 from .units import format_area, format_dual_length, format_length, format_volume
@@ -117,8 +117,10 @@ class SegmentBatcher:
         self._text_items.clear()
 
 
-def set_preview_state(preview_state):
+def set_preview_state(preview_state, key=None):
     state = dict(preview_state)
+    if key is not None:
+        state["viewport_key"] = key
     from .snap_targets import snap_target_status
 
     state.setdefault("snap_target_status", snap_target_status(bpy.context))
@@ -129,8 +131,8 @@ def set_preview_state(preview_state):
     set_state("DIMENSION", state)
 
 
-def clear_preview_state():
-    clear_state("DIMENSION")
+def clear_preview_state(context=None, key=None):
+    clear_state("DIMENSION", context, key)
 
 
 def set_measure_state(state, context=None):
@@ -147,8 +149,10 @@ def clear_measure_state(context=None, key=None):
     clear_state("MEASURE", context, key)
 
 
-def set_guide_preview_state(state):
+def set_guide_preview_state(state, key=None):
     display_state = dict(state)
+    if key is not None:
+        display_state["viewport_key"] = key
     from .snap_targets import snap_target_status
 
     display_state.setdefault("snap_target_status", snap_target_status(bpy.context))
@@ -156,8 +160,8 @@ def set_guide_preview_state(state):
     set_state("GUIDE", display_state)
 
 
-def clear_guide_preview_state():
-    clear_state("GUIDE")
+def clear_guide_preview_state(context=None, key=None):
+    clear_state("GUIDE", context, key)
 
 
 def register_draw_handler():
@@ -571,8 +575,7 @@ def draw_dimensions():
 
     try:
         batcher = SegmentBatcher(shader)
-        collection = get_scene_collection(context.scene, "DIMENSIONS")
-        for obj in () if collection is None else collection.all_objects:
+        for obj in iter_scene_role_objects(context.scene, "DIMENSIONS"):
             if not is_dimension_object(obj):
                 continue
 
@@ -659,8 +662,7 @@ def _draw_construction_guides(context, shader):
     if settings is None or not settings.show_construction_guides:
         return
     batcher = SegmentBatcher(shader)
-    collection = get_scene_collection(context.scene, "GUIDES")
-    for obj in () if collection is None else collection.all_objects:
+    for obj in iter_scene_role_objects(context.scene, "GUIDES"):
         if not guide_is_visible(context, obj):
             continue
         if getattr(obj.guide_props, "kind", "GUIDE") == "PLANE":
@@ -1203,8 +1205,7 @@ def _draw_persistent_measurements(context):
     precision = settings.precision
     text_size = settings.dimension_text_size
     color = tuple(settings.guide_color)
-    collection = get_scene_collection(context.scene, "GUIDES")
-    for obj in () if collection is None else collection.all_objects:
+    for obj in iter_scene_role_objects(context.scene, "GUIDES"):
         if not guide_is_visible(context, obj):
             continue
         if getattr(obj.guide_props, "kind", "GUIDE") != "MEASUREMENT":
@@ -1245,9 +1246,8 @@ def _draw_persistent_guide_points(context, shader):
     settings = getattr(context.scene, "dimensions_settings", None)
     if settings is None or not settings.show_construction_guides:
         return
-    collection = get_scene_collection(context.scene, "GUIDES")
     batcher = SegmentBatcher(shader)
-    for obj in () if collection is None else collection.all_objects:
+    for obj in iter_scene_role_objects(context.scene, "GUIDES"):
         if (
             not guide_is_visible(context, obj)
             or getattr(obj.guide_props, "kind", "GUIDE") != "POINT"
@@ -1679,8 +1679,7 @@ def find_dimension_hit(context, mouse_x, mouse_y, threshold=None):
     mouse = Vector((mouse_x, mouse_y))
     best = None
 
-    collection = get_scene_collection(context.scene, "DIMENSIONS")
-    for obj in () if collection is None else collection.all_objects:
+    for obj in iter_scene_role_objects(context.scene, "DIMENSIONS"):
         if not is_dimension_object(obj):
             continue
 

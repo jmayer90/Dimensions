@@ -70,10 +70,12 @@ def restore_annotation_visibility(context):
     settings = context.scene.dimensions_settings
     for record in settings.annotation_manager_isolate_records:
         obj = record.annotation
-        if obj is not None and obj.name in context.view_layer.objects:
+        if obj is None:
+            continue
+        if not is_read_only_dimensions_object(obj):
+            set_annotation_property_visible(obj, record.was_property_visible)
+        if obj.name in context.view_layer.objects:
             obj.hide_set(record.was_hidden)
-            if not is_read_only_dimensions_object(obj):
-                set_annotation_property_visible(obj, record.was_property_visible)
     settings.annotation_manager_isolate_records.clear()
     settings.annotation_manager_isolate_active = False
 

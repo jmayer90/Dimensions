@@ -183,7 +183,6 @@ def _grease_pencil_material(color, source_key, index):
     try:
         material = bpy.data.materials.new(f"Dimensions Output {source_key} {index}")
         bpy.data.materials.create_gpencil_data(material)
-        material.grease_pencil.show_stroke = True
         material.grease_pencil.color = color
         return material
     except Exception:

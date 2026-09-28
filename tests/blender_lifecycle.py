@@ -38,6 +38,7 @@ from dimensions.collections import (
     ensure_measurement_snap_proxy,
     ensure_guide_point_snap_proxy,
     get_scene_collection,
+    iter_scene_role_objects,
     remove_measurement_snap_proxies,
 )
 from dimensions.guide_planes import active_plane_frame, resolve_guide_plane
@@ -114,7 +115,11 @@ class DimensionsLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             filepath = Path(directory) / "dimensions-lifecycle.blend"
             bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
+            from dimensions.viewport_state import _states
+
+            _states["DIMENSION"][(11, 22, 33)] = {"state": "STALE_PREVIEW"}
             bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
+            self.assertNotIn((11, 22, 33), _states["DIMENSION"])
             measurement = bpy.data.objects.get(self.measurement_name)
             self.assertIsNotNone(measurement)
             sync_scene_objects(bpy.context.scene)
@@ -619,10 +624,40 @@ class DimensionsLifecycleMatrixTests(unittest.TestCase):
             ]
             self.assertEqual(len(linked_dimensions), 3)
             before = [(obj.name, tuple(obj.location), obj.dimension_props.measurement_state) for obj in linked_dimensions]
-            sync_scene_objects(linked_scene)
+            linked_scene.dimensions_settings.schema_version = 0
+            with patch.object(
+                migrations_module, "migrate_anchor_identity",
+                side_effect=AssertionError("linked anchor must remain read-only"),
+            ):
+                sync_scene_objects(linked_scene)
+            self.assertEqual(linked_scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
             after = [(obj.name, tuple(obj.location), obj.dimension_props.measurement_state) for obj in linked_dimensions]
             self.assertEqual(after, before)
             self.assertTrue(all(is_read_only_dimensions_object(obj) for obj in linked_dimensions))
+
+            linked_mesh = next(
+                obj for obj in linked_scene.objects if obj.type == "MESH" and obj.library is not None
+            )
+            attributes_before = tuple(linked_mesh.data.attributes.keys())
+            original_scene = bpy.context.window.scene
+            bpy.context.window.scene = linked_scene
+            try:
+                local_annotation = create_dimension_object(bpy.context, "Local With Linked Source")
+                local_anchor = local_annotation.dimension_props.start
+                local_anchor.target_object = linked_mesh
+                local_anchor.anchor_type = "VERTEX"
+                local_anchor.vertex_index = 0
+                local_anchor.vertex_id = 0
+                linked_scene.dimensions_settings.schema_version = 0
+                self.assertTrue(migrate_scene(linked_scene))
+                self.assertEqual(local_anchor.vertex_id, 0)
+                self.assertEqual(tuple(linked_mesh.data.attributes.keys()), attributes_before)
+                self.assertIsNone(get_scene_collection(linked_scene, "DIMENSIONS").library)
+                visible_dimensions = tuple(iter_scene_role_objects(linked_scene, "DIMENSIONS"))
+                self.assertIn(local_annotation, visible_dimensions)
+                self.assertTrue(all(obj in visible_dimensions for obj in linked_dimensions))
+            finally:
+                bpy.context.window.scene = original_scene
 
             linked_name = linked_dimensions[0].name
             active_scene = bpy.context.window.scene
@@ -720,6 +755,7 @@ class DimensionsReleasedFileTests(unittest.TestCase):
     OUTPUT_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v1-0.3.2.blend"
     SCHEMA_V2_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v2-0.4.0.blend"
     SCHEMA_V14_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v14-0.5.0.blend"
+    SETTINGS_ONLY_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v6-settings-only-0.4.2.blend"
 
     def setUp(self):
         dimensions.register()
@@ -729,6 +765,60 @@ class DimensionsReleasedFileTests(unittest.TestCase):
         self.assertTrue(self.OUTPUT_FIXTURE.is_file(), f"missing fixture: {self.OUTPUT_FIXTURE}")
         self.assertTrue(self.SCHEMA_V2_FIXTURE.is_file(), f"missing fixture: {self.SCHEMA_V2_FIXTURE}")
         self.assertTrue(self.SCHEMA_V14_FIXTURE.is_file(), f"missing fixture: {self.SCHEMA_V14_FIXTURE}")
+        self.assertTrue(self.SETTINGS_ONLY_FIXTURE.is_file(), f"missing fixture: {self.SETTINGS_ONLY_FIXTURE}")
+
+    def test_settings_only_released_file_migrates_before_first_annotation(self):
+        load_handlers = bpy.app.handlers.load_post
+        migration_handler = migrations_module._load_post_handler
+        handler_was_registered = migration_handler in load_handlers
+        if handler_was_registered:
+            load_handlers.remove(migration_handler)
+        try:
+            bpy.ops.wm.open_mainfile(filepath=str(self.SETTINGS_ONLY_FIXTURE), load_ui=False)
+        finally:
+            if handler_was_registered and migration_handler not in load_handlers:
+                load_handlers.append(migration_handler)
+
+        scene = bpy.context.scene
+        settings = scene.dimensions_settings
+        self.assertFalse(any(obj.dimension_props.enabled for obj in scene.objects))
+        self.assertTrue(scene_has_dimensions_data(scene))
+        self.assertEqual(settings.schema_version, 6)
+        self.assertEqual(settings.precision, 4)
+        self.assertEqual(settings.output_scope, "SELECTED")
+        self.assertEqual(settings.annotation_styles[0].name, "Legacy Settings Style")
+
+        calls = []
+        originals = migrations_module._MIGRATIONS
+        wrappers = {
+            version: (lambda current, migration: lambda value: (
+                calls.append(current), migration(value)
+            )[1])(version, originals[version])
+            for version in range(6, CURRENT_SCHEMA_VERSION)
+        }
+        with patch.dict(originals, wrappers):
+            created = create_dimension_object(bpy.context, "First Annotation After Migration")
+            self.assertEqual(calls, list(range(6, CURRENT_SCHEMA_VERSION)))
+            self.assertEqual(settings.schema_version, CURRENT_SCHEMA_VERSION)
+            self.assertFalse(migrate_scene(scene))
+        self.assertTrue(created.dimension_props.enabled)
+        self.assertEqual(settings.precision, 4)
+        self.assertEqual(settings.output_scope, "SELECTED")
+        self.assertEqual(settings.annotation_styles[0].name, "Legacy Settings Style")
+
+    def test_first_annotation_in_fresh_scene_keeps_inherited_style(self):
+        original_scene = bpy.context.window.scene
+        scene = bpy.data.scenes.new("Dimensions Fresh Scene")
+        try:
+            bpy.context.window.scene = scene
+            self.assertEqual(scene.dimensions_settings.schema_version, 0)
+            created = create_dimension_object(bpy.context, "Fresh Inherited Annotation")
+            self.assertEqual(scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
+            self.assertFalse(created.dimension_props.override_line_width)
+            self.assertFalse(created.dimension_props.override_precision)
+        finally:
+            bpy.context.window.scene = original_scene
+            bpy.data.scenes.remove(scene)
 
     def test_schema_v14_fixture_migrates_sheet_defaults_idempotently(self):
         load_handlers = bpy.app.handlers.load_post

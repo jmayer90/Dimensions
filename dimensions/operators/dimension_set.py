@@ -1,6 +1,10 @@
 """Creation and editing operators for persistent chain/baseline sets."""
 
 import bpy
+
+from ..interaction import modal_cleanup_on_exception
+
+from ..viewport_state import viewport_key
 from mathutils import Vector
 
 from .. import messages
@@ -63,6 +67,7 @@ class DIMENSIONS_OT_CreateDimensionSet(bpy.types.Operator):
     ], default="CHAIN")
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         if context.area is None or context.area.type != "VIEW_3D":
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
@@ -85,9 +90,17 @@ class DIMENSIONS_OT_CreateDimensionSet(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         if context.area is None or context.area.type != "VIEW_3D" or session_context_changed(self, context):
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             self._preview(context)
@@ -168,14 +181,14 @@ class DIMENSIONS_OT_CreateDimensionSet(bpy.types.Operator):
             self._preview(context)
             return {"RUNNING_MODAL"}
         if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"FINISHED"} if self.set_object_name else {"CANCELLED"}
         if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_preview_state()
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _member_start_snap(self):
         return self.previous_snap if self.set_kind == "CHAIN" else self.datum_snap
@@ -345,7 +358,7 @@ class DIMENSIONS_OT_CreateDimensionSet(bpy.types.Operator):
             preview["offset_distance"] = get_preferences(context).default_offset_distance
             if self.offset_plane_normal is not None:
                 preview["offset_plane_normal"] = tuple(self.offset_plane_normal)
-        set_preview_state(preview)
+        set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))
 
 
 class DIMENSIONS_OT_DeleteDimensionSetMember(bpy.types.Operator):
@@ -368,6 +381,9 @@ class DIMENSIONS_OT_DeleteDimensionSetMember(bpy.types.Operator):
         delete_set_member(obj.dimension_props, index)
         if not obj.dimension_props.set_members:
             bpy.data.objects.remove(obj, do_unlink=True)
+            from ..annotation_manager import sync_annotation_manager
+
+            sync_annotation_manager(context.scene)
         self.report(messages.INFO, messages.DELETED_ANNOTATION)
         return {"FINISHED"}
 
@@ -382,6 +398,7 @@ class DIMENSIONS_OT_InsertDimensionSetMember(bpy.types.Operator):
     member_index: bpy.props.IntProperty(default=-1)
 
     def invoke(self, context, _event):
+        self._session_viewport_key = viewport_key(context)
         if context.area is None or context.area.type != "VIEW_3D":
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
@@ -403,10 +420,18 @@ class DIMENSIONS_OT_InsertDimensionSetMember(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
+    @modal_cleanup_on_exception
     def modal(self, context, event):
+        owner_key = getattr(self, "_session_viewport_key", None)
+        if owner_key is not None and (
+            viewport_key(context) != owner_key
+            or getattr(getattr(context, "area", None), "type", None) != "VIEW_3D"
+        ):
+            self.cancel(context)
+            return {"CANCELLED"}
         obj = _set_object(context, self.object_name)
         if obj is None or session_context_changed(self, context):
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
             return {"RUNNING_MODAL"}
@@ -415,7 +440,7 @@ class DIMENSIONS_OT_InsertDimensionSetMember(bpy.types.Operator):
             self.hover_mouse = Vector((event.mouse_region_x, event.mouse_region_y))
             if self.hover_snap is not None:
                 member = obj.dimension_props.set_members[self.member_index]
-                set_preview_state({
+                set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None),
                     "state": "INSERT_SET_MEMBER",
                     "hover_screen": self.hover_snap.get("screen_co"),
                     "start_world": resolve_anchor(member.start),
@@ -458,15 +483,15 @@ class DIMENSIONS_OT_InsertDimensionSetMember(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
             anchor = _anchor_snapshot_from_snap(props, self.hover_snap)
             insert_chain_anchor(props, self.member_index, anchor)
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"FINISHED"}
         if event.type in {"ESC", "RIGHTMOUSE"}:
-            clear_preview_state()
+            clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         return {"PASS_THROUGH"} if is_navigation_event(event) else {"RUNNING_MODAL"}
 
     def cancel(self, _context):
-        clear_preview_state()
+        clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _find_snap(self, context, event):
         from ..guide_planes import active_plane_frame
