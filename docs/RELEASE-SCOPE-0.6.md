@@ -28,7 +28,8 @@ were removed and schema v15 is unchanged.
 
 ## Release gate
 
-Blender 5.1.2 and 5.2.2 Linux validation, installed UI inspection, and performance
-measurements are recorded in [QA-REVIEW-2026-09-28.md](QA-REVIEW-2026-09-28.md).
-Repeat the supported Windows/macOS matrix and make the deliberate schema-freeze
-decision before a 1.0 compatibility promise.
+Blender 5.1.2 and 5.2.2 Linux validation, installed UI inspection, performance
+measurements, and the passing Windows/Linux/macOS release-candidate CI matrix are
+recorded in [QA-REVIEW-2026-09-28.md](QA-REVIEW-2026-09-28.md). A separate
+foreground supported-platform review and deliberate schema-freeze decision remain
+before a 1.0 compatibility promise.
