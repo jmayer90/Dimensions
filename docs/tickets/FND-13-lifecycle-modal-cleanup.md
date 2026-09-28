@@ -1,7 +1,7 @@
 # FND-13 — Lifecycle, modal cleanup, and Blender API hardening
 
 **Milestone:** M6 1.0 gate
-**Status:** ✅ Complete — migration, linked-data, modal cleanup, set/manager, and Grease Pencil fixes validated on Blender 5.1.2 and 5.2.2 in the 0.6.0 candidate.
+**Status:** ✅ Complete — migration, linked-data, modal cleanup, set/manager, and Grease Pencil fixes validated on Blender 5.1.2 and 5.2.2 in the 0.6.0 release.
 **Effort:** M
 **Depends on:** FND-12, FND-07
 **Version impact:** Patch.

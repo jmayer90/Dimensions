@@ -1,7 +1,7 @@
 # UX-05 — User control over which snap targets are active
 
 **Milestone:** M2 Fluency
-**Status:** ✅ Complete — delivered in 0.4.2; foreground disable/re-enable QA and labeled sidebar controls completed for the 0.6.0 candidate.
+**Status:** ✅ Complete — delivered in 0.4.2; foreground disable/re-enable QA and labeled sidebar controls completed for the 0.6.0 release.
 **Effort:** S
 **Depends on:** FND-04
 **Version impact:** Patch.

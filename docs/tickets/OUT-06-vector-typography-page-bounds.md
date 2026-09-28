@@ -1,7 +1,7 @@
 # OUT-06 — Vector typography and printable-area correctness
 
 **Milestone:** M6 1.0 gate
-**Status:** ✅ Complete — validated on Blender 5.1.2 and 5.2.2 in the 0.6.0 candidate.
+**Status:** ✅ Complete — validated on Blender 5.1.2 and 5.2.2 in the 0.6.0 release.
 **Effort:** M
 **Depends on:** FND-12, OUT-05
 **Version impact:** Patch.

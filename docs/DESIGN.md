@@ -101,7 +101,7 @@ Add-on preferences are per-user defaults and interaction tuning. Scene and annot
 | 12 | 0.4.3 | Additive named/oriented datum flags on guide points plus coordinate/elevation binding, alignment, sign, axis, relative-reference, and independent elevation-format fields. Existing guide points remain ordinary points. |
 | 13 | 0.5.0 | Additive saved guide-plane definitions, bounded presentation extent, plane repair state, dedicated snap/manager defaults, and one scene active-plane frame. The v12 → v13 migration is idempotent and the released schema-v2 fixture exercises the full path. |
 | 14 | 0.5.0 | Additive angular-guide pivot/angle and repeated-spacing mode/interval/count/extent definitions; existing guides remain fixed or retain their prior derived mode. |
-| 15 | 0.6.0 candidate | Additive scene-owned drawing-sheet toggles, physical margin/title-block dimensions, and title/number/revision/author/date metadata. Existing vector export remains furniture-free by default. |
+| 15 | 0.6.0 release | Additive scene-owned drawing-sheet toggles, physical margin/title-block dimensions, and title/number/revision/author/date metadata. Existing vector export remains furniture-free by default. |
 
 ## Interaction contract
 

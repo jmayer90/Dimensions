@@ -2,7 +2,7 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
-## 0.6.0 — Unreleased
+## 0.6.0 — September 28, 2026
 
 - Focused the release sidebar: Output now sits directly below creation tools, and Snap Targets opens as a compact child panel with labeled Mesh, Guide, and Measurement toggles instead of eleven unexplained icons. Removed the unexposed member-reorder helper; Chain and Baseline editing keeps insertion, deletion, reattachment, and repair with defined geometric behavior.
 
