@@ -51,7 +51,7 @@ def annotations_for_output(context, scope):
         if not is_dimension_object(obj):
             continue
         props = obj.dimension_props
-        if getattr(props, "annotation_kind", "LINEAR") not in {"LINEAR", "ANGLE", "AREA", "DIMENSION_SET", "CIRCLE", "COORDINATE", "ELEVATION"}:
+        if getattr(props, "annotation_kind", "LINEAR") not in {"LINEAR", "ANGLE", "AREA"}:
             continue
         if not props.visible or not _is_visible(context, obj):
             continue
@@ -181,20 +181,6 @@ def _camera_world_units_per_pixel(scene, camera, world_co):
 def _annotation_world_depth_point(annotation):
     props = annotation.dimension_props
     annotation_kind = getattr(props, "annotation_kind", "LINEAR")
-    if annotation_kind in {"COORDINATE", "ELEVATION"}:
-        from ..coordinate_dimensions import coordinate_values, elevation_value
-        result = coordinate_values(props) if annotation_kind == "COORDINATE" else elevation_value(props)
-        return None if result is None else (result["point"] + resolve_anchor(props.end)) * 0.5
-    if annotation_kind == "DIMENSION_SET":
-        from ..dimension_sets import dimension_set_world_geometry
-
-        geometry = dimension_set_world_geometry(props)
-        return None if not geometry else sum((item["line_mid_world"] for item in geometry), Vector()) / len(geometry)
-    if annotation_kind == "CIRCLE":
-        from ..circle_binding import circle_geometry
-
-        fit = circle_geometry(props)
-        return None if fit is None else fit["center"]
     if annotation_kind == "ANGLE":
         source = resolve_angle_source(props)
         if source is None:

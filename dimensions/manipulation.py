@@ -1,7 +1,5 @@
 """Shared presentation mutations used by direct handles and sidebar operators."""
 
-from math import atan2
-
 from mathutils import Vector
 
 from .anchors import resolve_anchor, set_object_anchor
@@ -47,18 +45,3 @@ def apply_area_label_position(annotation, result, world_co, placement_axis):
     props.presentation_offset = (0.0, 0.0, 0.0)
     props.placement_initialized = False
     annotation.location = world_co
-
-
-def apply_circle_label_position(annotation, fit, world_co):
-    """Move a circular label in its fitted plane without changing the binding."""
-    props = annotation.dimension_props
-    delta = Vector(world_co) - Vector(fit["center"])
-    delta -= Vector(fit["normal"]) * delta.dot(Vector(fit["normal"]))
-    if delta.length < 1e-6:
-        return False
-    props.circle_label_distance = delta.length
-    props.circle_leader_angle = atan2(delta.dot(fit["axis_v"]), delta.dot(fit["axis_u"]))
-    props.presentation_offset = (0.0, 0.0, 0.0)
-    props.placement_initialized = False
-    annotation.location = Vector(fit["center"]) + delta
-    return True

@@ -1,7 +1,7 @@
 # UX-02 — Annotation manager: list, search, isolate, repair, restyle
 
 **Milestone:** M2 Fluency
-**Status:** ✅ Complete — delivered in 0.4.2; redraw safety and exact derived-source repair routing hardened in the 0.6.0 candidate.
+**Status:** ✅ Complete — delivered in 0.4.2; redraw safety hardened in the 0.6.0 candidate. In 0.7.0, [UX-10](UX-10-focused-toolset.md) made the filters visible above the list and scoped Isolate to the selection by default.
 **Effort:** L
 **Depends on:** —
 **Version impact:** Patch.

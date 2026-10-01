@@ -6,9 +6,8 @@ from ..viewport_state import viewport_key
 
 from .. import messages
 from ..anchors import resolve_anchor, set_anchor_from_snap
-from ..dimension_sets import synchronize_set_member_anchor
 from ..drawing import clear_preview_state, set_preview_state
-from ..properties import is_dimension_object, is_guide_object, is_read_only_dimensions_object
+from ..properties import is_dimension_object, is_read_only_dimensions_object
 from ..snapping import copy_snap, find_nearest_snap_point
 from ..snap_targets import handle_snap_target_event
 
@@ -16,6 +15,7 @@ from ..snap_targets import handle_snap_target_event
 class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
     bl_idname = "dimensions.reattach_anchor"
     bl_label = "Reattach Dimension Anchor"
+    bl_description = "Click a new point for this end of the selected dimension; its placement is kept"
     bl_options = {"REGISTER", "UNDO"}
 
     anchor_name: bpy.props.EnumProperty(
@@ -28,12 +28,8 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             ("ANGLE_A_END", "First Edge End", "Reattach the first edge end"),
             ("ANGLE_B_START", "Second Edge Start", "Reattach the second edge start"),
             ("ANGLE_B_END", "Second Edge End", "Reattach the second edge end"),
-            ("SET_START", "Set Member Start", "Reattach the selected set member start"),
-            ("SET_END", "Set Member End", "Reattach the selected set member end"),
-            ("CIRCLE_VERTEX", "Circle Source Point", "Reattach one fitted circle point"),
         ],
     )
-    member_index: bpy.props.IntProperty(default=-1)
 
     def invoke(self, context, event):
         self._session_viewport_key = viewport_key(context)
@@ -45,16 +41,11 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             return {"CANCELLED"}
 
         active_object = context.view_layer.objects.active
-        is_point = (
-            is_guide_object(active_object)
-            and getattr(active_object.guide_props, "kind", "GUIDE") == "POINT"
-        )
-        if (not is_dimension_object(active_object) and not is_point) or is_read_only_dimensions_object(active_object):
+        if not is_dimension_object(active_object) or is_read_only_dimensions_object(active_object):
             self.report(messages.WARNING, messages.SELECT_DIMENSION_FIRST)
             return {"CANCELLED"}
 
         self.dimension_object = active_object
-        self.guide_point_object = active_object if is_point else None
         self.hover_snap = None
 
         self._update_preview()
@@ -100,12 +91,6 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
 
             anchor = self._get_target_anchor()
             set_anchor_from_snap(anchor, self.hover_snap)
-            if self.anchor_name in {"SET_START", "SET_END"}:
-                props = self.dimension_object.dimension_props
-                index = self.member_index if self.member_index >= 0 else props.active_set_member_index
-                synchronize_set_member_anchor(
-                    props, index, "START" if self.anchor_name == "SET_START" else "END",
-                )
             from ..scene_sync import sync_scene_objects
 
             sync_scene_objects(context.scene)
@@ -126,15 +111,7 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
         clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
     def _get_target_anchor(self):
-        if self.guide_point_object is not None:
-            return self.guide_point_object.guide_props.start
         props = self.dimension_object.dimension_props
-        if self.anchor_name in {"SET_START", "SET_END"}:
-            index = self.member_index if self.member_index >= 0 else props.active_set_member_index
-            member = props.set_members[index]
-            return member.start if self.anchor_name == "SET_START" else member.end
-        if self.anchor_name == "CIRCLE_VERTEX":
-            return props.circle_vertices[self.member_index]
         return {
             "START": props.start,
             "CENTER": props.center,
@@ -146,28 +123,9 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
         }[self.anchor_name]
 
     def _update_preview(self):
-        if self.guide_point_object is not None:
-            preview = {"state": "REATTACH_START"}
-            if self.hover_snap is not None:
-                preview.update({
-                    "hover_screen": self.hover_snap["screen_co"],
-                    "hover_type": self.hover_snap.get("type", "WORLD"),
-                    "hover_label": self.hover_snap.get("label", "Point"),
-                    "hover_snap": copy_snap(self.hover_snap),
-                })
-            set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))
-            return
         props = self.dimension_object.dimension_props
-        if self.anchor_name == "CIRCLE_VERTEX":
-            start_world = end_world = resolve_anchor(props.circle_vertices[self.member_index])
-        elif self.anchor_name in {"SET_START", "SET_END"}:
-            index = self.member_index if self.member_index >= 0 else props.active_set_member_index
-            member = props.set_members[index]
-            start_world = resolve_anchor(member.start)
-            end_world = resolve_anchor(member.end)
-        else:
-            start_world = resolve_anchor(props.start)
-            end_world = resolve_anchor(props.end)
+        start_world = resolve_anchor(props.start)
+        end_world = resolve_anchor(props.end)
 
         preview = {
             "state": f"REATTACH_{self.anchor_name}",

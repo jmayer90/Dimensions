@@ -2,6 +2,41 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
+## 0.7.0 — Unreleased
+
+This release narrows Dimensions to a smaller set of tools that each work predictably. It is a minor release under both versioning triggers 1 and 2: older files are converted and some annotation kinds are removed (saved-data break), and documented tools, operators, and the active-plane X/Y/Z remapping are gone (interaction-contract break).
+
+**Breaking — removed features.** Opening an older file converts it automatically; keep a copy if you depend on anything below.
+
+- Removed **Baseline** dimension sets and the persistent **Chain** set object. Saved sets become separate linear dimensions that keep their anchors, offsets, measured axis, and style; Baseline rows keep their stacking.
+- Removed **Radial**, **Diameter**, and **Arc** dimensions, **Coordinate** and **Elevation** dimensions, and **named datums**. Saved radial, diameter, arc, coordinate, and elevation annotations are deleted on load and their names are printed to the system console. Datum guide points remain as ordinary guide points.
+- Removed **Centerline**, **Angular**, and **Spacing** guides and live (source-following) offset guides. Saved ones become fixed guide lines at their last position; a spaced set keeps its first line.
+- Removed the **active construction plane** (Use Selected, Use Face, Use View, World XY/YZ/ZX, Clear) and the guide-plane **Offset** and **Cursor + Normal** definitions. X, Y, and Z always mean world axes again.
+- Removed the guide-point **Offset** placement mode and the duplicate guide buttons from the top of the sidebar.
+- Schema v16 performs the conversion. Each released schema since v0 still migrates in order; the steps that only initialized removed features no longer do anything.
+
+**Reworked.**
+
+- **Chain** is now Create Dimension continuing from its own end point: the first dimension is placed normally, and each further click adds an ordinary linear dimension that starts where the last ended and shares its dimension line. It honors Auto/X/Y/Z like any dimension, projects off-axis points onto a locked axis instead of refusing them, and each dimension is its own undo step and object.
+- **Guide points, guide lines, and guide planes are ordinary movable objects.** A point is its object origin and a line runs along its object's local X axis, so `G` and `R` move them — previously every move snapped back. Saved measurements now move with their object too.
+- **Guide planes are real wireframe grid meshes.** They can be clicked to select, moved, rotated, and scaled, and Blender's own snapping (vertex, edge, face) works on them alongside Dimensions snapping. Grid intersections, lines, midpoints, cell centers, and the surface are Dimensions snap targets, labeled Grid Point, Grid Line, and so on. Grids never block snapping to model geometry behind them. Select a plane to edit its Half Size and Grid Spacing; dimensions snapped to a grid follow it and survive spacing changes.
+- **Plane: Face** now lies on the face and extends past it (it previously produced a perpendicular plane), and works from the Edit Mode face selection or by clicking a face. **Plane: 3 Points** picks its points with the shared snapping, or uses exactly three selected Edit Mode vertices.
+- **Offset Guide** is a single fixed-line tool: click an edge, guide line, or measurement, then click where the parallel line passes or type its distance; `F` flips the side of a typed distance.
+- All construction tools now share Create Dimension's acquisition contract — snapping, inference, `S` target cycling, axis locks including middle-drag, typed distances, step back, and continuous placement — and work in Object and Mesh Edit Mode.
+- The **Annotation Manager** shows its search box and a visible filter toggle above the list; filters were previously hidden behind Blender's small list-filter triangle. **Apply To** now defaults to **Selected**, and **Isolate** shows only those annotations (or the highlighted row when nothing is selected) while keeping the model visible; it previously used every listed row, so it appeared to do nothing.
+- Every operator now has a tooltip, and modal tools show the next step in the corner badge and their keys in Blender's status bar.
+- The face-plane drafting inference is now labeled **Face Plane** (it was labeled Active Plane, which was easily confused with the removed active construction plane). Its add-on preference resets to on.
+
+**Fixed.**
+
+- **Measure** and **Guide Line** did nothing when clicked: each was a registered operator subclassed by another registered operator, which left Blender unable to find the Python class, so invoking it returned immediately. Both now share an unregistered base class, and a test checks that every operator resolves to its class and has a tooltip.
+- Live Areas created from an Edit Mode face selection raised `ReferenceError: BMesh data of type BMFace has been removed` on every redraw and scene update, so the Area never appeared. The Edit Mode BMesh is now kept alive while bound faces are evaluated.
+- Creating a plane from a selected face raised the same `ReferenceError`. Face coordinates are now copied before any object is created.
+- Edges on an object's outline could not be snapped in Object Mode unless the cursor was over one of the edge's faces. When the cursor is just off a surface, Dimensions now looks at a small ring around it so outline edges and midpoints stay snappable.
+- The Measure button and the manager's measurement rows used an icon that does not exist in Blender 5.1, which stopped those panels from drawing. A test now checks every interface icon.
+
+- Added `tests/foreground_workflows.py`, which drives real window events through Measure, Guide Line, guide point moves, Chain, Area from Selected Faces, both plane tools, Offset Guide, and Isolate in a foreground Blender. Added the released `schema-v15-0.6.0.blend` fixture, built with the retained 0.6.0 archive, to verify the conversion.
+
 ## 0.6.0 — September 28, 2026
 
 - Focused the release sidebar: Output now sits directly below creation tools, and Snap Targets opens as a compact child panel with labeled Mesh, Guide, and Measurement toggles instead of eleven unexplained icons. Removed the unexposed member-reorder helper; Chain and Baseline editing keeps insertion, deletion, reattachment, and repair with defined geometric behavior.

@@ -15,7 +15,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 import dimensions
 from dimensions.anchors import set_world_anchor
 from dimensions.area_binding import bind_area_face_indices
-from dimensions.collections import create_dimension_object, create_guide_point_object
+from dimensions.collections import create_dimension_object
 from dimensions.output_geometry import (
     TEXT_OUTPUT_SUPPORTED,
     WorldSizingPolicy,
@@ -27,7 +27,6 @@ from dimensions.output_geometry import (
     linear_dimension_label_layout,
     linear_dimension_label_strokes,
     linear_dimension_output_spec,
-    coordinate_elevation_output_spec,
     annotation_output_state,
 )
 
@@ -387,50 +386,6 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
                 dimension, "invalid-area", WorldSizingPolicy(0.02, 0.2)
             )
         )
-
-    def test_coordinate_and_elevation_share_world_output_pipeline(self):
-        datum = create_guide_point_object(self.context, "DATUM Output")
-        self.created.append(datum)
-        datum.guide_props.is_datum = True
-        set_world_anchor(datum.guide_props.start, Vector((0.0, 0.0, 0.0)))
-        coordinate = create_dimension_object(self.context, "DIM Coordinate Output")
-        self.created.append(coordinate)
-        props = coordinate.dimension_props
-        props.annotation_kind = "COORDINATE"
-        props.datum_object = datum
-        set_world_anchor(props.start, Vector((2.0, 3.0, 4.0)))
-        set_world_anchor(props.end, Vector((3.0, 4.0, 4.0)))
-        coordinate_spec = coordinate_elevation_output_spec(
-            self.context, coordinate, "coordinate", WorldSizingPolicy(0.02, 0.2), 0.15,
-        )
-        self.assertIsNotNone(coordinate_spec)
-        self.assertGreater(len(coordinate_spec.strokes), 1)
-
-        props.coordinate_alignment = "ROW"
-        props.coordinate_alignment_offset = 8.0
-        aligned_spec = coordinate_elevation_output_spec(
-            self.context, coordinate, "coordinate-aligned", WorldSizingPolicy(0.02, 0.2), 0.15,
-        )
-        self.assertEqual(tuple(aligned_spec.strokes[0].points[1]), (2.0, 8.0, 0.0))
-
-        props.annotation_kind = "ELEVATION"
-        elevation_spec = coordinate_elevation_output_spec(
-            self.context, coordinate, "elevation", WorldSizingPolicy(0.02, 0.2), 0.15,
-        )
-        self.assertIsNotNone(elevation_spec)
-        self.assertEqual(len(elevation_spec.strokes[0].points), 2)
-        self.assertEqual(len(elevation_spec.strokes[1].points), 3)
-        self.assertEqual(len(elevation_spec.strokes[2].points), 2)
-
-        props.annotation_kind = "COORDINATE"
-        props.secondary_unit_style = "MILLIMETERS"
-        props.secondary_precision = 0
-        props.dual_unit_arrangement = "BRACKETS"
-        dual_spec = coordinate_elevation_output_spec(
-            self.context, coordinate, "coordinate-dual", WorldSizingPolicy(0.02, 0.2), 0.15,
-        )
-        self.assertIsNotNone(dual_spec)
-        self.assertGreater(len(dual_spec.strokes), len(coordinate_spec.strokes))
 
 
 def main():

@@ -8,6 +8,7 @@ class DIMENSIONS_OT_ClickSelect(bpy.types.Operator):
 
     bl_idname = "dimensions.click_select"
     bl_label = "Select Dimensions Annotation"
+    bl_description = "Click an annotation or guide to select it; clicks elsewhere use normal Blender selection"
     bl_options = {"INTERNAL", "UNDO"}
 
     @classmethod

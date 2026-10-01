@@ -5,21 +5,12 @@ from types import SimpleNamespace
 
 from mathutils import Vector
 
-from .anchors import anchor_resolution, resolve_anchor
+from .anchors import resolve_anchor
 from .angle_binding import resolve_angle_source
 from .area_binding import evaluate_area_binding
 from .dimension_geometry import get_angle_world_geometry
-from .dimension_sets import dimension_set_state
-from .circle_binding import circle_geometry, circle_value
-from .coordinate_dimensions import (
-    coordinate_label,
-    coordinate_values,
-    elevation_value,
-    is_datum_object,
-    signed_number,
-)
 from .properties import is_dimension_object, is_guide_object, resolve_dimension_style
-from .units import format_area, format_dual_length, format_length
+from .units import format_area, format_length
 
 
 _index_sync_active = False
@@ -38,30 +29,13 @@ def annotation_kind(obj):
         return getattr(obj.dimension_props, "annotation_kind", "LINEAR")
     if is_guide_object(obj):
         kind = getattr(obj.guide_props, "kind", "GUIDE")
-        if is_datum_object(obj):
-            return "DATUM"
         return {"MEASUREMENT": "MEASUREMENT", "POINT": "POINT", "PLANE": "PLANE"}.get(kind, "GUIDE")
     return "UNKNOWN"
 
 
 def annotation_state(obj):
     if is_dimension_object(obj):
-        if getattr(obj.dimension_props, "annotation_kind", "LINEAR") == "DIMENSION_SET":
-            return dimension_set_state(obj.dimension_props)
-        if getattr(obj.dimension_props, "annotation_kind", "LINEAR") == "CIRCLE":
-            fit = circle_geometry(obj.dimension_props)
-            return "NEEDS_REPAIR" if fit is None else fit["state"]
         return getattr(obj.dimension_props, "measurement_state", "LIVE")
-    if is_guide_object(obj) and getattr(obj.guide_props, "kind", "GUIDE") == "POINT":
-        _world, status = anchor_resolution(obj.guide_props.start)
-        return {"BY_FALLBACK": "FALLBACK", "UNRESOLVABLE": "NEEDS_REPAIR"}.get(status, "LIVE")
-    if is_guide_object(obj) and getattr(obj.guide_props, "kind", "GUIDE") == "PLANE":
-        from .guide_planes import resolve_guide_plane
-
-        return "LIVE" if resolve_guide_plane(obj) is not None else "NEEDS_REPAIR"
-    if is_guide_object(obj) and getattr(obj.guide_props, "derived", False):
-        state = getattr(obj.guide_props, "derived_state", "LIVE")
-        return "NEEDS_REPAIR" if state in {"NEEDS_REPAIR", "CYCLE"} else "LIVE"
     return "LIVE"
 
 
@@ -89,42 +63,16 @@ def annotation_references_object(annotation, target):
         return False
     if is_dimension_object(annotation):
         props = annotation.dimension_props
-        if getattr(props, "annotation_kind", "LINEAR") in {"COORDINATE", "ELEVATION"}:
-            return props.datum_object == target or props.elevation_reference == target or props.start.target_object == target
         anchors = (
             props.start, props.end, props.center, props.angle_a_start,
             props.angle_a_end, props.angle_b_start, props.angle_b_end,
         )
-        if getattr(props, "annotation_kind", "LINEAR") == "DIMENSION_SET":
-            anchors = tuple(
-                anchor for member in props.set_members for anchor in (member.start, member.end)
-            )
-        elif getattr(props, "annotation_kind", "LINEAR") == "CIRCLE":
-            anchors = tuple(props.circle_vertices)
         return props.area_source_object == target or any(anchor.target_object == target for anchor in anchors)
-    if is_guide_object(annotation):
-        if getattr(annotation.guide_props, "kind", "GUIDE") == "PLANE":
-            anchors = (
-                annotation.guide_props.plane_point_a,
-                annotation.guide_props.plane_point_b,
-                annotation.guide_props.plane_point_c,
-            )
-            if any(anchor.target_object == target for anchor in anchors):
-                return True
-            source = annotation.guide_props.source_a
-            return source.target_object == target or source.guide_object == target
-        direct = any(
+    if is_guide_object(annotation) and getattr(annotation.guide_props, "kind", "GUIDE") == "MEASUREMENT":
+        return any(
             anchor.target_object == target
             for anchor in (annotation.guide_props.start, annotation.guide_props.end)
         )
-        if direct:
-            return True
-        if getattr(annotation.guide_props, "derived", False):
-            return any(
-                source.target_object == target or source.guide_object == target
-                for source in (annotation.guide_props.source_a, annotation.guide_props.source_b)
-            )
-        return False
     return False
 
 
@@ -148,26 +96,14 @@ def annotation_display_value(scene, obj):
     context = SimpleNamespace(scene=scene)
     kind = annotation_kind(obj)
     if is_guide_object(obj):
-        if kind == "DATUM":
-            return obj.guide_props.datum_name or obj.name
+        precision = scene.dimensions_settings.precision
         if kind == "GUIDE":
-            if getattr(obj.guide_props, "derived", False):
-                if obj.guide_props.derivation_mode == "CENTERLINE":
-                    return "Centerline"
-                if obj.guide_props.derivation_mode == "ANGULAR":
-                    return f"Angular · {degrees(obj.guide_props.guide_angle):.2f}°"
-                if obj.guide_props.derivation_mode == "SPACING":
-                    from .derived_guides import spacing_definition
-                    interval, count = spacing_definition(obj.guide_props)
-                    return f"Spacing · {count} × {format_length(context, interval, scene.dimensions_settings.precision)}"
-                return f"Offset {format_length(context, obj.guide_props.offset_distance, scene.dimensions_settings.precision)}"
-            return "Guide"
+            return "Guide Line"
         if kind == "POINT":
-            return "Point" if resolve_anchor(obj.guide_props.start) is not None else "Unavailable"
+            return "Guide Point"
         if kind == "PLANE":
-            from .guide_planes import resolve_guide_plane
-
-            return "Plane" if resolve_guide_plane(obj) is not None else "Unavailable"
+            spacing = format_length(context, obj.guide_props.plane_spacing, precision)
+            return f"Grid · {spacing} spacing"
         start = resolve_anchor(obj.guide_props.start)
         end = resolve_anchor(obj.guide_props.end)
         if start is None or end is None:
@@ -179,39 +115,6 @@ def annotation_display_value(scene, obj):
     if kind == "LINEAR":
         value = _linear_value(props)
         return "Unavailable" if value is None else format_length(context, value, style.precision, style.unit_style)
-    if kind == "COORDINATE":
-        result = coordinate_values(props)
-        if result is None:
-            return "Unavailable"
-        return coordinate_label(
-            props,
-            result["values"],
-            lambda value: format_dual_length(
-                context,
-                value,
-                style.precision,
-                style.unit_style,
-                getattr(style, "secondary_unit_style", "NONE"),
-                getattr(style, "secondary_precision", 2),
-                getattr(style, "dual_unit_arrangement", "BRACKETS"),
-            ),
-        ).replace("\n", " · ")
-    if kind == "ELEVATION":
-        result = elevation_value(props)
-        if result is None:
-            return "Unavailable"
-        value = signed_number(result["value"], props.elevation_precision, props.elevation_show_plus)
-        return f"{props.elevation_prefix}{value}{props.elevation_suffix}"
-    if kind == "DIMENSION_SET":
-        count = len(props.set_members)
-        label = "Chain" if props.set_kind == "CHAIN" else "Baseline"
-        return f"{label} · {count} member{'s' if count != 1 else ''}"
-    if kind == "CIRCLE":
-        fit = circle_geometry(props)
-        if fit is None:
-            return "Unavailable"
-        symbol = {"RADIUS": "R", "DIAMETER": "⌀", "ARC_LENGTH": "⌒"}[props.circle_kind]
-        return f"{symbol}{format_length(context, circle_value(props, fit), style.precision, style.unit_style)}"
     if kind == "AREA":
         result = evaluate_area_binding(props) if props.measurement_state != "CAPTURED" else None
         value = result["area"] if result is not None else props.area_value

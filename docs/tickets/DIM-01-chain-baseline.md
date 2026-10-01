@@ -1,7 +1,7 @@
 # DIM-01 — Chain and baseline dimensions
 
 **Milestone:** M5 Documentation-grade
-**Status:** ✅ Complete — persistent sets delivered; creation, repair, collision, and output paths hardened in the 0.6.0 candidate.
+**Status:** 🚫 Withdrawn in 0.7.0 — the persistent set object and Baseline were removed after user testing; Chain is now a mode of Create Dimension that places ordinary linear dimensions end to end (see [UX-10](UX-10-focused-toolset.md)). Saved sets convert to linear dimensions. Delivered 0.4.3; hardened in the 0.6.0 candidate.
 **Effort:** M
 **Depends on:** UX-01
 **Version impact:** Patch. Additive.

@@ -1,7 +1,7 @@
 # UX-03 — Inference: parallel, perpendicular, extension, intersection, local axis
 
 **Milestone:** M2 Fluency
-**Status:** ✅ Complete in 0.4.2.
+**Status:** ✅ Complete in 0.4.2. The active-face plane candidate is labeled Face Plane from 0.7.0.
 **Effort:** L
 **Depends on:** FND-08
 **Version impact:** Patch, unless it changes documented constraint keys — coordinate with `FND-05`.

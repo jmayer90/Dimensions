@@ -75,6 +75,17 @@ def axis_label(axis):
     return axis
 
 
+def set_tool_status_text(context, text):
+    """Show modal key hints in Blender's status bar, or restore it with ``None``."""
+    workspace = getattr(context, "workspace", None)
+    if workspace is None:
+        return
+    try:
+        workspace.status_text_set(text)
+    except (AttributeError, RuntimeError, TypeError):
+        pass
+
+
 def push_undo_step(message):
     """Place an undo boundary after one item in a continuous modal session."""
     import bpy
@@ -148,16 +159,10 @@ def constrained_delta(raw_delta, axis, context=None):
     return raw_delta.copy()
 
 
-def axis_world_direction(context, axis):
-    """Return the shared X/Y/Z direction in world or active-plane space."""
+def axis_world_direction(_context, axis):
+    """Return the shared world X/Y/Z direction."""
     if axis not in {"X", "Y", "Z"}:
         return None
-    from .guide_planes import active_plane_frame
-
-    scene = None if context is None else getattr(context, "scene", None)
-    frame = active_plane_frame(scene)
-    if frame is not None:
-        return {"X": frame[1], "Y": frame[2], "Z": frame[3]}[axis].copy()
     return {
         "X": Vector((1.0, 0.0, 0.0)),
         "Y": Vector((0.0, 1.0, 0.0)),

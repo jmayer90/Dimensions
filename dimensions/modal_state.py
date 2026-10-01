@@ -77,6 +77,12 @@ class PointPlacementState:
         self.clear_numeric()
         return "RESTARTED"
 
+    def continue_from_point(self):
+        """Begin the next chained placement with its first point already known."""
+        self.stage = self.PICK_END
+        self.clear_numeric()
+        return "CONTINUED"
+
     def confirm(self):
         """Advance a picking stage, or commit from the placement stage."""
         if self.stage in (self.PICK_START, self.PICK_END):

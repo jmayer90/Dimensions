@@ -1,7 +1,7 @@
 # CON-02 — Offset and parallel guides at a typed distance
 
 **Milestone:** M3 Construction
-**Status:** ✅ Complete in 0.4.3.
+**Status:** 🚫 Withdrawn in 0.7.0 — live, source-following offsets and centerlines were removed; [UX-10](UX-10-focused-toolset.md) provides a fixed Offset Guide tool instead. Saved derived guides convert to fixed guide lines. Delivered 0.4.3.
 **Effort:** M
 **Depends on:** CON-01
 **Version impact:** Patch. Additive.

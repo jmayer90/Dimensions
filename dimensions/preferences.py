@@ -39,7 +39,7 @@ DEFAULT_PREFERENCES = SimpleNamespace(
         "measurement_endpoint", "measurement_midpoint", "measurement_segment",
     )},
     **{f"inference_{identifier}": True for identifier in (
-        "parallel", "perpendicular", "extension", "intersection", "local_axis", "active_plane",
+        "parallel", "perpendicular", "extension", "intersection", "local_axis", "face_plane",
     )},
 )
 _reregistered_values = {}
@@ -165,7 +165,12 @@ class DIMENSIONS_AddonPreferences(bpy.types.AddonPreferences):
     inference_extension: bpy.props.BoolProperty(name="Extension", default=True, update=_tag_redraw)
     inference_intersection: bpy.props.BoolProperty(name="Intersection", default=True, update=_tag_redraw)
     inference_local_axis: bpy.props.BoolProperty(name="Local Axis", default=True, update=_tag_redraw)
-    inference_active_plane: bpy.props.BoolProperty(name="Active Plane", default=True, update=_tag_redraw)
+    inference_face_plane: bpy.props.BoolProperty(
+        name="Face Plane",
+        description="After hovering a face, free points land on that face's plane",
+        default=True,
+        update=_tag_redraw,
+    )
 
     def draw(self, _context):
         layout = self.layout

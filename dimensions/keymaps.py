@@ -25,7 +25,8 @@ _INVOCATION_OPERATORS = (
     "dimensions.measure_persistent",
     "dimensions.create_guide",
     "dimensions.create_guide_point",
-    "dimensions.create_derived_guide",
+    "dimensions.create_offset_guide",
+    "dimensions.create_guide_plane",
 )
 
 _MODAL_BINDINGS = (

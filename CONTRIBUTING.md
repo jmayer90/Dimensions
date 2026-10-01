@@ -4,7 +4,9 @@ Thanks for taking a look. This is a small, opinionated project — reading this 
 
 ## Scope
 
-Dimensions is a **non-destructive annotation** tool. It may inspect Edit Mode topology to acquire anchors or compute values, but it never creates, cuts, merges, or otherwise modifies mesh geometry.
+Dimensions is a **non-destructive annotation** tool. It may inspect Edit Mode topology to acquire anchors or compute values, but it never creates, cuts, merges, or otherwise modifies the user's mesh geometry. Its own construction meshes — guide-plane grids and native snap proxies — live in the Construction Guides collection, are never rendered, and never enter output.
+
+The toolset is deliberately small. Since 0.7.0 a tool ships only with a workflow a first-time user can follow from its tooltip and the on-screen prompt; see [UX-10](docs/tickets/UX-10-focused-toolset.md) for what was removed and why.
 
 Mesh-line drawing, face cutting, Push/Pull, Offset, arrays, and eraser-style editing are geometry-authoring tools. They are explicitly out of scope and belong in a separate project with its own interaction model and topology guarantees. An earlier experiment along those lines was removed for exactly this reason; please don't reintroduce it incrementally.
 
@@ -66,9 +68,21 @@ Both scripts accept an explicit Blender executable path; on POSIX systems they f
 
 `tests/blender_lifecycle.py` covers persistent data: measurement proxies, save/reload, and schema migration against the released-file fixtures in `tests/fixtures/`.
 
+`tests/foreground_workflows.py` drives real window events — mouse moves, clicks, and keys — through the core tools in a foreground Blender. It needs a window, so it is not part of `validate.ps1` or CI; run it before a release and after any change to a modal tool, snapping, or Edit Mode code:
+
+```bash
+blender --factory-startup --enable-event-simulate --window-geometry 0 0 1600 1000 --python tests/foreground_workflows.py
+```
+
 `tests/stroke_font_smoke.py`, `tests/output_geometry_smoke.py`, `tests/output_smoke.py`, and `tests/output_operator_smoke.py` cover render output: vector labels, live linear-annotation translation, camera/world sizing, scene isolation, deterministic regeneration, rollback, and minimal EEVEE/Cycles renders.
 
-Two differences between the test environment and a real install have hidden real bugs, and `DimensionsPackagingTests` now guards both. The suites import the add-on as a top-level `dimensions` package, but Blender installs it as `bl_ext.<repository>.dimensions` — so anything deriving an identifier from `__package__` must use the full name. And Blender restricts `bpy.data` while an add-on registers, so registration must not read scene data directly.
+Three Blender behaviors have hidden real bugs from the background suites:
+
+- **Registered classes must not subclass each other.** When one registered operator subclasses another, Blender loses the parent's Python class and invoking it silently does nothing. Share code through an unregistered base class instead; `DimensionsPackagingTests` checks every operator.
+- **Edit Mode BMesh elements die with their wrapper.** Blender invalidates every BMesh element object when the `bmesh.from_edit_mesh()` object that produced it is freed. Keep that object alive for as long as you use its elements. Tests can hide this bug because they often hold their own reference; the foreground script covers the Edit Mode paths.
+- **Every icon name must exist in the running Blender.** An unknown icon stops the whole panel from drawing; `DimensionsPackagingTests` checks them.
+
+Two differences between the test environment and a real install have also hidden real bugs, and `DimensionsPackagingTests` guards both. The suites import the add-on as a top-level `dimensions` package, but Blender installs it as `bl_ext.<repository>.dimensions` — so anything deriving an identifier from `__package__` must use the full name. And Blender restricts `bpy.data` while an add-on registers, so registration must not read scene data directly.
 
 ### Benchmarks
 

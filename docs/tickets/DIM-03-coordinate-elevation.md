@@ -1,7 +1,7 @@
 # DIM-03 — Coordinate and elevation dimensions
 
 **Milestone:** M5 Documentation-grade
-**Status:** ✅ Complete in 0.5.0; explicit datum and viewport acquisition hardened in the 0.6.0 candidate.
+**Status:** 🚫 Withdrawn in 0.7.0 — datums, coordinate, and elevation dimensions were removed after user testing (see [UX-10](UX-10-focused-toolset.md)). Saved annotations are deleted on load; datums remain as guide points. Delivered 0.5.0.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.

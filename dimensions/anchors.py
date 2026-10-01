@@ -130,7 +130,13 @@ def set_anchor_from_snap(anchor, snap):
     if snap is None:
         raise ValueError("Snap target is required")
 
-    if snap.get("type") == "VERTEX" and snap.get("object") is not None:
+    snap_object = snap.get("object")
+    if snap_object is not None and is_construction_grid(snap_object):
+        # Grid points follow the plane object but not its regenerated mesh topology.
+        set_object_anchor(anchor, snap_object, snap["world_co"])
+        return
+
+    if snap.get("type") == "VERTEX" and snap_object is not None:
         set_anchor(anchor, snap["object"], snap["vertex_index"])
         return
 
@@ -139,6 +145,13 @@ def set_anchor_from_snap(anchor, snap):
         return
 
     set_world_anchor(anchor, snap["world_co"])
+
+
+def is_construction_grid(obj):
+    """Return whether ``obj`` is a Dimensions construction grid."""
+    from .construction import GUIDE_PLANE_FLAG
+
+    return bool(getattr(obj, "get", None) and obj.get(GUIDE_PLANE_FLAG, False))
 
 
 def anchor_source_is_missing(anchor):
@@ -207,14 +220,6 @@ def refresh_anchor_resolution(anchor):
 def dimension_source_is_missing(props):
     """Detect deleted object bindings without broadening into guided repair."""
     annotation_kind = getattr(props, "annotation_kind", "LINEAR")
-    if annotation_kind in {"COORDINATE", "ELEVATION"}:
-        datum = getattr(props, "datum_object", None)
-        return (
-            anchor_source_is_missing(props.start)
-            or datum is None
-            or not hasattr(datum, "guide_props")
-            or anchor_source_is_missing(datum.guide_props.start)
-        )
     if annotation_kind == "AREA":
         if props.measurement_state == "CAPTURED":
             return False
@@ -236,8 +241,6 @@ def dimension_source_is_missing(props):
 def dimension_source_anchors(props):
     """Return only anchors that define the current annotation's source."""
     annotation_kind = getattr(props, "annotation_kind", "LINEAR")
-    if annotation_kind in {"COORDINATE", "ELEVATION"}:
-        return (("POINT", props.start),)
     if annotation_kind == "ANGLE":
         if props.angle_source_mode == "EDGES":
             return (

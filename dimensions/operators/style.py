@@ -130,6 +130,7 @@ class CADDIM_OT_CopyStyleToGlobal(bpy.types.Operator):
 class CADDIM_OT_CreateAnnotationStyle(bpy.types.Operator):
     bl_idname = "dimensions.create_annotation_style"
     bl_label = "Create Style"
+    bl_description = "Add a named style from the current global dimension style"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -161,6 +162,7 @@ class CADDIM_OT_CreateAnnotationStyle(bpy.types.Operator):
 class CADDIM_OT_DuplicateAnnotationStyle(bpy.types.Operator):
     bl_idname = "dimensions.duplicate_annotation_style"
     bl_label = "Duplicate Style"
+    bl_description = "Copy the highlighted named style"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -181,6 +183,7 @@ class CADDIM_OT_DuplicateAnnotationStyle(bpy.types.Operator):
 class CADDIM_OT_RenameAnnotationStyle(bpy.types.Operator):
     bl_idname = "dimensions.rename_annotation_style"
     bl_label = "Rename Style"
+    bl_description = "Rename the highlighted named style; annotations using it follow the new name"
     bl_options = {"REGISTER", "UNDO"}
 
     name: bpy.props.StringProperty(name="Name")
@@ -212,6 +215,7 @@ class CADDIM_OT_RenameAnnotationStyle(bpy.types.Operator):
 class CADDIM_OT_DeleteAnnotationStyle(bpy.types.Operator):
     bl_idname = "dimensions.delete_annotation_style"
     bl_label = "Delete Style"
+    bl_description = "Delete the highlighted named style; annotations using it return to the global style"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -239,6 +243,7 @@ class CADDIM_OT_DeleteAnnotationStyle(bpy.types.Operator):
 class CADDIM_OT_AssignAnnotationStyle(bpy.types.Operator):
     bl_idname = "dimensions.assign_annotation_style"
     bl_label = "Assign Style to Selection"
+    bl_description = "Give the selected annotations the highlighted named style and clear their local overrides"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -258,6 +263,7 @@ class CADDIM_OT_AssignAnnotationStyle(bpy.types.Operator):
 class CADDIM_OT_SelectAnnotationStyleUsers(bpy.types.Operator):
     bl_idname = "dimensions.select_annotation_style_users"
     bl_label = "Select Style Users"
+    bl_description = "Select every annotation that uses the highlighted named style"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -278,6 +284,7 @@ class CADDIM_OT_SelectAnnotationStyleUsers(bpy.types.Operator):
 class CADDIM_OT_ClearAnnotationStyleOverrides(bpy.types.Operator):
     bl_idname = "dimensions.clear_annotation_style_overrides"
     bl_label = "Clear Overrides and Inherit"
+    bl_description = "Remove every local style override so this dimension follows its named style or the global style"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod

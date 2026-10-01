@@ -1,4 +1,5 @@
 from heapq import nsmallest
+from math import cos, sin, tau
 
 from bpy_extras import view3d_utils
 from mathutils.geometry import intersect_line_line, intersect_line_plane
@@ -6,8 +7,13 @@ from mathutils import Vector
 
 from .constants import DEFAULT_SNAP_PIXEL_THRESHOLD
 from .preferences import get_preferences
-from .anchors import resolve_anchor
 from .collections import GUIDE_POINT_SNAP_PROXY_FLAG, MEASUREMENT_SNAP_PROXY_FLAG
+from .construction import (
+    construction_segment_world,
+    guide_line_world,
+    guide_point_world,
+    guide_segment_world,
+)
 from .projected_snap import nearest_visible_projected_vertex
 from .properties import is_guide_object
 from .snap_targets import enabled_snap_targets
@@ -60,33 +66,101 @@ def get_mouse_ray(context, mouse_region_x, mouse_region_y):
     return origin, direction.normalized()
 
 
-def raycast_from_mouse(context, mouse_x, mouse_y):
+def raycast_from_mouse(context, mouse_x, mouse_y, include_guide_planes=False):
+    """Return the model surface under the mouse, or a grid when nothing else is hit.
+
+    Face- and edge-picking tools leave ``include_guide_planes`` off so they can
+    never bind to a construction grid.
+    """
+    hits = raycast_hits_from_mouse(context, mouse_x, mouse_y, include_guide_planes)
+    model_hits = [hit for hit in hits if not hit.get("guide_plane")]
+    return (model_hits or hits or [None])[0]
+
+
+def raycast_hits_from_mouse(context, mouse_x, mouse_y, include_guide_planes=True):
+    """Return the model surface under the mouse and any visible grid in front of it."""
     if not has_view3d_window_region(context):
-        return None
+        return []
 
     origin, direction = get_mouse_ray(context, mouse_x, mouse_y)
 
     if context.mode == "EDIT_MESH" and context.edit_object is not None:
         edit_hit = _raycast_edit_mesh(context, origin, direction)
-        return edit_hit
+        return [] if edit_hit is None else [edit_hit]
+    return scene_mesh_hits(context, origin, direction, include_guide_planes)
 
-    depsgraph = context.evaluated_depsgraph_get()
 
-    hit, location, normal, face_index, obj, _matrix = context.scene.ray_cast(
-        depsgraph,
-        origin,
-        direction,
-    )
-
-    if not hit or obj is None or obj.type != "MESH":
-        return None
-
+def _hit_entry(obj, location, normal, face_index, guide_plane):
     return {
         "object": obj,
         "location": location,
         "normal": normal,
         "face_index": face_index,
+        "guide_plane": guide_plane,
     }
+
+
+def scene_mesh_hits(context, origin, direction, include_guide_planes=True, max_steps=8):
+    """Cast through the scene treating construction grids as transparent.
+
+    A grid never hides model geometry behind it, but model geometry hides grid
+    points behind it. A grid lying exactly on a model face (the usual result of
+    Plane: Face) is found with a per-grid cast, because two surfaces at the same
+    depth cannot both be reached by stepping one scene ray forward.
+    """
+    from .construction import ray_hits_guide_plane
+
+    depsgraph = context.evaluated_depsgraph_get()
+    origin = Vector(origin)
+    direction = Vector(direction).normalized()
+    start = origin.copy()
+    hits = []
+    plane_found = False
+    model_depth = None
+    for _step in range(max_steps):
+        hit, location, normal, face_index, obj, _matrix = context.scene.ray_cast(depsgraph, start, direction)
+        if not hit or obj is None:
+            break
+        depth = (location - origin).dot(direction)
+        if ray_hits_guide_plane(obj):
+            if include_guide_planes and not plane_found:
+                hits.append(_hit_entry(obj, location, normal, face_index, True))
+                plane_found = True
+            start = location + direction * max(1e-5, abs(depth) * 1e-5)
+            continue
+        if obj.type == "MESH":
+            hits.append(_hit_entry(obj, location, normal, face_index, False))
+            model_depth = depth
+        break
+    if include_guide_planes and not plane_found and model_depth is not None:
+        coplanar = _coplanar_guide_plane_hit(context, depsgraph, origin, direction, model_depth)
+        if coplanar is not None:
+            hits.append(coplanar)
+    return hits
+
+
+def _coplanar_guide_plane_hit(context, depsgraph, origin, direction, depth):
+    from .construction import iter_guide_plane_objects
+
+    tolerance = max(1e-5, abs(depth) * 1e-5)
+    for plane in iter_guide_plane_objects(context.scene):
+        if plane.type != "MESH" or not guide_is_visible(context, plane):
+            continue
+        inverse = plane.matrix_world.inverted_safe()
+        local_direction = inverse.to_3x3() @ direction
+        if local_direction.length < 1e-12:
+            continue
+        hit, location, normal, face_index = plane.ray_cast(
+            inverse @ origin, local_direction.normalized(), depsgraph=depsgraph,
+        )
+        if not hit:
+            continue
+        world_location = plane.matrix_world @ location
+        if abs((world_location - origin).dot(direction) - depth) > tolerance:
+            continue
+        world_normal = plane.matrix_world.to_3x3().inverted_safe().transposed() @ normal
+        return _hit_entry(plane, world_location, world_normal.normalized(), face_index, True)
+    return None
 
 
 def _raycast_edit_mesh(context, origin_world, direction_world):
@@ -178,7 +252,7 @@ def find_nearest_snap_point(
     if mesh_snap is not None:
         candidates.append(mesh_snap)
 
-    if include_guides and ({"guide", "guide_point", "guide_plane", "measurement_endpoint", "measurement_midpoint", "measurement_segment"} & enabled):
+    if include_guides and ({"guide", "guide_point", "measurement_endpoint", "measurement_midpoint", "measurement_segment"} & enabled):
         guide_snap = find_nearest_guide_point(
             context, mouse_x, mouse_y, pixel_threshold, enabled_targets=enabled
         )
@@ -259,10 +333,19 @@ def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=None
         pixel_threshold = get_preferences(context).snap_pixel_threshold
     enabled_targets = enabled_targets if enabled_targets is not None else enabled_snap_targets(context)
     mesh_targets = {"vertex", "edge", "midpoint", "face_center", "face_point"}
-    if not (mesh_targets & enabled_targets):
+    include_guide_planes = "guide_plane" in enabled_targets
+    # Guide Plane on its own (for example while cycling with S) snaps to every
+    # grid element and ignores model geometry.
+    grid_only = include_guide_planes and not (mesh_targets & enabled_targets)
+    if not (mesh_targets & enabled_targets) and not grid_only:
         return None
-    hit = raycast_from_mouse(context, mouse_x, mouse_y)
-    if hit is None:
+    hits = raycast_hits_from_mouse(context, mouse_x, mouse_y, include_guide_planes)
+    if grid_only:
+        hits = [hit for hit in hits if hit.get("guide_plane")]
+    hit_targets = mesh_targets if grid_only else enabled_targets
+    if not hits:
+        if grid_only:
+            return None
         if context.mode == "EDIT_MESH" and context.edit_object is not None:
             return _nearest_projected_edit_mesh_element(
                 context,
@@ -271,15 +354,83 @@ def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=None
                 pixel_threshold,
                 enabled_targets,
             )
-        if "vertex" in enabled_targets:
-            return _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold)
-        return None
+        # The cursor is just off a surface: look around it so outline edges and
+        # their midpoints stay snappable. Face points need the cursor on the face.
+        hit_targets = enabled_targets - {"face_point", "face_center"}
+        if {"edge", "midpoint"} & hit_targets:
+            hits = _nearby_surface_hits(context, mouse_x, mouse_y, pixel_threshold * 0.5, include_guide_planes)
+        if not hits:
+            if "vertex" in enabled_targets:
+                return _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold, include_guide_planes)
+            return None
 
-    obj = hit["object"]
     mouse = Vector((mouse_x, mouse_y))
     candidates = []
-    face_index = hit["face_index"]
+    for hit in hits:
+        _add_hit_candidates(context, hit, mouse, candidates, hit_targets)
 
+    first_hit = hits[0]
+    projected_vertex = (
+        _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold, include_guide_planes)
+        if "vertex" in enabled_targets
+        else None
+    )
+    if projected_vertex is not None:
+        if first_hit.get("edit_mesh"):
+            projected_vertex["priority"] = _edit_mesh_projected_vertex_priority(
+                first_hit["object"],
+                first_hit["face_index"],
+                projected_vertex,
+            )
+            if projected_vertex["priority"] == 0:
+                projected_vertex["face_index"] = first_hit["face_index"]
+        candidates.append(projected_vertex)
+
+    best = _best_snap_candidate(candidates, mouse, pixel_threshold)
+    if best is not None:
+        return _label_grid_candidate(best)
+    return None
+
+
+def _nearby_surface_hits(context, mouse_x, mouse_y, radius, include_guide_planes, samples=8):
+    """Return distinct surfaces under a small ring of rays around the cursor."""
+    seen = set()
+    hits = []
+    radius = max(float(radius), 4.0)
+    for index in range(samples):
+        angle = tau * index / samples
+        sample_x = mouse_x + cos(angle) * radius
+        sample_y = mouse_y + sin(angle) * radius
+        for hit in raycast_hits_from_mouse(context, sample_x, sample_y, include_guide_planes):
+            identity = (hit["object"].as_pointer(), hit["face_index"])
+            if identity in seen:
+                continue
+            seen.add(identity)
+            hits.append(hit)
+    return hits
+
+
+_GRID_LABELS = {
+    "Vertex": "Grid Point",
+    "Edge": "Grid Line",
+    "Midpoint": "Grid Midpoint",
+    "Face Center": "Grid Cell Center",
+    "Face": "Grid Plane",
+}
+
+
+def _label_grid_candidate(candidate):
+    from .construction import ray_hits_guide_plane
+
+    if ray_hits_guide_plane(candidate.get("object")):
+        candidate["label"] = _GRID_LABELS.get(candidate.get("label"), candidate.get("label"))
+        candidate["guide_plane"] = True
+    return candidate
+
+
+def _add_hit_candidates(context, hit, mouse, candidates, enabled_targets):
+    obj = hit["object"]
+    face_index = hit["face_index"]
     if hit.get("edit_mesh"):
         _add_edit_mesh_candidates(
             context,
@@ -303,22 +454,8 @@ def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=None
         if "vertex" in enabled_targets:
             _add_vertex_candidates(context, obj, _nearest_base_vertices(obj, local_hit), candidates)
 
-    projected_vertex = (
-        _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold)
-        if "vertex" in enabled_targets
-        else None
-    )
-    if projected_vertex is not None:
-        if hit.get("edit_mesh"):
-            projected_vertex["priority"] = _edit_mesh_projected_vertex_priority(
-                obj,
-                face_index,
-                projected_vertex,
-            )
-            if projected_vertex["priority"] == 0:
-                projected_vertex["face_index"] = face_index
-        candidates.append(projected_vertex)
-
+    if "face_point" not in enabled_targets:
+        return
     screen_co = view3d_utils.location_3d_to_region_2d(
         context.region,
         context.region_data,
@@ -326,23 +463,18 @@ def find_nearest_mesh_snap_point(context, mouse_x, mouse_y, pixel_threshold=None
     )
     if screen_co is None:
         screen_co = mouse
-    if "face_point" in enabled_targets:
-        candidates.append({
-            "type": "FACE",
-            "label": "Face",
-            "priority": 10,
-            "object": obj,
-            "vertex_index": -1,
-            "face_index": face_index,
-            "world_co": hit["location"].copy(),
-            "screen_co": screen_co.copy(),
-            "normal": hit["normal"].copy(),
-        })
-
-    best = _best_snap_candidate(candidates, mouse, pixel_threshold)
-    if best is not None:
-        return best
-    return None
+    candidates.append({
+        "type": "FACE",
+        "label": "Face",
+        # A grid's own surface yields to the coplanar model face it was drawn on.
+        "priority": 11 if hit.get("guide_plane") else 10,
+        "object": obj,
+        "vertex_index": -1,
+        "face_index": face_index,
+        "world_co": hit["location"].copy(),
+        "screen_co": screen_co.copy(),
+        "normal": hit["normal"].copy(),
+    })
 
 
 def _add_edit_mesh_candidates(context, obj, face_index, mouse, candidates, enabled_targets=None):
@@ -651,7 +783,7 @@ def _configured_snap_pixel_threshold(context, requested_threshold):
         return DEFAULT_SNAP_PIXEL_THRESHOLD
 
 
-def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold):
+def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold, include_guide_planes=True):
     if not has_view3d_window_region(context):
         return None
 
@@ -660,13 +792,19 @@ def _nearest_projected_vertex(context, mouse_x, mouse_y, pixel_threshold):
         if obj is not None and obj.type == "MESH"
     ]
     if context.mode != "EDIT_MESH" or not edit_objects:
-        return nearest_visible_projected_vertex(
+        from .construction import GUIDE_PLANE_FLAG
+
+        excluded = (MEASUREMENT_SNAP_PROXY_FLAG, GUIDE_POINT_SNAP_PROXY_FLAG)
+        if not include_guide_planes:
+            excluded += (GUIDE_PLANE_FLAG,)
+        candidate = nearest_visible_projected_vertex(
             context,
             mouse_x,
             mouse_y,
             pixel_threshold,
-            excluded_flag=(MEASUREMENT_SNAP_PROXY_FLAG, GUIDE_POINT_SNAP_PROXY_FLAG),
+            excluded_flag=excluded,
         )
+        return None if candidate is None else _label_grid_candidate(candidate)
 
     mouse = Vector((mouse_x, mouse_y))
     best = None
@@ -786,7 +924,7 @@ def find_nearest_guide_point(
 
     if enabled_targets is None:
         enabled_targets = frozenset((
-            "guide", "guide_point", "guide_plane", "measurement_endpoint", "measurement_midpoint", "measurement_segment",
+            "guide", "guide_point", "measurement_endpoint", "measurement_midpoint", "measurement_segment",
         ))
     mouse = Vector((mouse_x, mouse_y))
     ray_origin, ray_direction = get_mouse_ray(context, mouse_x, mouse_y)
@@ -799,47 +937,12 @@ def find_nearest_guide_point(
 
         kind = getattr(obj.guide_props, "kind", "GUIDE")
         if kind == "PLANE":
-            if "guide_plane" not in enabled_targets:
-                continue
-            from .guide_planes import point_within_plane_extent, resolve_guide_plane
-
-            frame = resolve_guide_plane(obj)
-            if frame is None:
-                continue
-            origin, _axis_u, _axis_v, normal = frame
-            world_co = intersect_line_plane(
-                ray_origin, ray_origin + ray_direction * 100000.0,
-                origin, normal, False,
-            )
-            if (
-                world_co is None
-                or (world_co - ray_origin).dot(ray_direction) < 0.0
-                or not point_within_plane_extent(
-                    world_co, frame, obj.guide_props.plane_extent,
-                )
-            ):
-                continue
-            screen_co = view3d_utils.location_3d_to_region_2d(
-                context.region, context.region_data, world_co,
-            )
-            if screen_co is None:
-                continue
-            candidate = {
-                "type": "GUIDE_PLANE", "label": "Guide Plane", "priority": 20,
-                "object": None, "vertex_index": -1,
-                "world_co": world_co.copy(), "screen_co": screen_co.copy(),
-                "guide_object": obj, "plane_origin": origin.copy(),
-                "plane_normal": normal.copy(),
-            }
-            distance = (screen_co - mouse).length
-            if distance < best_distance:
-                best_distance = distance
-                best = candidate
+            # Grids are real meshes and snap through the mesh path.
             continue
         if kind == "POINT":
             if "guide_point" not in enabled_targets:
                 continue
-            world_co = resolve_anchor(obj.guide_props.start)
+            world_co = guide_point_world(obj)
             if world_co is None:
                 continue
             screen_co = view3d_utils.location_3d_to_region_2d(
@@ -880,62 +983,22 @@ def find_nearest_guide_point(
 
         if "guide" not in enabled_targets:
             continue
-        if getattr(obj.guide_props, "derivation_mode", "NONE") == "SPACING":
-            from .derived_guides import spaced_guide_lines
-            for line_index, line in enumerate(spaced_guide_lines(obj)):
-                candidate = _guide_line_snap_candidate(context, mouse, ray_origin, ray_direction, obj, line, f"Guide {line_index + 1}")
-                if candidate is None:
-                    continue
-                distance = (candidate["screen_co"] - mouse).length
-                if distance < best_distance:
-                    best_distance, best = distance, candidate
-            continue
         line = guide_line_world(obj)
         if line is None:
             continue
-
-        line_origin, line_direction = line
-        closest_points = intersect_line_line(
-            ray_origin,
-            ray_origin + ray_direction,
-            line_origin,
-            line_origin + line_direction,
-        )
-        if closest_points is None:
+        candidate = _guide_line_snap_candidate(context, ray_origin, ray_direction, obj, line)
+        if candidate is None:
             continue
-
-        ray_point, world_co = closest_points
-        if (ray_point - ray_origin).dot(ray_direction) < 0.0:
-            continue
-
-        screen_co = view3d_utils.location_3d_to_region_2d(
-            context.region,
-            context.region_data,
-            world_co,
-        )
-        if screen_co is None:
-            continue
-
-        distance = (screen_co - mouse).length
+        distance = (candidate["screen_co"] - mouse).length
         if distance >= best_distance:
             continue
-
         best_distance = distance
-        best = {
-            "type": "GUIDE",
-            "label": "Guide",
-            "priority": 1,
-            "object": None,
-            "vertex_index": -1,
-            "world_co": world_co.copy(),
-            "screen_co": screen_co.copy(),
-            "guide_object": obj,
-        }
+        best = candidate
 
     return best
 
 
-def _guide_line_snap_candidate(context, mouse, ray_origin, ray_direction, guide, line, label="Guide"):
+def _guide_line_snap_candidate(context, ray_origin, ray_direction, guide, line, label="Guide"):
     line_origin, line_direction = line
     closest = intersect_line_line(ray_origin, ray_origin + ray_direction, line_origin, line_origin + line_direction)
     if closest is None:
@@ -946,7 +1009,17 @@ def _guide_line_snap_candidate(context, mouse, ray_origin, ray_direction, guide,
     screen_co = view3d_utils.location_3d_to_region_2d(context.region, context.region_data, world_co)
     if screen_co is None:
         return None
-    return {"type": "GUIDE", "label": label, "priority": 1, "object": None, "vertex_index": -1, "world_co": world_co.copy(), "screen_co": screen_co.copy(), "guide_object": guide, "reference_line": (line_origin.copy(), line_direction.copy())}
+    return {
+        "type": "GUIDE",
+        "label": label,
+        "priority": 1,
+        "object": None,
+        "vertex_index": -1,
+        "world_co": world_co.copy(),
+        "screen_co": screen_co.copy(),
+        "guide_object": guide,
+        "reference_line": (line_origin.copy(), line_direction.copy()),
+    }
 
 
 def _nearest_measurement_segment_snap(
@@ -1065,74 +1138,11 @@ def guide_is_visible(context, guide_object):
         return not guide_object.hide_get()
 
 
-def guide_line_world(guide_object):
-    if getattr(guide_object.guide_props, "kind", "GUIDE") != "GUIDE":
-        return None
-
-    if getattr(guide_object.guide_props, "derived", False):
-        from .derived_guides import resolve_derived_guide
-
-        return resolve_derived_guide(guide_object)
-
-    start_world = resolve_anchor(guide_object.guide_props.start)
-    if start_world is None:
-        return None
-
-    axis = guide_object.guide_props.axis
-    if axis == "X":
-        direction = Vector((1.0, 0.0, 0.0))
-    elif axis == "Y":
-        direction = Vector((0.0, 1.0, 0.0))
-    elif axis == "Z":
-        direction = Vector((0.0, 0.0, 1.0))
-    else:
-        end_world = resolve_anchor(guide_object.guide_props.end)
-        if end_world is None:
-            return None
-        direction = end_world - start_world
-        if direction.length < 1e-6:
-            return None
-        direction.normalize()
-
-    return start_world, direction
-
-
-def guide_segment_world(guide_object, extent=10000.0):
-    kind = getattr(guide_object.guide_props, "kind", "GUIDE")
-    if kind == "POINT":
-        return None
-    if kind == "MEASUREMENT":
-        return construction_segment_world(guide_object)
-
-    line = guide_line_world(guide_object)
-    if line is None:
-        return None
-
-    origin, direction = line
-    return origin - direction * extent, origin + direction * extent
-
-
-def construction_segment_world(construction_object):
-    start_world = resolve_anchor(construction_object.guide_props.start)
-    end_world = resolve_anchor(construction_object.guide_props.end)
-    if start_world is None or end_world is None:
-        return None
-    if (end_world - start_world).length < 1e-6:
-        return None
-    return start_world, end_world
-
-
 def project_mouse_to_plane(context, mouse_x, mouse_y, plane_point=None, plane_normal=None):
     if not has_view3d_window_region(context):
         return None
 
     line_origin, line_direction = get_mouse_ray(context, mouse_x, mouse_y)
-    if plane_point is None and plane_normal is None:
-        from .guide_planes import active_plane_frame
-
-        active_frame = active_plane_frame(context.scene)
-        if active_frame is not None:
-            plane_point, _axis_u, _axis_v, plane_normal = active_frame
     if plane_point is None:
         plane_point = Vector((0.0, 0.0, 0.0))
     if plane_normal is None:

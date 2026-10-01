@@ -1,7 +1,7 @@
 # DIM-02 — Radial, diameter, and arc-length dimensions
 
 **Milestone:** M5 Documentation-grade
-**Status:** ✅ Complete.
+**Status:** 🚫 Withdrawn in 0.7.0 — removed after user testing found the selection-and-fit workflow unclear (see [UX-10](UX-10-focused-toolset.md)). Saved radial, diameter, and arc annotations are deleted on load. Delivered 0.4.3.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.

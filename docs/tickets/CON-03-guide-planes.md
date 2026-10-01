@@ -1,7 +1,7 @@
 # CON-03 — Guide planes and an active construction plane
 
 **Milestone:** M3 Construction
-**Status:** ✅ Complete in 0.5.0.
+**Status:** 🚫 Withdrawn in 0.7.0 — the active construction plane and source-following plane definitions were removed; [UX-10](UX-10-focused-toolset.md) replaces them with movable, snappable grid planes. Saved planes convert to grids. Delivered 0.5.0.
 **Effort:** L
 **Depends on:** CON-02
 **Version impact:** Minor trigger 2: the delivered active plane deliberately resolves X/Y/Z in plane space.

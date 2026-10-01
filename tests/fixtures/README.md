@@ -25,6 +25,19 @@ blender --background --factory-startup --python scripts/create_schema_v14_fixtur
 
 It is the immutable starting point for migrations introduced after 0.5.0.
 
+The schema-v15 fixture is built by registering the retained 0.6.0 archive and creating
+one scene with every annotation and construction kind that 0.7.0 removes or reshapes —
+chain and baseline sets, a circle, a datum with coordinate and elevation annotations,
+fixed, vertex-anchored, axis, offset, angular, and spaced guides, guide points, every
+guide-plane definition, an active plane, and a measurement — beside a kept linear
+dimension:
+
+```bash
+blender --background --factory-startup --python scripts/create_schema_v15_fixture.py
+```
+
+`tests/blender_lifecycle.py` verifies the schema-v16 conversion against it.
+
 The settings-only fixture uses the retained 0.4.2 archive and contains a custom
 style and scene settings, but no Dimensions objects:
 

@@ -11,7 +11,7 @@ INFERENCE_TYPES = (
     ("extension", "Extension"),
     ("intersection", "Intersection"),
     ("local_axis", "Local Axis"),
-    ("active_plane", "Active Plane"),
+    ("face_plane", "Face Plane"),
 )
 
 DERIVED_PRIORITY = 20
@@ -229,12 +229,12 @@ def generate_inference_candidates(context, mouse_x, mouse_y, references, *, orig
     if origin is not None and isinstance(axis, str) and axis.startswith("LOCAL_") and local_direction is not None and "local_axis" in enabled:
         _add_line_candidate(context, candidates, ray_origin, ray_direction, origin, local_direction, "LOCAL_AXIS", f"Local {axis[-1]}")
 
-    if "active_plane" in enabled:
+    if "face_plane" in enabled:
         plane = next((value for snap in references if (value := snap_plane(snap)) is not None), None)
         if plane is not None:
             point = intersect_line_plane(ray_origin, ray_origin + ray_direction * 100000.0, plane[0], plane[1], False)
             if point is not None:
-                _append_candidate(context, candidates, point, "ACTIVE_PLANE", "Active Plane")
+                _append_candidate(context, candidates, point, "FACE_PLANE", "Face Plane")
     return candidates
 
 

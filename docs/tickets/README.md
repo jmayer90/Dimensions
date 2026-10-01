@@ -25,6 +25,7 @@ This index and each ticket header carry the durable delivery status. GitHub issu
 | ⏭ **Next** | Not shipped; selected for the next delivery phase. |
 | ⬜ **Planned** | Accepted roadmap work that has not started. |
 | ⛔ **Blocked** | Accepted work waiting on an incomplete dependency. |
+| 🚫 **Withdrawn** | Shipped earlier, then removed by a product decision; the ticket's status note names the replacement, if any. |
 | 🔍 **Release QA** | Implemented work awaiting interactive or compatibility verification; used for release gates rather than ticket delivery state. |
 
 Acceptance checkboxes inside a ticket define its intended scope; they are not maintained as a second status tracker. Use the ticket's **Status** header and this index to determine delivery state.
@@ -34,10 +35,10 @@ Acceptance checkboxes inside a ticket define its intended scope; they are not ma
 | Milestone | Status | Delivered | Remaining |
 | --- | --- | --- | --- |
 | M1 — Foundation | ✅ Complete | `FND-01` through `FND-10`; expanded `FND-07` background matrix and two-window foreground QA completed in 0.4.2 | — |
-| M2 — Fluency | ✅ Complete | `UX-01`, `UX-08` in 0.3.1; `FND-11`, `UX-02`, `UX-03`, `UX-05`, `UX-07` in 0.4.2; `UX-04`, `UX-06`, `UX-09` in 0.4.3; final foreground QA in the 0.6.0 release | — |
-| M3 — Construction | ✅ Complete | `CON-01`, `CON-02` in 0.4.3; validated `CON-03` and `CON-04` in 0.5.0 | — |
+| M2 — Fluency | ✅ Complete | `UX-01`, `UX-08` in 0.3.1; `FND-11`, `UX-02`, `UX-03`, `UX-05`, `UX-07` in 0.4.2; `UX-04`, `UX-06`, `UX-09` in 0.4.3; final foreground QA in the 0.6.0 release; `UX-10` focused toolset in 0.7.0 | — |
+| M3 — Construction | ✅ Complete | `CON-01` in 0.4.3, reworked into movable objects by `UX-10` in 0.7.0; `CON-02`, `CON-03`, `CON-04` withdrawn in 0.7.0 and replaced by `UX-10`'s Offset Guide and grid planes | — |
 | M4 — Output | ✅ Complete | Render/vector output through `OUT-04`; single-sheet `OUT-05` in 0.6.0 | — |
-| M5 — Documentation-grade | ✅ Complete | Architectural ticks in 0.3.2; Outside Start placement in 0.4.1; `DIM-01`, `DIM-02`, `DIM-04` in 0.4.3; validated `DIM-03` in 0.5.0 | — |
+| M5 — Documentation-grade | ✅ Complete | Architectural ticks in 0.3.2; Outside Start placement in 0.4.1; `DIM-04` in 0.4.3; `DIM-01`, `DIM-02`, `DIM-03` withdrawn in 0.7.0 (Chain returned as a Create Dimension mode) | — |
 | M6 — 1.0 gate | 🔍 Release QA | `FND-12`, `OUT-06`, and `FND-13` pass Blender 5.1.2/5.2.2 Linux validation | Supported-platform review and deliberate schema freeze before 1.0 |
 
 ## Index
@@ -69,7 +70,7 @@ The difference between a tool that works and one people keep using.
 | --- | --- | --- | --- | --- | --- |
 | [FND-11](FND-11-snap-cache-build-cost.md) | Bring projected snap-cache build within budget | ✅ Complete | 0.4.2 | M | FND-08 |
 | [UX-01](UX-01-continuous-placement.md) | Continuous placement with a persistent Auto/X/Y/Z session mode | ✅ Complete | 0.3.1 | M | — |
-| [UX-02](UX-02-annotation-manager.md) | Annotation manager: list, search, isolate, repair, restyle | ✅ Complete | 0.4.2; redraw/repair routing hardened in 0.6.0 release | L | — |
+| [UX-02](UX-02-annotation-manager.md) | Annotation manager: list, search, isolate, repair, restyle | ✅ Complete | 0.4.2; redraw/repair routing hardened in 0.6.0 release; visible filters and selection-scoped isolate in 0.7.0 | L | — |
 | [UX-03](UX-03-inference-engine.md) | Inference: parallel, perpendicular, extension, intersection, local axis | ✅ Complete | 0.4.2 | L | FND-08 |
 | [UX-04](UX-04-direct-handles.md) | Direct viewport handles for placement, radius, and offset | ✅ Complete | 0.4.3 | M | FND-01 |
 | [UX-05](UX-05-snap-control.md) | User control over which snap targets are active | ✅ Complete | 0.4.2; foreground QA and labeled controls in 0.6.0 release | S | FND-04 |
@@ -77,6 +78,7 @@ The difference between a tool that works and one people keep using.
 | [UX-07](UX-07-guided-repair.md) | Guided repair for broken anchors and area bindings | ✅ Complete | 0.4.2 | M | UX-02 |
 | [UX-08](UX-08-stable-overlay-sizing.md) | Verify and enforce stable screen-space label sizing | ✅ Complete | 0.3.1 | S | — |
 | [UX-09](UX-09-annotation-transform-semantics.md) | Define annotation rotation and scale semantics | ✅ Complete | 0.4.3 work; verified in 0.6.0 release | S | UX-04, UX-08 |
+| [UX-10](UX-10-focused-toolset.md) | Focused 0.7 toolset: working tools, movable construction objects, snappable grids | ✅ Complete | 0.7.0 | L | UX-01, UX-02, CON-01 |
 
 ### M3 — Construction
 
@@ -84,10 +86,10 @@ Snapping lines and points as a first-class way to build dimensionally, not just 
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [CON-01](CON-01-guide-points.md) | Guide points | ✅ Complete | 0.4.3 | M | — |
-| [CON-02](CON-02-offset-guides.md) | Offset and parallel guides at a typed distance | ✅ Complete | 0.4.3 | M | CON-01 |
-| [CON-03](CON-03-guide-planes.md) | Guide planes and an active construction plane | ✅ Complete | 0.5.0 | L | CON-02 |
-| [CON-04](CON-04-angular-guides-spacing.md) | Angular guides and repeated spacing | ✅ Complete | 0.5.0; anchored acquisition/repair hardened in 0.6.0 release | M | CON-02 |
+| [CON-01](CON-01-guide-points.md) | Guide points | ✅ Complete | 0.4.3; movable fixed points in 0.7.0 | M | — |
+| [CON-02](CON-02-offset-guides.md) | Offset and parallel guides at a typed distance | 🚫 Withdrawn | 0.4.3; live derivation removed in 0.7.0, replaced by `UX-10`'s fixed Offset Guide | M | CON-01 |
+| [CON-03](CON-03-guide-planes.md) | Guide planes and an active construction plane | 🚫 Withdrawn | 0.5.0; removed in 0.7.0, replaced by `UX-10`'s snappable grid planes | L | CON-02 |
+| [CON-04](CON-04-angular-guides-spacing.md) | Angular guides and repeated spacing | 🚫 Withdrawn | 0.5.0; removed in 0.7.0 | M | CON-02 |
 
 ### M4 — Output
 
@@ -105,9 +107,9 @@ Milestone numbers group related work; they are not a strict delivery queue. The 
 
 | ID | Title | Status | Delivered | Effort | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| [DIM-01](DIM-01-chain-baseline.md) | Chain and baseline dimensions | ✅ Complete | 0.4.3; interaction/geometry/output hardened in 0.6.0 release | M | UX-01 |
-| [DIM-02](DIM-02-radial-diameter-arc.md) | Radial, diameter, and arc-length dimensions | ✅ Complete | 0.4.3 | M | — |
-| [DIM-03](DIM-03-coordinate-elevation.md) | Coordinate and elevation dimensions | ✅ Complete | 0.5.0; explicit datum/point acquisition hardened in 0.6.0 release | M | — |
+| [DIM-01](DIM-01-chain-baseline.md) | Chain and baseline dimensions | 🚫 Withdrawn | 0.4.3; sets removed in 0.7.0, Chain replaced by `UX-10`'s Create Dimension chain mode | M | UX-01 |
+| [DIM-02](DIM-02-radial-diameter-arc.md) | Radial, diameter, and arc-length dimensions | 🚫 Withdrawn | 0.4.3; removed in 0.7.0 | M | — |
+| [DIM-03](DIM-03-coordinate-elevation.md) | Coordinate and elevation dimensions | 🚫 Withdrawn | 0.5.0; removed in 0.7.0 | M | — |
 | [DIM-04](DIM-04-presentation-controls.md) | Drafting presentation controls: ticks, arrows, units, and alignment | ✅ Complete | 0.4.3 | M | OUT-03 |
 
 ### M6 — 1.0 gate
@@ -123,8 +125,10 @@ Focused hardening required before the compatibility promise is made.
 ## Suggested order
 
 M1 through M5 and all three M6 hardening tickets are implemented and validated on
-Linux Blender 5.1.2 and 5.2.2. The final 1.0 release-gate review in
-`VERSIONING.md` still covers the supported-platform matrix and schema freeze.
+Linux Blender 5.1.2 and 5.2.2. `UX-10` narrowed the toolset in 0.7.0 after user
+testing; its schema v16 must ship in a release before the 1.0 schema freeze. The
+final 1.0 release-gate review in `VERSIONING.md` still covers the supported-platform
+matrix and schema freeze.
 
 ## Effort key
 

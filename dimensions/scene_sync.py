@@ -2,10 +2,14 @@
 
 import bpy
 from bpy.app.handlers import persistent
-from math import cos, sin
 from mathutils import Vector
 
-from .anchors import refresh_anchor_resolution, refresh_dimension_anchor_resolutions, resolve_anchor
+from .anchors import (
+    refresh_anchor_resolution,
+    refresh_dimension_anchor_resolutions,
+    resolve_anchor,
+    set_world_anchor,
+)
 from .area_binding import area_label_world, evaluate_area_binding
 from .angle_binding import resolve_angle_source
 from .collections import (
@@ -15,12 +19,6 @@ from .collections import (
     remove_orphan_measurement_snap_proxies,
 )
 from .dimension_geometry import get_angle_world_geometry, get_dimension_world_geometry
-from .dimension_sets import (
-    dimension_set_state,
-    dimension_set_world_geometry,
-    refresh_dimension_set_state,
-)
-from .circle_binding import circle_geometry, store_circle_fit
 from .projected_snap import clear_projected_snap_cache, invalidate_projected_snap_cache_from_depsgraph
 from .properties import is_dimension_object, is_guide_object
 from .volume import clear_volume_cache, invalidate_volume_cache_from_depsgraph
@@ -147,84 +145,40 @@ def _is_editable(obj):
 
 
 def _sync_guide(obj, scene):
-    if getattr(obj.guide_props, "kind", "GUIDE") == "PLANE":
-        from .guide_planes import guide_plane_resolution, store_guide_plane_resolution
-
-        for anchor in (
-            obj.guide_props.plane_point_a,
-            obj.guide_props.plane_point_b,
-            obj.guide_props.plane_point_c,
-            obj.guide_props.source_a.start,
-            obj.guide_props.source_a.end,
-        ):
-            refresh_anchor_resolution(anchor)
-        frame, state = guide_plane_resolution(obj)
-        store_guide_plane_resolution(obj.guide_props, frame, state)
-        _set_translation(obj, None if state != "LIVE" or frame is None else frame[0])
-        return
-    for anchor in (
-        obj.guide_props.start,
-        obj.guide_props.end,
-        obj.guide_props.construction_pivot,
-        obj.guide_props.spacing_end,
-        obj.guide_props.source_a.start,
-        obj.guide_props.source_a.end,
-        obj.guide_props.source_b.start,
-        obj.guide_props.source_b.end,
-    ):
-        refresh_anchor_resolution(anchor)
-    if getattr(obj.guide_props, "derived", False):
-        from .derived_guides import derived_guide_resolution, store_derived_guide_resolution
-
-        line, state = derived_guide_resolution(obj)
-        store_derived_guide_resolution(obj.guide_props, line, state)
-        start_world = None if state != "LIVE" or line is None else line[0]
-    else:
-        start_world = resolve_anchor(obj.guide_props.start)
-    target_world = start_world
-    if getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT":
-        end_world = resolve_anchor(obj.guide_props.end)
-        if start_world is not None and end_world is not None:
-            target_world = (start_world + end_world) * 0.5
-    _set_translation(obj, target_world)
-    if getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT":
-        ensure_measurement_snap_proxy(obj, scene)
-    elif getattr(obj.guide_props, "kind", "GUIDE") == "POINT":
+    kind = getattr(obj.guide_props, "kind", "GUIDE")
+    if kind == "POINT":
         ensure_guide_point_snap_proxy(obj, scene)
+        return
+    if kind != "MEASUREMENT":
+        return
+    for anchor in (obj.guide_props.start, obj.guide_props.end):
+        refresh_anchor_resolution(anchor)
+    start_world = resolve_anchor(obj.guide_props.start)
+    end_world = resolve_anchor(obj.guide_props.end)
+    if start_world is None or end_world is None:
+        return
+    midpoint = (start_world + end_world) * 0.5
+    user_delta = annotation_world_location(obj) - midpoint
+    if user_delta.length > 1e-6 and _measurement_follows_object(obj):
+        set_world_anchor(obj.guide_props.start, start_world + user_delta)
+        set_world_anchor(obj.guide_props.end, end_world + user_delta)
+    else:
+        _set_translation(obj, midpoint)
+    ensure_measurement_snap_proxy(obj, scene)
+
+
+def _measurement_follows_object(obj):
+    """World-anchored measurements move with their object; mesh-bound ones follow the mesh."""
+    return all(
+        getattr(anchor, "anchor_type", "VERTEX") == "WORLD"
+        for anchor in (obj.guide_props.start, obj.guide_props.end)
+    )
 
 
 def _sync_dimension(obj):
     enforce_annotation_transform_policy(obj)
     props = obj.dimension_props
     annotation_kind = getattr(props, "annotation_kind", "LINEAR")
-    if annotation_kind in {"COORDINATE", "ELEVATION"}:
-        from .coordinate_dimensions import coordinate_values, elevation_value
-
-        result = coordinate_values(props) if annotation_kind == "COORDINATE" else elevation_value(props)
-        if result is None:
-            _set_measurement_state(props, "NEEDS_REPAIR")
-            return
-        _set_measurement_state(props, result["state"])
-        _sync_annotation_placement(obj, props, result["point"])
-        return
-    if annotation_kind == "DIMENSION_SET":
-        refresh_dimension_set_state(props)
-        geometry = dimension_set_world_geometry(props)
-        _set_measurement_state(props, dimension_set_state(props))
-        if geometry:
-            center = sum((item["line_mid_world"] for item in geometry), Vector()) / len(geometry)
-            _sync_annotation_placement(obj, props, center)
-        return
-    if annotation_kind == "CIRCLE":
-        fit = circle_geometry(props)
-        if fit is None:
-            _set_measurement_state(props, "NEEDS_REPAIR")
-            return
-        store_circle_fit(props, fit)
-        direction = fit["axis_u"] * cos(props.circle_leader_angle) + fit["axis_v"] * sin(props.circle_leader_angle)
-        distance = props.circle_label_distance if props.circle_label_distance > 1e-6 else fit["radius"] * 1.35
-        _sync_annotation_placement(obj, props, fit["center"] + direction * distance)
-        return
     anchor_state = refresh_dimension_anchor_resolutions(props)
     start_world = resolve_anchor(props.start)
     end_world = resolve_anchor(props.end)

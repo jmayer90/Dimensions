@@ -169,7 +169,10 @@ def evaluate_area_binding(props):
     if obj is None or obj.type != "MESH" or not bindings:
         return None
 
-    faces_by_id = _faces_by_id(obj)
+    # Hold the Edit Mode BMesh wrapper for the whole evaluation: when it is freed,
+    # Blender invalidates every BMFace object created from it.
+    edit_mesh = bmesh.from_edit_mesh(obj.data) if obj.mode == "EDIT" else None
+    faces_by_id = _faces_by_id(obj, edit_mesh)
     resolved = []
     for binding in bindings:
         matches = faces_by_id.get(binding.face_id, ())
@@ -255,10 +258,11 @@ def _evaluate_faces(obj, faces):
     }
 
 
-def _faces_by_id(obj):
+def _faces_by_id(obj, edit_mesh=None):
+    """Map persistent face IDs to faces; ``edit_mesh`` must outlive the returned faces."""
     result = {}
     if obj.mode == "EDIT":
-        bm = bmesh.from_edit_mesh(obj.data)
+        bm = edit_mesh if edit_mesh is not None else bmesh.from_edit_mesh(obj.data)
         layer = bm.faces.layers.int.get(FACE_ID_ATTRIBUTE)
         if layer is None:
             return result

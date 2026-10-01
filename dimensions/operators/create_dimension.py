@@ -18,6 +18,7 @@ from ..drawing import (
     set_preview_state,
 )
 from ..interaction import (
+    set_tool_status_text,
     axis_label,
     axis_from_event,
     axis_from_mouse_direction,
@@ -41,11 +42,32 @@ from ..units import parse_distance_input
 from .selection_annotations import create_dimension_from_selected_edge
 
 
+_DIMENSION_DESCRIPTION = (
+    "Click two points, then click to place the dimension line. "
+    "In Edit Mode with one edge selected, the edge is dimensioned immediately"
+)
+_CHAIN_DESCRIPTION = (
+    "Place a run of ordinary linear dimensions end to end: each new dimension starts where the last one "
+    "ended and shares its dimension line. Esc or right-click ends the run"
+)
+
+
 class CADDIM_OT_CreateDimension(bpy.types.Operator):
     bl_idname = "dimensions.create_dimension"
     bl_label = "Create Dimension"
-    bl_description = "Create from one selected Edit Mode edge, or interactively pick two points"
+    bl_description = _DIMENSION_DESCRIPTION
     bl_options = {"REGISTER", "UNDO"}
+
+    chain: bpy.props.BoolProperty(
+        name="Chain",
+        description="Continue each new dimension from the end of the previous one",
+        default=False,
+        options={"SKIP_SAVE"},
+    )
+
+    @classmethod
+    def description(cls, _context, properties):
+        return _CHAIN_DESCRIPTION if properties.chain else _DIMENSION_DESCRIPTION
 
     # The state machine owns the interaction contract; these expose it under the
     # names the operator body and the preview payload already use.
@@ -87,8 +109,8 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             self.report(messages.WARNING, messages.DIMENSIONS_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
 
-        continuous_placement = continuous_placement_enabled(context)
-        if context.mode == "EDIT_MESH":
+        continuous_placement = continuous_placement_enabled(context) or self.chain
+        if context.mode == "EDIT_MESH" and not self.chain:
             dimension = create_dimension_from_selected_edge(context)
             if dimension is not None:
                 self.report(messages.INFO, messages.CREATED_SELECTED_EDGE)
@@ -107,10 +129,12 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.axis_gesture_active = False
         self.inference_axis = self.dimension_type
         self.inference_session = InferenceSession()
+        self.chain_line = None
         remember_session_context(self, context)
 
         self._update_preview()
         context.window_manager.modal_handler_add(self)
+        set_tool_status_text(context, self._status_text())
         return {"RUNNING_MODAL"}
 
     @modal_cleanup_on_exception
@@ -280,8 +304,14 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
         return {"RUNNING_MODAL"}
 
-    def cancel(self, _context):
+    def cancel(self, context):
         clear_preview_state(key=getattr(self, "_session_viewport_key", None))
+        set_tool_status_text(context, None)
+
+    def _status_text(self):
+        if self.chain:
+            return "Chain: click points in order · X/Y/Z lock direction before the first point · type a distance · Esc ends the run"
+        return "Dimension: click start, click end, click to place the line · X/Y/Z lock direction · type a distance · Esc exits"
 
     def _accept_start(self):
         if self.hover_snap is None:
@@ -311,10 +341,33 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
         self.distance_text = ""
         self.distance_input_valid = True
+        if self.chain and self.chain_line is not None:
+            offset, plane_normal = self._chain_offset(self.start_snap["world_co"], self.end_snap["world_co"])
+            self.offset_distance = offset
+            self.offset_plane_normal = plane_normal
+            self._state_machine.accept_point()
+            if self._create_dimension(context):
+                return self._after_commit(context)
+            self._state_machine.step_back()
+            return {"RUNNING_MODAL"}
         self._begin_offset_stage(context)
         self._state_machine.accept_point()
         self._update_preview()
         return {"RUNNING_MODAL"}
+
+    def _chain_offset(self, start_world, end_world):
+        """Offset that keeps a chained dimension on the previous dimension line."""
+        line_point, plane_normal, line_direction, previous_offset = self.chain_line
+        geometry = get_dimension_world_geometry(
+            self.dimension_type, start_world, end_world, plane_normal, 0.0,
+        )
+        if geometry is None:
+            return previous_offset, plane_normal
+        if abs(geometry["measure_direction_world"].dot(line_direction)) < 0.999:
+            # A turn in an Auto chain keeps the offset instead of a shared line.
+            return previous_offset, plane_normal
+        offset = (line_point - geometry["measure_start_world"]).dot(geometry["offset_direction_world"])
+        return offset, plane_normal
 
     def _effective_end_snap(self, context):
         if self.start_snap is None or self.hover_snap is None:
@@ -363,6 +416,7 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.axis_gesture_active = False
         self.inference_axis = self.dimension_type
         self.inference_session.clear()
+        self.chain_line = None
         previous_state = self.state
         transition = self._state_machine.step_back()
         if transition == "CANCELLED":
@@ -521,20 +575,33 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             dimension_object.select_set(True)
             context.view_layer.objects.active = dimension_object
 
+        if geometry is not None:
+            self._last_line = (
+                geometry["line_start_world"].copy(),
+                Vector(self.offset_plane_normal).copy(),
+                geometry["measure_direction_world"].copy(),
+                self.offset_distance,
+            )
         self.report(messages.INFO, messages.CREATED_DIMENSION)
         return True
 
     def _after_commit(self, context):
         if not self.continuous_placement:
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
+            set_tool_status_text(context, None)
             return {"FINISHED"}
-        push_undo_step("Create Dimension")
-        self._state_machine.restart()
+        push_undo_step("Chain Dimension" if self.chain else "Create Dimension")
+        if self.chain and self.end_snap is not None:
+            self.chain_line = getattr(self, "_last_line", None)
+            self.start_snap = self._copy_snap(self.end_snap)
+            self._state_machine.continue_from_point()
+        else:
+            self._state_machine.restart()
+            self.start_snap = None
+            self.offset_plane_normal = None
         self.hover_snap = None
         self.hover_mouse = None
-        self.start_snap = None
         self.end_snap = None
-        self.offset_plane_normal = None
         self.axis_gesture_active = False
         self.inference_axis = self.dimension_type
         self.inference_session.clear()
@@ -545,6 +612,8 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
     def _update_preview(self):
         preview = {
             "state": self.state,
+            "tool_label": "CHAIN" if self.chain else "DIM",
+            "prompt": self._prompt(),
             "axis": self.inference_axis,
             "axis_selectable": self._state_machine.accepts_axis_lock,
             "dimension_type": self.dimension_type,
@@ -572,6 +641,10 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             end_snap = self._effective_end_snap(bpy.context)
             if end_snap is not None:
                 preview["end_world"] = end_snap["world_co"]
+                if self.chain and self.chain_line is not None:
+                    offset, plane_normal = self._chain_offset(self.start_snap["world_co"], end_snap["world_co"])
+                    preview["offset_distance"] = offset
+                    preview["offset_plane_normal"] = tuple(plane_normal)
         elif self.end_snap is not None:
             preview["end_world"] = self.end_snap["world_co"]
             preview.setdefault("locked_snaps", []).append(self._copy_snap(self.end_snap))
@@ -580,9 +653,18 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             ) * 0.5
 
         if self.offset_plane_normal is not None:
-            preview["offset_plane_normal"] = tuple(self.offset_plane_normal)
+            preview.setdefault("offset_plane_normal", tuple(self.offset_plane_normal))
 
         set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))
+
+    def _prompt(self):
+        if self.state == "PICK_START":
+            return "Click the first point"
+        if self.state == "PICK_END":
+            if self.chain and self.chain_line is not None:
+                return "Click the next point"
+            return "Click the second point"
+        return "Click to place the dimension line"
 
     @staticmethod
     def _copy_snap(snap):

@@ -95,7 +95,7 @@ def nearest_visible_projected_vertex(context, mouse_x, mouse_y, pixel_threshold,
     for _distance, source_index in candidate_indices[:_MAX_DEPTH_CHECKS]:
         candidate = _materialize_candidate(cache["sources"], grid, source_index)
         visible_started = perf_counter() if _profiling_enabled() else None
-        if _is_visible(context, candidate):
+        if _is_visible(context, candidate, _see_through_flags(excluded_flag)):
             if visible_started is not None:
                 _record_timing("occlusion", visible_started)
             if started is not None:
@@ -441,21 +441,42 @@ def _materialize_candidate(sources, grid, source_index):
     }
 
 
-def _is_visible(context, candidate):
+def _see_through_flags(excluded_flag):
+    """Construction grids never hide geometry, whether or not they are snap targets."""
+    from .construction import GUIDE_PLANE_FLAG
+
+    flags = () if not excluded_flag else ((excluded_flag,) if isinstance(excluded_flag, str) else tuple(excluded_flag))
+    return flags + (GUIDE_PLANE_FLAG,)
+
+
+def _is_visible(context, candidate, excluded_flag=None, max_steps=8):
+    """Return whether nothing but see-through objects lies in front of a candidate."""
     coord = candidate["screen_co"]
     origin = view3d_utils.region_2d_to_origin_3d(context.region, context.region_data, coord)
     direction = view3d_utils.region_2d_to_vector_3d(context.region, context.region_data, coord).normalized()
     candidate_depth = (candidate["world_co"] - origin).dot(direction)
     if candidate_depth <= 0.0:
         return False
-    hit, location, _normal, _face_index, _obj, _matrix = context.scene.ray_cast(
-        context.evaluated_depsgraph_get(),
-        origin,
-        direction,
-        distance=candidate_depth + max(1e-4, candidate_depth * 1e-4),
-    )
-    if not hit:
-        return True
-    hit_depth = (location - origin).dot(direction)
     tolerance = max(1e-4, candidate_depth * 1e-4)
-    return candidate_depth <= hit_depth + tolerance
+    depsgraph = context.evaluated_depsgraph_get()
+    start = origin
+    for _step in range(max_steps):
+        remaining = candidate_depth + tolerance - (start - origin).dot(direction)
+        if remaining <= 0.0:
+            return True
+        hit, location, _normal, _face_index, obj, _matrix = context.scene.ray_cast(
+            depsgraph,
+            start,
+            direction,
+            distance=remaining,
+        )
+        if not hit:
+            return True
+        hit_depth = (location - origin).dot(direction)
+        if candidate_depth <= hit_depth + tolerance:
+            return True
+        original = getattr(obj, "original", obj)
+        if original is None or not _object_has_excluded_flag(original, excluded_flag):
+            return False
+        start = location + direction * max(1e-5, hit_depth * 1e-5)
+    return False

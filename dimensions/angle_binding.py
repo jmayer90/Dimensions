@@ -5,7 +5,7 @@ from math import acos, pi
 from mathutils import Vector
 from mathutils.geometry import intersect_line_line
 
-from .anchors import resolve_anchor, set_anchor
+from .anchors import is_construction_grid, resolve_anchor, set_anchor, set_object_anchor
 
 
 def set_angle_edge(props, slot, obj, vertex_indices):
@@ -13,8 +13,13 @@ def set_angle_edge(props, slot, obj, vertex_indices):
         raise ValueError("Angle edge source requires one mesh edge")
     first = props.angle_a_start if slot == "A" else props.angle_b_start
     second = props.angle_a_end if slot == "A" else props.angle_b_end
-    set_anchor(first, obj, int(vertex_indices[0]))
-    set_anchor(second, obj, int(vertex_indices[1]))
+    if is_construction_grid(obj):
+        # Grid edges follow the plane object, not its regenerated topology.
+        for anchor, index in ((first, int(vertex_indices[0])), (second, int(vertex_indices[1]))):
+            set_object_anchor(anchor, obj, obj.matrix_world @ obj.data.vertices[index].co)
+    else:
+        set_anchor(first, obj, int(vertex_indices[0]))
+        set_anchor(second, obj, int(vertex_indices[1]))
     props.angle_source_mode = "EDGES"
 
 

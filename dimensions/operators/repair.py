@@ -106,6 +106,7 @@ class DIMENSIONS_OT_RepairConvertWorld(bpy.types.Operator):
 class DIMENSIONS_OT_RepairFrameIssue(bpy.types.Operator):
     bl_idname = "dimensions.repair_frame_issue"
     bl_label = "Frame Last Known Position"
+    bl_description = "Zoom the viewport to where the missing source was last seen"
     bl_options = {"REGISTER"}
 
     object_name: bpy.props.StringProperty()

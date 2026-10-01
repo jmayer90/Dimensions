@@ -230,26 +230,13 @@ def migrate_v5_to_v6(scene):
     return changed
 
 
-def migrate_v6_to_v7(scene):
-    """Initialize additive persistent chain/baseline set storage.
+def migrate_v6_to_v7(_scene):
+    """Formerly initialized chain/baseline set storage.
 
-    Existing annotations remain independent. Blender supplies empty member
-    collections and the automatic-spacing default for files written by v6.
+    Schema 16 converts every saved set into ordinary linear dimensions, so this
+    step has nothing left to initialize.
     """
-    changed = False
-    for obj in _writable_scene_objects(scene):
-        if not is_dimension_object(obj):
-            continue
-        props = obj.dimension_props
-        if getattr(props, "annotation_kind", "LINEAR") != "DIMENSION_SET":
-            continue
-        if props.set_kind not in {"CHAIN", "BASELINE"}:
-            props.set_kind = "CHAIN"
-            changed = True
-        if props.set_spacing < 0.0:
-            props.set_spacing = 0.0
-            changed = True
-    return changed
+    return False
 
 
 def migrate_v7_to_v8(scene):
@@ -314,108 +301,35 @@ def migrate_v8_to_v9(scene):
     return True
 
 
-def migrate_v9_to_v10(scene):
-    """Initialize additive circular binding storage without changing legacy annotations."""
-    changed = False
-    settings = scene.dimensions_settings
-    if not settings.annotation_manager_kind_circle:
-        settings.annotation_manager_kind_circle = True
-        changed = True
-    for obj in _writable_scene_objects(scene):
-        if not is_dimension_object(obj):
-            continue
-        props = obj.dimension_props
-        if getattr(props, "annotation_kind", "LINEAR") != "CIRCLE":
-            continue
-        if props.circle_fit_warning_threshold <= 0.0:
-            props.circle_fit_warning_threshold = 0.02
-            changed = True
-    return changed
+def migrate_v9_to_v10(_scene):
+    """Formerly initialized circular-dimension storage, removed in schema 16."""
+    return False
 
 
-def migrate_v10_to_v11(scene):
-    """Initialize additive derived-guide relationship storage as fixed/live."""
-    changed = False
-    for obj in _writable_scene_objects(scene):
-        if not is_guide_object(obj):
-            continue
-        props = obj.guide_props
-        if props.derived or props.derivation_mode != "NONE":
-            props.derived = False
-            props.derivation_mode = "NONE"
-            changed = True
-        if props.derived_state != "LIVE":
-            props.derived_state = "LIVE"
-            changed = True
-    return changed
+def migrate_v10_to_v11(_scene):
+    """Formerly initialized derived-guide storage, removed in schema 16."""
+    return False
 
 
-def migrate_v11_to_v12(scene):
-    """Initialize additive named datum and coordinate/elevation storage."""
-    changed = False
-    settings = scene.dimensions_settings
-    for name in ("coordinate", "elevation", "datum"):
-        property_name = f"annotation_manager_kind_{name}"
-        if not getattr(settings, property_name):
-            setattr(settings, property_name, True)
-            changed = True
-    for obj in _writable_scene_objects(scene):
-        if is_guide_object(obj) and getattr(obj.guide_props, "kind", "GUIDE") == "POINT":
-            props = obj.guide_props
-            if props.is_datum and not props.datum_name.strip():
-                props.datum_name = obj.name
-                changed = True
-        elif is_dimension_object(obj):
-            props = obj.dimension_props
-            if props.annotation_kind == "ELEVATION" and props.elevation_precision < 0:
-                props.elevation_precision = 3
-                changed = True
-    return changed
+def migrate_v11_to_v12(_scene):
+    """Formerly initialized datum, coordinate, and elevation storage, removed in schema 16."""
+    return False
 
 
 def migrate_v12_to_v13(scene):
-    """Initialize additive guide-plane and active construction-plane storage."""
+    """Initialize the additive guide-plane snap target and manager filter."""
     settings = scene.dimensions_settings
     changed = False
-    if settings.active_plane_mode not in {"NONE", "GUIDE", "FACE", "VIEW", "WORLD_XY", "WORLD_YZ", "WORLD_ZX"}:
-        settings.active_plane_mode = "NONE"
-        settings.active_plane_object = None
-        changed = True
     for property_name in ("snap_guide_plane", "annotation_manager_kind_plane"):
         if not getattr(settings, property_name):
             setattr(settings, property_name, True)
             changed = True
-    for obj in _writable_scene_objects(scene):
-        if not is_guide_object(obj) or getattr(obj.guide_props, "kind", "GUIDE") != "PLANE":
-            continue
-        props = obj.guide_props
-        if props.plane_extent <= 0.0:
-            props.plane_extent = 2.0
-            changed = True
-        if props.plane_state not in {"LIVE", "NEEDS_REPAIR", "CYCLE"}:
-            props.plane_state = "NEEDS_REPAIR"
-            changed = True
     return changed
 
 
-def migrate_v13_to_v14(scene):
-    """Initialize additive angular and repeated-spacing guide definitions."""
-    changed = False
-    for obj in _writable_scene_objects(scene):
-        if not is_guide_object(obj):
-            continue
-        props = obj.guide_props
-        if props.derivation_mode == "SPACING":
-            if props.spacing_interval <= 0.0:
-                props.spacing_interval = 1.0
-                changed = True
-            if props.spacing_count < 2:
-                props.spacing_count = 2
-                changed = True
-            if props.spacing_extent <= 0.0:
-                props.spacing_extent = props.spacing_interval * (props.spacing_count - 1)
-                changed = True
-    return changed
+def migrate_v13_to_v14(_scene):
+    """Formerly initialized angular and repeated-spacing guides, removed in schema 16."""
+    return False
 
 
 def migrate_v14_to_v15(scene):
@@ -445,6 +359,248 @@ def migrate_v14_to_v15(scene):
     return changed
 
 
+_LEGACY_ANNOTATION_KINDS = {3: "DIMENSION_SET", 4: "CIRCLE", 5: "COORDINATE", 6: "ELEVATION"}
+_LEGACY_AXIS_NAMES = {1: "X", 2: "Y", 3: "Z"}
+_ANCHOR_TYPES = ("VERTEX", "OBJECT_POINT", "WORLD")
+_LEGACY_DIMENSION_KEYS = (
+    "datum_object", "coordinate_components", "coordinate_alignment", "coordinate_alignment_offset",
+    "coordinate_sign", "coordinate_show_plus", "coordinate_show_negative", "elevation_axis",
+    "elevation_mode", "elevation_reference", "elevation_precision", "elevation_show_plus",
+    "elevation_prefix", "elevation_suffix", "set_kind", "set_members", "active_set_member_index",
+    "set_spacing", "set_expanded", "circle_kind", "circle_fit_mode", "circle_source_object",
+    "circle_vertices", "circle_closed", "circle_fit_error", "circle_fit_warning_threshold",
+    "circle_center", "circle_normal", "circle_start_direction", "circle_radius", "circle_sweep",
+    "circle_leader_angle", "circle_label_distance",
+)
+_LEGACY_GUIDE_KEYS = (
+    "is_datum", "datum_name", "datum_orientation", "axis", "derived", "derivation_mode",
+    "source_a", "source_b", "construction_pivot", "spacing_end", "guide_angle", "spacing_mode",
+    "spacing_interval", "spacing_count", "spacing_extent", "offset_distance", "offset_side",
+    "derived_direction", "derived_state", "last_resolved_origin", "last_resolved_direction",
+    "plane_definition", "plane_point_a", "plane_point_b", "plane_point_c", "plane_normal",
+    "plane_axis_u", "plane_state",
+)
+_LEGACY_SCENE_KEYS = (
+    "active_plane_mode", "active_plane_object", "active_plane_origin", "active_plane_normal",
+    "active_plane_axis_u", "annotation_manager_kind_dimension_set", "annotation_manager_kind_circle",
+    "annotation_manager_kind_coordinate", "annotation_manager_kind_elevation",
+    "annotation_manager_kind_datum",
+)
+
+
+def _raw_group(owner, name):
+    """Return the saved property group behind ``owner.<name>``, including removed fields."""
+    getter = getattr(owner, "bl_system_properties_get", None)
+    if getter is None:
+        return None
+    try:
+        storage = getter()
+    except (TypeError, RuntimeError):
+        return None
+    if storage is None:
+        return None
+    try:
+        return storage[name]
+    except (KeyError, TypeError):
+        return None
+
+
+def _raw_value(group, key, default=None):
+    if group is None:
+        return default
+    try:
+        return group[key]
+    except (KeyError, TypeError):
+        return default
+
+
+def _raw_vector(group, key, default):
+    from mathutils import Vector
+
+    value = _raw_value(group, key)
+    try:
+        vector = Vector(tuple(value))
+    except (TypeError, ValueError):
+        return Vector(default)
+    return vector if len(vector) == 3 else Vector(default)
+
+
+def _drop_raw_keys(group, keys):
+    if group is None:
+        return
+    for key in keys:
+        try:
+            del group[key]
+        except (KeyError, TypeError):
+            pass
+
+
+def _copy_raw_anchor(raw, owner, key):
+    """Copy a saved anchor group verbatim, bypassing RNA update callbacks."""
+    if raw is None:
+        return False
+    target = _raw_group(owner, "dimension_props")
+    if target is None:
+        return False
+    target[key] = raw.to_dict() if hasattr(raw, "to_dict") else dict(raw)
+    return True
+
+
+def _copy_simple_properties(source, target, skip=()):
+    for prop in source.bl_rna.properties:
+        name = prop.identifier
+        if name in skip or name == "rna_type" or prop.is_readonly or prop.type in {"POINTER", "COLLECTION"}:
+            continue
+        try:
+            setattr(target, name, getattr(source, name))
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+
+def _convert_dimension_set(obj, raw):
+    """Replace one saved chain/baseline set with ordinary linear dimensions."""
+    members = list(_raw_value(raw, "set_members", ()) or ())
+    baseline = int(_raw_value(raw, "set_kind", 0)) == 1
+    spacing = float(_raw_value(raw, "set_spacing", 0.0) or 0.0)
+    props = obj.dimension_props
+    pitch = spacing if spacing > 1e-6 else max(0.05, float(props.text_size) * 0.015)
+    axis = props.dimension_type
+    collections = tuple(obj.users_collection)
+    created = []
+    for index, member in enumerate(members):
+        new_object = bpy.data.objects.new(f"{obj.name} {index + 1}", None)
+        new_object.empty_display_type = obj.empty_display_type
+        new_object.empty_display_size = obj.empty_display_size
+        new_object.hide_render = True
+        for collection in collections:
+            collection.objects.link(new_object)
+        new_props = new_object.dimension_props
+        _copy_simple_properties(props, new_props, skip={"annotation_kind", "enabled", "placement_initialized"})
+        new_props.enabled = True
+        new_props.annotation_kind = "LINEAR"
+        new_props.measurement_mode = f"DELTA_{axis}" if axis in {"X", "Y", "Z"} else "TRUE"
+        new_props.offset_distance = props.offset_distance + (index * pitch if baseline else 0.0)
+        new_props.placement_initialized = False
+        new_object["_dimensions_new_locator"] = True
+        _copy_raw_anchor(_raw_value(member, "start"), new_object, "start")
+        _copy_raw_anchor(_raw_value(member, "end"), new_object, "end")
+        new_object.location = obj.location
+        created.append(new_object)
+    bpy.data.objects.remove(obj, do_unlink=True)
+    return created
+
+
+def _convert_guide_line(obj, raw):
+    from mathutils import Vector
+
+    from .anchors import resolve_anchor, set_world_anchor
+    from .construction import set_guide_line_transform
+
+    props = obj.guide_props
+    if _raw_value(raw, "derived", 0):
+        origin = _raw_vector(raw, "last_resolved_origin", obj.matrix_world.translation)
+        direction = _raw_vector(raw, "last_resolved_direction", (1.0, 0.0, 0.0))
+    else:
+        origin = resolve_anchor(props.start)
+        axis = _LEGACY_AXIS_NAMES.get(int(_raw_value(raw, "axis", 0) or 0))
+        if axis is not None:
+            direction = Vector({"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}[axis])
+        else:
+            direction = resolve_anchor(props.end) - origin
+    if direction.length < 1e-8:
+        direction = Vector((1.0, 0.0, 0.0))
+    direction.normalize()
+    set_guide_line_transform(obj, origin, direction)
+    set_world_anchor(props.start, origin)
+    set_world_anchor(props.end, origin + direction)
+
+
+def _convert_guide_point(obj):
+    from .anchors import resolve_anchor, set_world_anchor
+
+    point = resolve_anchor(obj.guide_props.start)
+    matrix = obj.matrix_world.copy()
+    matrix.translation = point
+    obj.matrix_world = matrix
+    set_world_anchor(obj.guide_props.start, point)
+
+
+def _convert_guide_plane(obj, raw):
+    """Replace a saved Empty plane with a snappable grid mesh on its last frame."""
+    from .collections import build_guide_plane_object
+    from .construction import plane_frame
+
+    origin = _raw_vector(raw, "last_resolved_origin", obj.matrix_world.translation)
+    normal = _raw_vector(raw, "last_resolved_direction", (0.0, 0.0, 1.0))
+    axis_u = _raw_vector(raw, "plane_axis_u", (1.0, 0.0, 0.0))
+    frame = plane_frame(origin, normal, axis_u) or plane_frame(origin, (0.0, 0.0, 1.0))
+    collections = tuple(obj.users_collection)
+    if not collections:
+        return None
+    name = obj.name
+    extent = obj.guide_props.plane_extent
+    visible = obj.guide_props.visible
+    hidden = obj.hide_viewport
+    bpy.data.objects.remove(obj, do_unlink=True)
+    plane = build_guide_plane_object(collections[0], frame, extent, None, name)
+    for collection in collections[1:]:
+        collection.objects.link(plane)
+    plane.name = name
+    plane.guide_props.visible = visible
+    plane.hide_viewport = hidden
+    return plane
+
+
+def migrate_v15_to_v16(scene):
+    """Convert 0.6 data to the simplified 0.7 model.
+
+    Chain and Baseline sets become ordinary linear dimensions. Derived, angular,
+    and spaced guides become fixed guide lines at their last resolved position.
+    Guide lines and points become transform-defined movable objects, and guide
+    planes become snappable grid meshes. Radial, diameter, arc-length,
+    coordinate, and elevation annotations are removed because 0.7 has no
+    equivalent; their names are printed to the console.
+    """
+    changed = False
+    removed = []
+    for obj in list(scene.objects):
+        if is_read_only_dimensions_object(obj):
+            continue
+        dimension_raw = _raw_group(obj, "dimension_props")
+        if dimension_raw is not None and _raw_value(dimension_raw, "enabled", 0):
+            kind = _LEGACY_ANNOTATION_KINDS.get(int(_raw_value(dimension_raw, "annotation_kind", 0) or 0))
+            if kind == "DIMENSION_SET":
+                _convert_dimension_set(obj, dimension_raw)
+                changed = True
+                continue
+            if kind in {"CIRCLE", "COORDINATE", "ELEVATION"}:
+                removed.append(obj.name)
+                bpy.data.objects.remove(obj, do_unlink=True)
+                changed = True
+                continue
+            _drop_raw_keys(dimension_raw, _LEGACY_DIMENSION_KEYS)
+        guide_raw = _raw_group(obj, "guide_props")
+        if guide_raw is None or not _raw_value(guide_raw, "enabled", 0):
+            continue
+        kind = obj.guide_props.kind
+        if kind == "GUIDE":
+            _convert_guide_line(obj, guide_raw)
+        elif kind == "POINT":
+            _convert_guide_point(obj)
+        elif kind == "PLANE" and obj.type != "MESH":
+            obj = _convert_guide_plane(obj, guide_raw)
+            guide_raw = None if obj is None else _raw_group(obj, "guide_props")
+        _drop_raw_keys(guide_raw, _LEGACY_GUIDE_KEYS)
+        changed = True
+    _drop_raw_keys(_raw_group(scene, "dimensions_settings"), _LEGACY_SCENE_KEYS)
+    if removed:
+        print(
+            "Dimensions 0.7 removed radial, diameter, arc, coordinate, and elevation "
+            f"annotations from scene {scene.name!r}: {', '.join(sorted(removed))}"
+        )
+    return changed
+
+
 _MIGRATIONS = {
     0: migrate_v0_to_v1,
     1: migrate_v1_to_v2,
@@ -461,6 +617,7 @@ _MIGRATIONS = {
     12: migrate_v12_to_v13,
     13: migrate_v13_to_v14,
     14: migrate_v14_to_v15,
+    15: migrate_v15_to_v16,
 }
 
 

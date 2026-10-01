@@ -18,10 +18,8 @@ from ..properties import (
 )
 from ..collections import remove_guide_point_snap_proxies, remove_measurement_snap_proxies
 from ..drawing import set_preview_state
-from ..derived_guides import resolve_source
 from ..area_binding import evaluate_area_binding
 from ..repair import repair_issues
-from ..anchors import anchor_resolution
 from .style import _active_style, assign_style_to_annotations
 
 
@@ -43,10 +41,22 @@ def _remove_managed_object(obj):
         remove_measurement_snap_proxies(obj)
     if is_guide_object(obj) and getattr(obj.guide_props, "kind", "GUIDE") == "POINT":
         remove_guide_point_snap_proxies(obj)
+    mesh = obj.data if getattr(obj, "type", None) == "MESH" else None
     bpy.data.objects.remove(obj, do_unlink=True)
+    if mesh is not None and mesh.users == 0:
+        bpy.data.meshes.remove(mesh)
+
+
+def _active_row_object(context):
+    settings = context.scene.dimensions_settings
+    index = settings.active_annotation_manager_index
+    if 0 <= index < len(settings.annotation_manager_items):
+        return settings.annotation_manager_items[index].annotation
+    return None
 
 
 def isolate_annotations(context, targets):
+    """Show only ``targets`` among Dimensions objects; the model stays visible."""
     settings = context.scene.dimensions_settings
     if settings.annotation_manager_isolate_active:
         restore_annotation_visibility(context)
@@ -83,9 +93,10 @@ def restore_annotation_visibility(context):
 class DIMENSIONS_OT_ManagerSelect(bpy.types.Operator):
     bl_idname = "dimensions.manager_select"
     bl_label = "Select Annotation"
+    bl_description = "Select this annotation in the viewport and make it active"
     bl_options = {"REGISTER", "UNDO"}
 
-    object_name: bpy.props.StringProperty()
+    object_name: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
 
     def execute(self, context):
         obj = _managed_object(context, self.object_name)
@@ -96,33 +107,13 @@ class DIMENSIONS_OT_ManagerSelect(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class DIMENSIONS_OT_ManagerSelectSetMember(bpy.types.Operator):
-    bl_idname = "dimensions.manager_select_set_member"
-    bl_label = "Select Dimension Set Member"
-    bl_options = {"REGISTER", "UNDO"}
-
-    object_name: bpy.props.StringProperty()
-    member_index: bpy.props.IntProperty(default=0, min=0)
-
-    def execute(self, context):
-        obj = _managed_object(context, self.object_name)
-        if obj is None or not is_dimension_object(obj) or obj.dimension_props.annotation_kind != "DIMENSION_SET":
-            self.report(messages.WARNING, messages.MANAGER_ITEM_MISSING)
-            return {"CANCELLED"}
-        if self.member_index >= len(obj.dimension_props.set_members):
-            self.report(messages.WARNING, messages.MANAGER_ITEM_MISSING)
-            return {"CANCELLED"}
-        obj.dimension_props.active_set_member_index = self.member_index
-        _select_only(context, obj)
-        return {"FINISHED"}
-
-
 class DIMENSIONS_OT_ManagerRename(bpy.types.Operator):
     bl_idname = "dimensions.manager_rename"
     bl_label = "Rename Annotation"
+    bl_description = "Give this annotation a new name"
     bl_options = {"REGISTER", "UNDO"}
 
-    object_name: bpy.props.StringProperty()
+    object_name: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
     name: bpy.props.StringProperty(name="Name")
 
     def invoke(self, context, _event):
@@ -148,10 +139,11 @@ class DIMENSIONS_OT_ManagerRename(bpy.types.Operator):
 
 class DIMENSIONS_OT_ManagerToggleVisibility(bpy.types.Operator):
     bl_idname = "dimensions.manager_toggle_visibility"
-    bl_label = "Toggle Annotation Visibility"
+    bl_label = "Show or Hide Annotation"
+    bl_description = "Show or hide this annotation in the viewport"
     bl_options = {"REGISTER", "UNDO"}
 
-    object_name: bpy.props.StringProperty()
+    object_name: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
 
     def execute(self, context):
         obj = _managed_object(context, self.object_name)
@@ -168,9 +160,10 @@ class DIMENSIONS_OT_ManagerToggleVisibility(bpy.types.Operator):
 class DIMENSIONS_OT_ManagerDelete(bpy.types.Operator):
     bl_idname = "dimensions.manager_delete"
     bl_label = "Delete Annotation"
+    bl_description = "Delete this annotation or construction object"
     bl_options = {"REGISTER", "UNDO"}
 
-    object_name: bpy.props.StringProperty()
+    object_name: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
 
     def execute(self, context):
         obj = _managed_object(context, self.object_name)
@@ -189,9 +182,10 @@ class DIMENSIONS_OT_ManagerDelete(bpy.types.Operator):
 class DIMENSIONS_OT_ManagerJumpTo(bpy.types.Operator):
     bl_idname = "dimensions.manager_jump_to"
     bl_label = "Frame Annotation"
+    bl_description = "Select this annotation and zoom the viewport to it"
     bl_options = {"REGISTER"}
 
-    object_name: bpy.props.StringProperty()
+    object_name: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
 
     def execute(self, context):
         obj = _managed_object(context, self.object_name)
@@ -209,39 +203,13 @@ class DIMENSIONS_OT_ManagerJumpTo(bpy.types.Operator):
 class DIMENSIONS_OT_ManagerRepairEntry(bpy.types.Operator):
     bl_idname = "dimensions.manager_repair_entry"
     bl_label = "Show Repair Sources"
+    bl_description = "Select the source geometry of this annotation and mark its last known and suggested positions"
     bl_options = {"REGISTER", "UNDO"}
 
-    object_name: bpy.props.StringProperty()
+    object_name: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
 
     def execute(self, context):
         obj = _managed_object(context, self.object_name)
-        if obj is not None and is_guide_object(obj) and getattr(obj.guide_props, "kind", "GUIDE") == "POINT":
-            _select_only(context, obj)
-            return bpy.ops.dimensions.reattach_anchor("INVOKE_DEFAULT", anchor_name="START")
-        if obj is not None and is_guide_object(obj) and getattr(obj.guide_props, "kind", "GUIDE") == "PLANE":
-            _select_only(context, obj)
-            return bpy.ops.dimensions.repair_guide_plane("INVOKE_DEFAULT", object_name=obj.name)
-        if obj is not None and is_guide_object(obj) and getattr(obj.guide_props, "derived", False):
-            _select_only(context, obj)
-            props = obj.guide_props
-            if resolve_source(props.source_a) is None:
-                slot = "A"
-            elif props.derivation_mode == "CENTERLINE" and resolve_source(props.source_b) is None:
-                slot = "B"
-            elif (
-                props.derivation_mode in {"ANGULAR", "SPACING"}
-                and anchor_resolution(props.construction_pivot)[1] != "BY_ID"
-            ):
-                slot = "PIVOT"
-            elif (
-                props.derivation_mode == "SPACING"
-                and props.spacing_mode == "DISTRIBUTE"
-                and anchor_resolution(props.spacing_end)[1] != "BY_ID"
-            ):
-                slot = "SPACING_END"
-            else:
-                slot = "A"
-            return bpy.ops.dimensions.repair_derived_guide_source("INVOKE_DEFAULT", source_slot=slot)
         if obj is None or not is_dimension_object(obj):
             self.report(messages.WARNING, messages.MANAGER_ITEM_MISSING)
             return {"CANCELLED"}
@@ -261,18 +229,6 @@ class DIMENSIONS_OT_ManagerRepairEntry(bpy.types.Operator):
                 props.angle_a_end, props.angle_b_start, props.angle_b_end,
             ) if anchor.target_object is not None
         }
-        if getattr(props, "annotation_kind", "LINEAR") == "DIMENSION_SET":
-            sources.update(
-                anchor.target_object
-                for member in props.set_members
-                for anchor in (member.start, member.end)
-                if anchor.target_object is not None
-            )
-        elif getattr(props, "annotation_kind", "LINEAR") == "CIRCLE":
-            sources.update(
-                anchor.target_object for anchor in props.circle_vertices
-                if anchor.target_object is not None
-            )
         if props.area_source_object is not None:
             sources.add(props.area_source_object)
         for selected in context.selected_objects:
@@ -294,24 +250,50 @@ class DIMENSIONS_OT_ManagerRepairEntry(bpy.types.Operator):
         return {"FINISHED"}
 
 
+_VISIBILITY_DESCRIPTIONS = {
+    "SHOW": "Show the annotations chosen by Apply To",
+    "HIDE": "Hide the annotations chosen by Apply To",
+    "ISOLATE": (
+        "Show only the annotations chosen by Apply To and hide every other annotation and guide. "
+        "Your model stays visible. With Selected and nothing selected, the highlighted row is used"
+    ),
+    "RESTORE": "Restore every annotation and guide to how it was before Isolate",
+}
+
+
 class DIMENSIONS_OT_ManagerBulkVisibility(bpy.types.Operator):
     bl_idname = "dimensions.manager_bulk_visibility"
-    bl_label = "Bulk Annotation Visibility"
+    bl_label = "Annotation Visibility"
+    bl_description = "Show, hide, or isolate annotations"
     bl_options = {"REGISTER", "UNDO"}
 
-    action: bpy.props.EnumProperty(items=[
-        ("SHOW", "Show", "Show annotations in scope"),
-        ("HIDE", "Hide", "Hide annotations in scope"),
-        ("ISOLATE", "Isolate", "Show only annotations in scope"),
-        ("RESTORE", "Exit Isolate", "Restore visibility from before isolate"),
-    ])
+    action: bpy.props.EnumProperty(
+        items=[
+            ("SHOW", "Show", _VISIBILITY_DESCRIPTIONS["SHOW"]),
+            ("HIDE", "Hide", _VISIBILITY_DESCRIPTIONS["HIDE"]),
+            ("ISOLATE", "Isolate", _VISIBILITY_DESCRIPTIONS["ISOLATE"]),
+            ("RESTORE", "Exit Isolate", _VISIBILITY_DESCRIPTIONS["RESTORE"]),
+        ],
+        options={"SKIP_SAVE"},
+    )
+
+    @classmethod
+    def description(cls, _context, properties):
+        return _VISIBILITY_DESCRIPTIONS.get(properties.action, cls.bl_description)
 
     def execute(self, context):
+        settings = context.scene.dimensions_settings
         if self.action == "RESTORE":
             restore_annotation_visibility(context)
             self.report(messages.INFO, messages.MANAGER_ISOLATE_RESTORED)
             return {"FINISHED"}
         objects = bulk_manager_objects(context)
+        if not objects and settings.annotation_manager_bulk_scope == "SELECTED":
+            active_row = _active_row_object(context)
+            objects = () if active_row is None else (active_row,)
+        if not objects:
+            self.report(messages.WARNING, messages.MANAGER_SCOPE_EMPTY)
+            return {"CANCELLED"}
         if self.action == "ISOLATE":
             isolate_annotations(context, objects)
         else:
@@ -326,7 +308,8 @@ class DIMENSIONS_OT_ManagerBulkVisibility(bpy.types.Operator):
 
 class DIMENSIONS_OT_ManagerBulkDelete(bpy.types.Operator):
     bl_idname = "dimensions.manager_bulk_delete"
-    bl_label = "Delete Annotations in Scope"
+    bl_label = "Delete Annotations"
+    bl_description = "Delete every annotation chosen by Apply To"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -334,6 +317,9 @@ class DIMENSIONS_OT_ManagerBulkDelete(bpy.types.Operator):
             obj for obj in bulk_manager_objects(context)
             if not is_read_only_dimensions_object(obj)
         )
+        if not objects:
+            self.report(messages.WARNING, messages.MANAGER_SCOPE_EMPTY)
+            return {"CANCELLED"}
         for obj in objects:
             _remove_managed_object(obj)
         sync_annotation_manager(context.scene)
@@ -343,7 +329,8 @@ class DIMENSIONS_OT_ManagerBulkDelete(bpy.types.Operator):
 
 class DIMENSIONS_OT_ManagerBulkStyle(bpy.types.Operator):
     bl_idname = "dimensions.manager_bulk_style"
-    bl_label = "Apply Named Style to Scope"
+    bl_label = "Apply Named Style"
+    bl_description = "Assign the highlighted named style to every annotation chosen by Apply To"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -361,7 +348,8 @@ class DIMENSIONS_OT_ManagerBulkStyle(bpy.types.Operator):
 
 class DIMENSIONS_OT_ManagerBulkResetStyle(bpy.types.Operator):
     bl_idname = "dimensions.manager_bulk_reset_style"
-    bl_label = "Reset Scope to Global Style"
+    bl_label = "Reset to Global Style"
+    bl_description = "Give every annotation chosen by Apply To the global dimension style"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -377,7 +365,6 @@ class DIMENSIONS_OT_ManagerBulkResetStyle(bpy.types.Operator):
 
 classes = (
     DIMENSIONS_OT_ManagerSelect,
-    DIMENSIONS_OT_ManagerSelectSetMember,
     DIMENSIONS_OT_ManagerRename,
     DIMENSIONS_OT_ManagerToggleVisibility,
     DIMENSIONS_OT_ManagerDelete,

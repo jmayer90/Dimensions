@@ -8,6 +8,7 @@ from ..anchors import set_world_anchor
 from ..collections import create_measurement_object, ensure_measurement_snap_proxy
 from ..drawing import clear_measure_state, set_measure_state
 from ..interaction import (
+    set_tool_status_text,
     axis_from_event,
     axis_from_mouse_direction,
     continuous_placement_enabled,
@@ -28,13 +29,13 @@ from ..measurement_query import format_measurement_query
 from ..keymaps import modal_action_from_event
 
 
-class CADDIM_OT_Measure(bpy.types.Operator):
-    """Transient tape measure; persistence is an explicit in-tool action."""
+class _MeasureTool:
+    """Shared tape-measure workflow.
 
-    bl_idname = "dimensions.measure"
-    bl_label = "Measure"
-    bl_description = "Measure transiently; press P to save the current segment"
-    bl_options = {"REGISTER"}
+    Blender binds each registered operator class to one RNA type, so the
+    transient and persistent operators share this unregistered base rather than
+    one registered operator subclassing the other.
+    """
 
     persistent_mode = False
 
@@ -59,7 +60,13 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         remember_session_context(self, context)
         self._update_overlay(context)
         context.window_manager.modal_handler_add(self)
+        set_tool_status_text(context, self._status_text())
         return {"RUNNING_MODAL"}
+
+    def _status_text(self):
+        if self.persistent_mode:
+            return "Measure (Persistent): click two points to save a measurement · X/Y/Z lock direction · type a distance · Esc exits"
+        return "Measure: click points to read distances · X/Y/Z lock direction · P saves the segment · Ctrl+C copies · Esc exits"
 
     @modal_cleanup_on_exception
     def modal(self, context, event):
@@ -359,12 +366,26 @@ class CADDIM_OT_Measure(bpy.types.Operator):
         )
 
 
-class CADDIM_OT_PersistentMeasure(CADDIM_OT_Measure):
-    """Direct invocation of the former save-on-confirm measurement workflow."""
+class CADDIM_OT_Measure(_MeasureTool, bpy.types.Operator):
+    """Transient tape measure; persistence is an explicit in-tool action."""
+
+    bl_idname = "dimensions.measure"
+    bl_label = "Measure"
+    bl_description = (
+        "Click points to read the distance and its X, Y, and Z components; each point continues the "
+        "tape. Nothing is saved unless you press P. Ctrl+C copies the reading"
+    )
+    bl_options = {"REGISTER"}
+
+    persistent_mode = False
+
+
+class CADDIM_OT_PersistentMeasure(_MeasureTool, bpy.types.Operator):
+    """Direct invocation of the save-on-confirm measurement workflow."""
 
     bl_idname = "dimensions.measure_persistent"
     bl_label = "Measure (Persistent)"
-    bl_description = "Create a saved construction measurement directly"
+    bl_description = "Click two points to save a measurement that other tools can snap to"
     bl_options = {"REGISTER", "UNDO"}
 
     persistent_mode = True

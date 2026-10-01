@@ -21,10 +21,16 @@ from dimensions.anchors import dimension_source_anchors, resolve_anchor, set_anc
 from dimensions.angle_binding import set_angle_edge
 from dimensions.area_binding import bind_area_face_indices
 from dimensions.constants import CURRENT_SCHEMA_VERSION
-from dimensions.derived_guides import bind_edge_source, resolve_derived_guide
-from dimensions.dimension_sets import dimension_set_world_geometry
-from dimensions.circle_binding import bind_circle_vertices, circle_geometry, store_circle_fit
-from dimensions.coordinate_dimensions import coordinate_values, elevation_value, is_datum_object
+from dimensions.dimension_geometry import get_dimension_world_geometry
+from dimensions.construction import (
+    GUIDE_PLANE_FLAG,
+    construction_segment_world,
+    guide_line_world,
+    guide_plane_frame,
+    guide_point_world,
+    plane_frame,
+    set_guide_line_transform,
+)
 from dimensions.migrations import migrate_scene, scene_has_dimensions_data
 from dimensions.properties import STYLE_PROPERTY_NAMES, resolve_dimension_style
 from dimensions.collections import (
@@ -41,7 +47,6 @@ from dimensions.collections import (
     iter_scene_role_objects,
     remove_measurement_snap_proxies,
 )
-from dimensions.guide_planes import active_plane_frame, resolve_guide_plane
 from dimensions.operators.generate_output import annotation_output_key
 from dimensions.projected_snap import get_projected_snap_timings
 from dimensions.scene_sync import _run_scheduled_sync, sync_scene_objects
@@ -173,77 +178,39 @@ class DimensionsLifecycleTests(unittest.TestCase):
             self.assertEqual(restored.sheet_author, "Ada Lovelace")
             self.assertEqual(restored.sheet_date, "2026-08-29")
 
-    def test_save_reload_preserves_guide_plane_and_active_plane(self):
-        plane = create_guide_plane_object(bpy.context, "Dimensions Lifecycle Plane")
+    def test_save_reload_preserves_moved_guide_plane_grid(self):
+        frame = plane_frame((1.0, 2.0, 3.0), (0.0, 1.0, 1.0), (1.0, 0.0, 0.0))
+        plane = create_guide_plane_object(bpy.context, frame, 1.5, 0.5, "Dimensions Lifecycle Plane")
         plane_name = plane.name
-        plane.guide_props.plane_definition = "POINT_NORMAL"
-        plane.guide_props.plane_extent = 4.5
-        plane.guide_props.plane_normal = (0.0, 1.0, 1.0)
-        set_world_anchor(plane.guide_props.plane_point_a, Vector((2.0, 3.0, 4.0)))
-        bpy.context.scene.dimensions_settings.active_plane_object = plane
-        bpy.context.scene.dimensions_settings.active_plane_mode = "GUIDE"
-        self.assertIsNotNone(resolve_guide_plane(plane))
+        plane.location.x += 2.0
+        bpy.context.view_layer.update()
+        sync_scene_objects(bpy.context.scene)
+        self.assertAlmostEqual(plane.location.x, 3.0)
+        expected_matrix = plane.matrix_world.copy()
         with tempfile.TemporaryDirectory() as directory:
             filepath = Path(directory) / "dimensions-guide-plane.blend"
             bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
             bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
             restored = bpy.data.objects.get(plane_name)
             self.assertIsNotNone(restored)
+            self.assertEqual(restored.type, "MESH")
+            self.assertTrue(restored.get(GUIDE_PLANE_FLAG))
             self.assertEqual(restored.guide_props.kind, "PLANE")
-            self.assertAlmostEqual(restored.guide_props.plane_extent, 4.5)
-            self.assertIsNotNone(resolve_guide_plane(restored))
-            self.assertEqual(bpy.context.scene.dimensions_settings.active_plane_object, restored)
-            self.assertIsNotNone(active_plane_frame(bpy.context.scene))
+            self.assertAlmostEqual(restored.guide_props.plane_extent, 1.5)
+            self.assertAlmostEqual(restored.guide_props.plane_spacing, 0.5)
+            self.assertEqual(len(restored.data.vertices), 49)
+            for restored_row, expected_row in zip(restored.matrix_world, expected_matrix):
+                for restored_value, expected_value in zip(restored_row, expected_row):
+                    self.assertAlmostEqual(restored_value, expected_value, places=5)
 
-    def test_save_reload_preserves_persistent_dimension_set_members(self):
-        dimension_set = create_dimension_object(bpy.context, "Dimensions Lifecycle Chain Set")
-        props = dimension_set.dimension_props
-        props.annotation_kind = "DIMENSION_SET"
-        props.set_kind = "CHAIN"
-        props.offset_distance = 0.4
-        for start, end in (((0, 0, 0), (1, 0, 0)), ((1, 0, 0), (3, 0, 0))):
-            member = props.set_members.add()
-            set_world_anchor(member.start, Vector(start))
-            set_world_anchor(member.end, Vector(end))
-        with tempfile.TemporaryDirectory() as directory:
-            filepath = Path(directory) / "dimensions-set-lifecycle.blend"
-            bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
-            bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
-            restored = bpy.data.objects.get("Dimensions Lifecycle Chain Set")
-            self.assertIsNotNone(restored)
-            self.assertEqual(restored.dimension_props.set_kind, "CHAIN")
-            self.assertEqual(len(restored.dimension_props.set_members), 2)
-            geometry = dimension_set_world_geometry(restored.dimension_props)
-            self.assertEqual([item["value"] for item in geometry], [1.0, 2.0])
-            self.assertAlmostEqual(geometry[0]["offset_distance"], 0.4)
-
-    def test_save_reload_preserves_live_circle_binding(self):
-        mesh = bpy.data.meshes.new("Dimensions Lifecycle Circle Source")
-        mesh.from_pydata(((1, 0, 0), (0, 1, 0), (-1, 0, 0), (0, -1, 0)), (), ())
-        source = bpy.data.objects.new("Dimensions Lifecycle Circle Source", mesh)
-        bpy.context.scene.collection.objects.link(source)
-        annotation = create_dimension_object(bpy.context, "Dimensions Lifecycle Radius")
-        props = annotation.dimension_props
-        props.annotation_kind = "CIRCLE"
-        fit = bind_circle_vertices(props, source, range(4), True)
-        store_circle_fit(props, fit)
-        with tempfile.TemporaryDirectory() as directory:
-            filepath = Path(directory) / "dimensions-circle-lifecycle.blend"
-            bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
-            bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
-            restored = bpy.data.objects.get("Dimensions Lifecycle Radius")
-            self.assertIsNotNone(restored)
-            self.assertEqual(len(restored.dimension_props.circle_vertices), 4)
-            self.assertAlmostEqual(circle_geometry(restored.dimension_props)["radius"], 1.0, places=5)
-
-    def test_save_reload_preserves_anchored_guide_point_and_proxy(self):
-        source_mesh = bpy.data.meshes.new("Dimensions Lifecycle Guide Point Source")
-        source_mesh.from_pydata([(2.0, 3.0, 4.0)], [], [])
-        source = bpy.data.objects.new("Dimensions Lifecycle Guide Point Source", source_mesh)
-        bpy.context.scene.collection.objects.link(source)
-        point = create_guide_point_object(bpy.context, "Dimensions Lifecycle Guide Point")
-        set_anchor(point.guide_props.start, source, 0)
+    def test_save_reload_preserves_moved_guide_point_and_proxy(self):
+        point = create_guide_point_object(
+            bpy.context, "Dimensions Lifecycle Guide Point", location=Vector((2.0, 3.0, 4.0)),
+        )
         ensure_guide_point_snap_proxy(point, bpy.context.scene)
+        point.location = (5.0, 6.0, 7.0)
+        sync_scene_objects(bpy.context.scene)
+        self.assertEqual(Vector(point.location), Vector((5.0, 6.0, 7.0)))
         point_name = point.name
         with tempfile.TemporaryDirectory() as directory:
             filepath = Path(directory) / "dimensions-guide-point-lifecycle.blend"
@@ -252,88 +219,22 @@ class DimensionsLifecycleTests(unittest.TestCase):
             restored = bpy.data.objects.get(point_name)
             self.assertIsNotNone(restored)
             self.assertEqual(restored.guide_props.kind, "POINT")
-            self.assertEqual(resolve_anchor(restored.guide_props.start), Vector((2.0, 3.0, 4.0)))
+            self.assertEqual(guide_point_world(restored), Vector((5.0, 6.0, 7.0)))
             sync_scene_objects(bpy.context.scene)
-            self.assertTrue(any(
-                child.get(GUIDE_POINT_SNAP_PROXY_FLAG, False)
-                for child in restored.children
-            ))
+            proxy = next(child for child in restored.children if child.get(GUIDE_POINT_SNAP_PROXY_FLAG, False))
+            self.assertLess((proxy.matrix_world @ proxy.data.vertices[0].co - Vector((5.0, 6.0, 7.0))).length, 1e-6)
 
-    def test_save_reload_preserves_datum_coordinate_and_relative_elevation_bindings(self):
-        datum = create_guide_point_object(bpy.context, "Dimensions Lifecycle Datum")
-        datum.guide_props.is_datum = True
-        datum.guide_props.datum_name = "Project Datum"
-        datum.guide_props.datum_orientation = (0.0, 0.0, 0.5)
-        set_world_anchor(datum.guide_props.start, Vector((10.0, 20.0, 30.0)))
-
-        coordinate = create_dimension_object(bpy.context, "Dimensions Lifecycle Coordinate")
-        coordinate.dimension_props.annotation_kind = "COORDINATE"
-        coordinate.dimension_props.datum_object = datum
-        coordinate.dimension_props.coordinate_components = "XYZ"
-        coordinate.dimension_props.coordinate_alignment = "COLUMN"
-        coordinate.dimension_props.coordinate_alignment_offset = 7.5
-        coordinate.dimension_props.coordinate_sign = "REVERSED"
-        set_world_anchor(coordinate.dimension_props.start, Vector((12.0, 23.0, 34.0)))
-
-        reference = create_dimension_object(bpy.context, "Dimensions Lifecycle Elevation Reference")
-        reference.dimension_props.annotation_kind = "ELEVATION"
-        reference.dimension_props.datum_object = datum
-        set_world_anchor(reference.dimension_props.start, Vector((10.0, 20.0, 31.5)))
-
-        elevation = create_dimension_object(bpy.context, "Dimensions Lifecycle Elevation")
-        elevation.dimension_props.annotation_kind = "ELEVATION"
-        elevation.dimension_props.datum_object = datum
-        elevation.dimension_props.elevation_mode = "RELATIVE"
-        elevation.dimension_props.elevation_reference = reference
-        elevation.dimension_props.elevation_precision = 4
-        elevation.dimension_props.elevation_prefix = "EL "
-        set_world_anchor(elevation.dimension_props.start, Vector((10.0, 20.0, 34.0)))
-
-        names = (datum.name, coordinate.name, reference.name, elevation.name)
-        with tempfile.TemporaryDirectory() as directory:
-            filepath = Path(directory) / "dimensions-coordinate-elevation.blend"
-            bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
-            bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
-            restored_datum, restored_coordinate, restored_reference, restored_elevation = (
-                bpy.data.objects.get(name) for name in names
-            )
-            self.assertTrue(is_datum_object(restored_datum))
-            self.assertEqual(restored_datum.guide_props.datum_name, "Project Datum")
-            self.assertEqual(restored_coordinate.dimension_props.datum_object, restored_datum)
-            self.assertEqual(restored_coordinate.dimension_props.coordinate_components, "XYZ")
-            self.assertEqual(restored_coordinate.dimension_props.coordinate_alignment, "COLUMN")
-            self.assertAlmostEqual(restored_coordinate.dimension_props.coordinate_alignment_offset, 7.5)
-            self.assertEqual(restored_coordinate.dimension_props.coordinate_sign, "REVERSED")
-            self.assertEqual(coordinate_values(restored_coordinate.dimension_props)["state"], "LIVE")
-            self.assertEqual(restored_elevation.dimension_props.datum_object, restored_datum)
-            self.assertEqual(restored_elevation.dimension_props.elevation_reference, restored_reference)
-            self.assertEqual(restored_elevation.dimension_props.elevation_precision, 4)
-            self.assertEqual(restored_elevation.dimension_props.elevation_prefix, "EL ")
-            self.assertAlmostEqual(elevation_value(restored_elevation.dimension_props)["value"], 2.5)
-
-    def test_save_reload_preserves_derived_guide_relationship(self):
-        source_mesh = bpy.data.meshes.new("Dimensions Lifecycle Derived Source")
-        source_mesh.from_pydata([(0.0, 0.0, 0.0), (4.0, 0.0, 0.0)], [(0, 1)], [])
-        source = bpy.data.objects.new("Dimensions Lifecycle Derived Source", source_mesh)
-        bpy.context.scene.collection.objects.link(source)
-        guide = create_guide_object(bpy.context, "Dimensions Lifecycle Derived Guide")
-        guide.guide_props.derived = True
-        guide.guide_props.derivation_mode = "OFFSET"
-        guide.guide_props.offset_distance = 2.0
-        guide.guide_props.derived_direction = (0.0, 1.0, 0.0)
-        self.assertTrue(bind_edge_source(guide.guide_props.source_a, source, 0))
-        guide_name, source_name = guide.name, source.name
-        with tempfile.TemporaryDirectory() as directory:
-            filepath = Path(directory) / "dimensions-derived-guide-lifecycle.blend"
-            bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
-            bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
-            restored = bpy.data.objects.get(guide_name)
-            restored_source = bpy.data.objects.get(source_name)
-            self.assertIsNotNone(restored)
-            self.assertEqual(resolve_derived_guide(restored)[0], Vector((0.0, 2.0, 0.0)))
-            restored_source.location.y = 3.0
-            bpy.context.view_layer.update()
-            self.assertEqual(resolve_derived_guide(restored)[0], Vector((0.0, 5.0, 0.0)))
+    def test_moved_and_rotated_guide_line_keeps_its_transform(self):
+        guide = create_guide_object(bpy.context, "Dimensions Lifecycle Guide Line")
+        set_guide_line_transform(guide, Vector((0.0, 0.0, 0.0)), Vector((1.0, 0.0, 0.0)))
+        guide.location = (0.0, 4.0, 0.0)
+        guide.rotation_euler = (0.0, 0.0, 1.5707963267948966)
+        bpy.context.view_layer.update()
+        sync_scene_objects(bpy.context.scene)
+        origin, direction = guide_line_world(guide)
+        self.assertLess((origin - Vector((0.0, 4.0, 0.0))).length, 1e-6)
+        self.assertLess((direction - Vector((0.0, 1.0, 0.0))).length, 1e-6)
+        bpy.data.objects.remove(guide, do_unlink=True)
 
     def test_save_reload_preserves_scene_owned_output_identity(self):
         dimension = create_dimension_object(
@@ -755,6 +656,7 @@ class DimensionsReleasedFileTests(unittest.TestCase):
     OUTPUT_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v1-0.3.2.blend"
     SCHEMA_V2_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v2-0.4.0.blend"
     SCHEMA_V14_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v14-0.5.0.blend"
+    SCHEMA_V15_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v15-0.6.0.blend"
     SETTINGS_ONLY_FIXTURE = REPOSITORY_ROOT / "tests" / "fixtures" / "schema-v6-settings-only-0.4.2.blend"
 
     def setUp(self):
@@ -765,6 +667,7 @@ class DimensionsReleasedFileTests(unittest.TestCase):
         self.assertTrue(self.OUTPUT_FIXTURE.is_file(), f"missing fixture: {self.OUTPUT_FIXTURE}")
         self.assertTrue(self.SCHEMA_V2_FIXTURE.is_file(), f"missing fixture: {self.SCHEMA_V2_FIXTURE}")
         self.assertTrue(self.SCHEMA_V14_FIXTURE.is_file(), f"missing fixture: {self.SCHEMA_V14_FIXTURE}")
+        self.assertTrue(self.SCHEMA_V15_FIXTURE.is_file(), f"missing fixture: {self.SCHEMA_V15_FIXTURE}")
         self.assertTrue(self.SETTINGS_ONLY_FIXTURE.is_file(), f"missing fixture: {self.SETTINGS_ONLY_FIXTURE}")
 
     def test_settings_only_released_file_migrates_before_first_annotation(self):
@@ -863,6 +766,101 @@ class DimensionsReleasedFileTests(unittest.TestCase):
             expected,
         )
 
+    def _open_without_migration(self, filepath):
+        load_handlers = bpy.app.handlers.load_post
+        migration_handler = migrations_module._load_post_handler
+        handler_was_registered = migration_handler in load_handlers
+        if handler_was_registered:
+            load_handlers.remove(migration_handler)
+        try:
+            bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
+        finally:
+            if handler_was_registered and migration_handler not in load_handlers:
+                load_handlers.append(migration_handler)
+        return bpy.context.scene
+
+    def _linear_geometry(self, obj):
+        props = obj.dimension_props
+        return get_dimension_world_geometry(
+            props.dimension_type,
+            resolve_anchor(props.start),
+            resolve_anchor(props.end),
+            Vector(props.offset_plane_normal),
+            props.offset_distance,
+            props.offset_angle,
+            props.measurement_mode,
+        )
+
+    def test_schema_v15_fixture_converts_removed_0_6_features(self):
+        scene = self._open_without_migration(self.SCHEMA_V15_FIXTURE)
+        self.assertEqual(scene.dimensions_settings.schema_version, 15)
+        self.assertTrue(migrate_scene(scene))
+        self.assertEqual(scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
+        objects = scene.objects
+
+        for name in ("DIM Circle Removed", "DIM Coordinate Removed", "DIM Elevation Removed"):
+            self.assertIsNone(objects.get(name), name)
+
+        for set_name, offsets, values in (
+            ("DIM Chain Set", (0.3, 0.3), (1.0, 2.0)),
+            ("DIM Baseline Set", (0.3, 0.7), (1.0, 2.5)),
+        ):
+            self.assertIsNone(objects.get(set_name))
+            members = [objects.get(f"{set_name} {index}") for index in (1, 2)]
+            self.assertTrue(all(member is not None for member in members), set_name)
+            for member, offset, value in zip(members, offsets, values):
+                props = member.dimension_props
+                self.assertEqual(props.annotation_kind, "LINEAR")
+                self.assertEqual(props.measurement_mode, "DELTA_X")
+                self.assertAlmostEqual(props.offset_distance, offset, places=5)
+                self.assertAlmostEqual(self._linear_geometry(member)["value"], value, places=5)
+                self.assertTrue(props.override_color)
+                self.assertAlmostEqual(props.color[0], 1.0, places=5)
+                self.assertAlmostEqual(props.color[1], 0.2, places=5)
+        chain_lines = [self._linear_geometry(objects.get(f"DIM Chain Set {index}")) for index in (1, 2)]
+        self.assertLess((chain_lines[0]["line_end_world"] - chain_lines[1]["line_start_world"]).length, 1e-5)
+
+        for name, origin, direction in (
+            ("GUIDE Fixed", (0.0, 5.0, 0.0), (1.0, 0.0, 0.0)),
+            ("GUIDE Offset Derived", (0.0, 6.0, 0.0), (1.0, 0.0, 0.0)),
+            ("GUIDE Angular Derived", (0.0, 5.0, 0.0), (0.70710678, 0.70710678, 0.0)),
+            ("GUIDE Axis Z", (3.0, 3.0, 0.0), (0.0, 0.0, 1.0)),
+            ("GUIDE Vertex Anchored", (-1.0, -1.0, 1.0), (0.0, 1.0, 0.0)),
+        ):
+            line = guide_line_world(objects.get(name))
+            self.assertIsNotNone(line, name)
+            self.assertLess((line[0] - Vector(origin)).length, 1e-5, name)
+            self.assertLess((line[1] - Vector(direction)).length, 1e-5, name)
+        self.assertIsNotNone(guide_line_world(objects.get("GUIDE Spacing Derived")))
+
+        self.assertEqual(guide_point_world(objects.get("POINT Vertex Anchored")), Vector((1.0, 1.0, 1.0)))
+        self.assertEqual(objects.get("DATUM Origin").guide_props.kind, "POINT")
+
+        for name in ("PLANE Three Points", "PLANE Face", "PLANE Point Normal", "PLANE Offset"):
+            plane = objects.get(name)
+            self.assertIsNotNone(plane, name)
+            self.assertEqual(plane.type, "MESH", name)
+            self.assertTrue(plane.get(GUIDE_PLANE_FLAG), name)
+            self.assertEqual(plane.guide_props.kind, "PLANE", name)
+        origin, _axis_u, _axis_v, normal = guide_plane_frame(objects.get("PLANE Face"))
+        self.assertLess((origin - Vector((1.0, 0.0, 0.0))).length, 1e-5)
+        self.assertLess((normal - Vector((1.0, 0.0, 0.0))).length, 1e-5)
+
+        segment = construction_segment_world(objects.get("MEASURE Segment"))
+        self.assertEqual(segment, (Vector((0.0, -7.0, 0.0)), Vector((2.0, -7.0, 0.0))))
+        self.assertIsNotNone(objects.get("DIM Linear Kept"))
+
+        raw_settings = scene.bl_system_properties_get()["dimensions_settings"]
+        self.assertNotIn("active_plane_mode", raw_settings.keys())
+        chain_raw = objects.get("DIM Chain Set 1").bl_system_properties_get()["dimension_props"]
+        self.assertNotIn("set_members", chain_raw.keys())
+
+        names = sorted(obj.name for obj in scene.objects)
+        self.assertFalse(migrate_scene(scene))
+        self.assertEqual(sorted(obj.name for obj in scene.objects), names)
+        sync_scene_objects(scene)
+        self.assertEqual(objects.get("DIM Chain Set 1").dimension_props.measurement_state, "LIVE")
+
     def test_an_unstamped_released_file_migrates_to_the_current_schema(self):
         bpy.ops.wm.open_mainfile(filepath=str(self.FIXTURE), load_ui=False)
         scene = bpy.context.scene
@@ -913,42 +911,11 @@ class DimensionsReleasedFileTests(unittest.TestCase):
         self.assertTrue(scene.dimensions_settings.snap_guide_point)
         self.assertTrue(scene.dimensions_settings.annotation_manager_kind_point)
 
-    def test_schema_v2_fixture_migrates_through_datum_v12_defaults(self):
-        bpy.ops.wm.open_mainfile(filepath=str(self.SCHEMA_V2_FIXTURE), load_ui=False)
-        scene = bpy.context.scene
-        self.assertEqual(scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
-        for obj in scene.objects:
-            if getattr(getattr(obj, "guide_props", None), "enabled", False):
-                self.assertFalse(obj.guide_props.is_datum)
-                self.assertEqual(tuple(obj.guide_props.datum_orientation), (0.0, 0.0, 0.0))
-
-    def test_schema_v2_fixture_migrates_through_angular_spacing_v14_defaults(self):
-        bpy.ops.wm.open_mainfile(filepath=str(self.SCHEMA_V2_FIXTURE), load_ui=False)
-        scene = bpy.context.scene
-        self.assertEqual(scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
-        for obj in scene.objects:
-            if getattr(getattr(obj, "guide_props", None), "enabled", False):
-                self.assertNotIn(obj.guide_props.derivation_mode, {"ANGULAR", "SPACING"})
-                self.assertGreater(obj.guide_props.spacing_interval, 0.0)
-                self.assertGreaterEqual(obj.guide_props.spacing_count, 2)
-
-    def test_schema_v2_fixture_migrates_through_fixed_derived_guide_v11_defaults(self):
-        bpy.ops.wm.open_mainfile(filepath=str(self.SCHEMA_V2_FIXTURE), load_ui=False)
-        scene = bpy.context.scene
-        self.assertEqual(scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
-        for obj in scene.objects:
-            if getattr(getattr(obj, "guide_props", None), "enabled", False):
-                self.assertFalse(obj.guide_props.derived)
-                self.assertEqual(obj.guide_props.derivation_mode, "NONE")
-                self.assertEqual(obj.guide_props.derived_state, "LIVE")
-
     def test_schema_v2_fixture_receives_guide_plane_v13_defaults(self):
         bpy.ops.wm.open_mainfile(filepath=str(self.SCHEMA_V2_FIXTURE), load_ui=False)
         scene = bpy.context.scene
         settings = scene.dimensions_settings
         self.assertEqual(settings.schema_version, CURRENT_SCHEMA_VERSION)
-        self.assertEqual(settings.active_plane_mode, "NONE")
-        self.assertIsNone(settings.active_plane_object)
         self.assertTrue(settings.snap_guide_plane)
         self.assertTrue(settings.annotation_manager_kind_plane)
         self.assertFalse(migrate_scene(scene))
@@ -989,11 +956,7 @@ class DimensionsReleasedFileTests(unittest.TestCase):
         }
         for obj in dimensions_in_fixture:
             props = obj.dimension_props
-            self.assertEqual(len(props.set_members), 0)
-            self.assertEqual(props.set_spacing, 0.0)
-            self.assertEqual(len(props.circle_vertices), 0)
-            self.assertAlmostEqual(props.circle_fit_warning_threshold, 0.02)
-            self.assertEqual(tuple(props.circle_start_direction), (1.0, 0.0, 0.0))
+            self.assertEqual(props.annotation_kind, "LINEAR")
             resolved = resolve_dimension_style(scene.dimensions_settings, props)
             self.assertEqual(props.style_name, "")
             self.assertTrue(all(

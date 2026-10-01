@@ -48,7 +48,6 @@ def vector_output_strokes(context):
     skipped = 0
     for index, annotation in enumerate(annotations):
         props = annotation.dimension_props
-        annotation_kind = getattr(props, "annotation_kind", "LINEAR")
         state = annotation_output_state(annotation)
         if state not in {"LIVE", "CAPTURED"}:
             skipped += 1

@@ -1,7 +1,7 @@
 # CON-01 — Guide points
 
 **Milestone:** M3 Construction
-**Status:** ✅ Complete in 0.4.3.
+**Status:** ✅ Complete in 0.4.3. Reworked in 0.7.0 by [UX-10](UX-10-focused-toolset.md): a guide point is its object origin and moves with `G`; it no longer follows the vertex it was placed on, and the Offset placement mode was removed.
 **Effort:** M
 **Depends on:** —
 **Version impact:** Patch. Additive.

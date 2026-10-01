@@ -1,7 +1,5 @@
 """Direct selected-annotation presentation handle manipulation."""
 
-from math import cos, sin
-
 import bpy
 
 from ..interaction import modal_cleanup_on_exception
@@ -13,14 +11,12 @@ from .. import messages
 from ..anchors import resolve_anchor
 from ..angle_binding import resolve_angle_source
 from ..area_binding import evaluate_area_binding
-from ..circle_binding import circle_geometry, circle_value
 from ..dimension_geometry import get_dimension_world_geometry
 from ..drawing import clear_preview_state, set_preview_state
 from ..interaction import axis_from_event, is_confirm_event, update_distance_text
 from ..manipulation import (
     angle_radius_from_world,
     apply_area_label_position,
-    apply_circle_label_position,
     linear_offset_from_world,
 )
 from ..modal_state import HandleManipulationState
@@ -33,15 +29,14 @@ from .create_area import _axis_mouse_world, _constrained_label_world
 class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
     bl_idname = "dimensions.drag_annotation_handle"
     bl_label = "Adjust Annotation Handle"
-    bl_description = "Adjust annotation presentation with the shared constraint and numeric-input contract"
+    bl_description = "Move the purple handle of the selected dimension: click to place, type a distance, or press X, Y, or Z to constrain"
     bl_options = {"REGISTER", "UNDO"}
 
-    object_name: bpy.props.StringProperty()
-    handle_kind: bpy.props.EnumProperty(items=[
+    object_name: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+    handle_kind: bpy.props.EnumProperty(options={"HIDDEN", "SKIP_SAVE"}, items=[
         ("LINEAR_OFFSET", "Linear Offset", "Adjust the dimension-line offset"),
         ("ANGLE_RADIUS", "Angle Radius", "Adjust the angle arc radius"),
         ("AREA_LABEL", "Area Label", "Adjust the area label position"),
-        ("CIRCLE_LABEL", "Circular Label", "Adjust the circular leader and label position"),
     ])
 
     def invoke(self, context, _event):
@@ -60,7 +55,6 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
             "LINEAR": "LINEAR_OFFSET",
             "ANGLE": "ANGLE_RADIUS",
             "AREA": "AREA_LABEL",
-            "CIRCLE": "CIRCLE_LABEL",
         }.get(annotation.dimension_props.annotation_kind)
         if self.handle_kind != expected:
             self.report(messages.WARNING, messages.HANDLE_NO_LONGER_AVAILABLE)
@@ -153,13 +147,6 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
         props = annotation.dimension_props
         if self.handle_kind == "AREA_LABEL":
             return resolve_anchor(props.end) + Vector(props.presentation_offset)
-        if self.handle_kind == "CIRCLE_LABEL":
-            fit = circle_geometry(props)
-            if fit is None:
-                return None
-            direction = fit["axis_u"] * cos(props.circle_leader_angle) + fit["axis_v"] * sin(props.circle_leader_angle)
-            distance = props.circle_label_distance if props.circle_label_distance > 1e-6 else fit["radius"] * 1.35
-            return fit["center"] + direction * distance + Vector(props.presentation_offset)
         if self.handle_kind == "ANGLE_RADIUS":
             source = resolve_angle_source(props)
             if source is None:
@@ -190,20 +177,6 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
             snap = find_nearest_snap_point(
                 context, event.mouse_region_x, event.mouse_region_y,
                 include_free=True, plane_point=result["center"], plane_normal=result["normal"],
-            )
-            return None if snap is None else snap["world_co"]
-        if self.handle_kind == "CIRCLE_LABEL":
-            fit = circle_geometry(props)
-            if fit is None:
-                return None
-            if self.state.axis in {"X", "Y", "Z"}:
-                return _axis_mouse_world(
-                    context, fit["center"], self.state.axis,
-                    event.mouse_region_x, event.mouse_region_y,
-                )
-            snap = find_nearest_snap_point(
-                context, event.mouse_region_x, event.mouse_region_y,
-                include_free=True, plane_point=fit["center"], plane_normal=fit["normal"],
             )
             return None if snap is None else snap["world_co"]
         if self.handle_kind == "ANGLE_RADIUS":
@@ -277,26 +250,6 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
                 result["center"], result["normal"], self.raw_world,
                 self.state.axis, typed,
             )
-        else:
-            fit = circle_geometry(props)
-            if fit is None or self.raw_world is None:
-                self.candidate_world = None
-                return
-            delta = Vector(self.raw_world) - fit["center"]
-            if self.state.axis in {"X", "Y", "Z"}:
-                axis = {
-                    "X": Vector((1.0, 0.0, 0.0)),
-                    "Y": Vector((0.0, 1.0, 0.0)),
-                    "Z": Vector((0.0, 0.0, 1.0)),
-                }[self.state.axis]
-                sign = -1.0 if delta.dot(axis) < 0.0 else 1.0
-                delta = axis * sign
-            delta -= fit["normal"] * delta.dot(fit["normal"])
-            if delta.length >= 1e-6 and typed is not None:
-                delta.normalize()
-                delta *= typed
-            self.candidate_world = None if delta.length < 1e-6 else fit["center"] + delta
-
     def _commit(self, annotation):
         props = annotation.dimension_props
         if self.handle_kind == "LINEAR_OFFSET":
@@ -309,11 +262,6 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
                 apply_area_label_position(
                     annotation, result, self.candidate_world, self.state.axis,
                 )
-        else:
-            fit = circle_geometry(props)
-            if fit is not None and self.candidate_world is not None:
-                apply_circle_label_position(annotation, fit, self.candidate_world)
-
     def _update_preview(self, context):
         annotation = bpy.data.objects.get(self.annotation_name)
         if annotation is None:
@@ -357,21 +305,6 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
                     "end_world": self.candidate_world,
                     "area_value": result["area"],
                     "face_count": result["face_count"],
-                })
-        else:
-            fit = circle_geometry(props)
-            if fit is not None and self.candidate_world is not None:
-                preview.update({
-                    "annotation_kind": "CIRCLE",
-                    "circle_kind": props.circle_kind,
-                    "center_world": fit["center"],
-                    "label_world": self.candidate_world,
-                    "edge_world": fit["center"] + (self.candidate_world - fit["center"]).normalized() * fit["radius"],
-                    "normal_world": fit["normal"],
-                    "start_direction_world": fit["start_direction"],
-                    "radius": fit["radius"],
-                    "sweep": fit["sweep"],
-                    "value": circle_value(props, fit),
                 })
         set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))
 

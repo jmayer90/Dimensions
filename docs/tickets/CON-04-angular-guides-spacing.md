@@ -1,7 +1,7 @@
 # CON-04 — Angular guides and repeated spacing
 
 **Milestone:** M3 Construction
-**Status:** ✅ Complete in 0.5.0; anchored Spacing acquisition and repair hardened in the 0.6.0 candidate.
+**Status:** 🚫 Withdrawn in 0.7.0 — angular and repeated-spacing guides were removed after user testing (see [UX-10](UX-10-focused-toolset.md)). Saved ones convert to fixed guide lines. Delivered 0.5.0.
 **Effort:** M
 **Depends on:** CON-02
 **Version impact:** Patch. Additive.

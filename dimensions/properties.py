@@ -290,22 +290,6 @@ class CADDIM_PG_AnnotationIsolateRecord(bpy.types.PropertyGroup):
     was_property_visible: bpy.props.BoolProperty(default=True)
 
 
-class CADDIM_PG_DimensionSetMember(bpy.types.PropertyGroup):
-    """One independently repairable source binding inside a dimension set."""
-
-    start: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    end: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    measurement_state: bpy.props.EnumProperty(
-        name="State",
-        items=[
-            ("LIVE", "Live", "Both member anchors resolve to their sources"),
-            ("FALLBACK", "Fallback", "A stored source position is in use"),
-            ("NEEDS_REPAIR", "Needs Repair", "A member source is missing or ambiguous"),
-        ],
-        default="LIVE",
-        options={"HIDDEN"},
-    )
-
 class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(
         name="Enabled",
@@ -318,10 +302,6 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
             ("LINEAR", "Linear", "Distance between two points"),
             ("AREA", "Area", "Live or captured area of a bound face set"),
             ("ANGLE", "Angle", "Live direction angle between two persistent edges"),
-            ("DIMENSION_SET", "Dimension Set", "Persistent chain or baseline dimension set"),
-            ("CIRCLE", "Radial / Diameter / Arc", "Dimension fitted to persistent circular mesh points"),
-            ("COORDINATE", "Coordinate", "Point coordinates relative to a named datum"),
-            ("ELEVATION", "Elevation", "Point elevation relative to a named datum or elevation"),
         ],
         default="LINEAR",
     )
@@ -333,117 +313,6 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
     end: bpy.props.PointerProperty(
         type=CADDIM_PG_Anchor,
     )
-
-    datum_object: bpy.props.PointerProperty(
-        name="Datum", type=bpy.types.Object, update=update_dimension_display,
-    )
-    coordinate_components: bpy.props.EnumProperty(
-        name="Components", items=[
-            ("X", "X", "Show X only"), ("Y", "Y", "Show Y only"),
-            ("XY", "X + Y", "Show X and Y"), ("XYZ", "X + Y + Z", "Show all axes"),
-        ], default="XY", update=update_dimension_display,
-    )
-    coordinate_alignment: bpy.props.EnumProperty(
-        name="Alignment", items=[
-            ("FREE", "Free", "Use this annotation's label position"),
-            ("ROW", "Row", "Align labels sharing a datum to a horizontal row"),
-            ("COLUMN", "Column", "Align labels sharing a datum to a vertical column"),
-        ], default="FREE", update=update_dimension_display,
-    )
-    coordinate_alignment_offset: bpy.props.FloatProperty(
-        name="Alignment Offset", default=0.0, subtype="DISTANCE", update=update_dimension_display,
-    )
-    coordinate_sign: bpy.props.EnumProperty(
-        name="Sign Convention", items=[
-            ("DATUM", "Datum Axes", "Use the datum's positive axes"),
-            ("REVERSED", "Reversed", "Reverse the datum axis signs"),
-        ], default="DATUM", update=update_dimension_display,
-    )
-    coordinate_show_plus: bpy.props.BoolProperty(
-        name="Show Positive Sign", default=False, update=update_dimension_display,
-    )
-    coordinate_show_negative: bpy.props.BoolProperty(
-        name="Show Negative Sign", default=True, update=update_dimension_display,
-    )
-    elevation_axis: bpy.props.EnumProperty(
-        name="Up Axis", items=[
-            ("DATUM_Z", "Datum Z", "Use the datum's local Z axis"),
-            ("WORLD_X", "World X", "Use world X"), ("WORLD_Y", "World Y", "Use world Y"),
-            ("WORLD_Z", "World Z", "Use world Z"),
-        ], default="WORLD_Z", update=update_dimension_display,
-    )
-    elevation_mode: bpy.props.EnumProperty(
-        name="Elevation Mode", items=[
-            ("ABSOLUTE", "Absolute", "Measure from the named datum"),
-            ("RELATIVE", "Relative", "Measure from another elevation annotation"),
-        ], default="ABSOLUTE", update=update_dimension_display,
-    )
-    elevation_reference: bpy.props.PointerProperty(
-        name="Relative To", type=bpy.types.Object, update=update_dimension_display,
-    )
-    elevation_precision: bpy.props.IntProperty(
-        name="Elevation Precision", default=3, min=0, max=8, update=update_dimension_display,
-    )
-    elevation_show_plus: bpy.props.BoolProperty(
-        name="Show Positive Sign", default=True, update=update_dimension_display,
-    )
-    elevation_prefix: bpy.props.StringProperty(
-        name="Elevation Prefix", default="", update=update_dimension_display,
-    )
-    elevation_suffix: bpy.props.StringProperty(
-        name="Elevation Suffix", default="", update=update_dimension_display,
-    )
-
-    set_kind: bpy.props.EnumProperty(
-        name="Set Type",
-        items=[
-            ("CHAIN", "Chain", "Sequential dimensions sharing one dimension line"),
-            ("BASELINE", "Baseline", "Dimensions from one datum on automatically spaced rows"),
-        ],
-        default="CHAIN",
-        update=update_dimension_display,
-    )
-    set_members: bpy.props.CollectionProperty(type=CADDIM_PG_DimensionSetMember)
-    active_set_member_index: bpy.props.IntProperty(name="Active Member", default=0, min=0)
-    set_spacing: bpy.props.FloatProperty(
-        name="Baseline Spacing",
-        description="Zero uses automatic spacing derived from text size",
-        default=0.0,
-        min=0.0,
-        soft_max=10.0,
-        subtype="DISTANCE",
-        update=update_dimension_display,
-    )
-    set_expanded: bpy.props.BoolProperty(name="Expand Members", default=False)
-
-    circle_kind: bpy.props.EnumProperty(
-        name="Circular Dimension",
-        items=[
-            ("RADIUS", "Radius", "Show the fitted radius with an R prefix"),
-            ("DIAMETER", "Diameter", "Show the fitted diameter with a diameter prefix"),
-            ("ARC_LENGTH", "Arc Length", "Show length along the bound fitted arc"),
-        ], default="RADIUS", update=update_dimension_display,
-    )
-    circle_fit_mode: bpy.props.EnumProperty(
-        name="Measurement",
-        items=[
-            ("FITTED", "Fitted", "Least-squares fitted radius"),
-            ("INSCRIBED", "Inscribed", "Across-flats radius of the selected polygon"),
-            ("CIRCUMSCRIBED", "Circumscribed", "Largest radius from the fitted center"),
-        ], default="FITTED", update=update_dimension_display,
-    )
-    circle_source_object: bpy.props.PointerProperty(name="Circle Source", type=bpy.types.Object, poll=poll_mesh_objects, update=update_dimension_display)
-    circle_vertices: bpy.props.CollectionProperty(type=CADDIM_PG_Anchor)
-    circle_closed: bpy.props.BoolProperty(name="Closed Circle", default=True, options={"HIDDEN"})
-    circle_fit_error: bpy.props.FloatProperty(name="Relative Fit Error", default=0.0, min=0.0, options={"HIDDEN"})
-    circle_fit_warning_threshold: bpy.props.FloatProperty(name="Fit Warning", description="Relative RMS error above which the fit is not authoritative", default=0.02, min=0.0001, max=1.0, precision=4, update=update_dimension_display)
-    circle_center: bpy.props.FloatVectorProperty(name="Fitted Center", size=3, subtype="XYZ", options={"HIDDEN"})
-    circle_normal: bpy.props.FloatVectorProperty(name="Fitted Plane Normal", size=3, subtype="DIRECTION", default=(0.0, 0.0, 1.0), options={"HIDDEN"})
-    circle_start_direction: bpy.props.FloatVectorProperty(name="Arc Start Direction", size=3, subtype="DIRECTION", default=(1.0, 0.0, 0.0), options={"HIDDEN"})
-    circle_radius: bpy.props.FloatProperty(name="Fitted Radius", default=0.0, min=0.0, options={"HIDDEN"})
-    circle_sweep: bpy.props.FloatProperty(name="Arc Sweep", default=6.283185307179586, min=0.0, max=6.283185307179586, options={"HIDDEN"})
-    circle_leader_angle: bpy.props.FloatProperty(name="Leader Angle", default=0.7853981633974483, subtype="ANGLE", update=update_dimension_display)
-    circle_label_distance: bpy.props.FloatProperty(name="Label Distance", default=0.0, min=0.0, subtype="DISTANCE", update=update_dimension_display)
 
     center: bpy.props.PointerProperty(
         type=CADDIM_PG_Anchor,
@@ -771,28 +640,14 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
     )
 
 
-class CADDIM_PG_GuideSource(bpy.types.PropertyGroup):
-    kind: bpy.props.EnumProperty(
-        name="Source Type",
-        items=[
-            ("NONE", "None", "No derived source"),
-            ("EDGE", "Edge", "A persistent mesh edge source"),
-            ("GUIDE", "Guide", "Another construction guide"),
-            ("FACE", "Face", "A persistent mesh face plane"),
-        ],
-        default="NONE",
-    )
-    target_object: bpy.props.PointerProperty(name="Mesh Source", type=bpy.types.Object, poll=poll_mesh_objects)
-    guide_object: bpy.props.PointerProperty(name="Guide Source", type=bpy.types.Object)
-    start: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    end: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    face_id: bpy.props.IntProperty(name="Persistent Face ID", default=0, min=0)
-    face_vertex_count: bpy.props.IntProperty(name="Face Vertex Count", default=0, min=0)
-    fallback_center: bpy.props.FloatVectorProperty(name="Fallback Center", size=3, subtype="XYZ")
-    fallback_normal: bpy.props.FloatVectorProperty(
-        name="Fallback Normal", size=3, subtype="XYZ", default=(0.0, 0.0, 1.0),
-    )
-    source_name: bpy.props.StringProperty(name="Last Source", default="", options={"HIDDEN"})
+def update_guide_plane_grid(props, _context):
+    try:
+        from .construction import rebuild_guide_plane_grid
+
+        rebuild_guide_plane_grid(props.id_data)
+    except (AttributeError, ImportError, RuntimeError):
+        pass
+    update_dimension_display(props, _context)
 
 
 class CADDIM_PG_Guide(bpy.types.PropertyGroup):
@@ -800,116 +655,26 @@ class CADDIM_PG_Guide(bpy.types.PropertyGroup):
     kind: bpy.props.EnumProperty(
         name="Construction Type",
         items=[
-            ("GUIDE", "Infinite Guide", "An infinite construction line"),
+            ("GUIDE", "Guide Line", "An infinite construction line through the object origin along its local X axis"),
             ("MEASUREMENT", "Measurement", "A persistent finite measured segment"),
-            ("POINT", "Guide Point", "A persistent construction point"),
-            ("PLANE", "Guide Plane", "A persistent bounded construction plane"),
+            ("POINT", "Guide Point", "A construction point at the object origin"),
+            ("PLANE", "Guide Plane", "A construction grid on the object's local XY plane"),
         ],
         default="GUIDE",
         update=update_dimension_display,
     )
     start: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
     end: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    is_datum: bpy.props.BoolProperty(
-        name="Datum", description="Use this guide point as an oriented measurement datum",
-        default=False, update=update_dimension_display,
-    )
-    datum_name: bpy.props.StringProperty(
-        name="Datum Name", default="Datum", update=update_dimension_display,
-    )
-    datum_orientation: bpy.props.FloatVectorProperty(
-        name="Datum Orientation", description="Local datum axes", size=3, subtype="EULER",
-        default=(0.0, 0.0, 0.0), update=update_dimension_display,
-    )
-    axis: bpy.props.EnumProperty(
-        name="Direction",
-        items=[
-            ("ALIGNED", "Aligned", "Use the direction between the two anchors"),
-            ("X", "X Axis", "Use the global X axis through the start anchor"),
-            ("Y", "Y Axis", "Use the global Y axis through the start anchor"),
-            ("Z", "Z Axis", "Use the global Z axis through the start anchor"),
-        ],
-        default="ALIGNED",
-        update=update_dimension_display,
-    )
     visible: bpy.props.BoolProperty(name="Visible", default=True, update=update_dimension_display)
-    derived: bpy.props.BoolProperty(name="Derived", default=False, options={"HIDDEN"})
-    derivation_mode: bpy.props.EnumProperty(
-        name="Derivation",
-        items=[
-            ("NONE", "Fixed", "A fixed guide"),
-            ("OFFSET", "Offset", "Offset from one edge, guide, or face"),
-            ("CENTERLINE", "Centerline", "Midway between two parallel sources"),
-            ("ANGULAR", "Angular", "Rotate a source direction about an anchored pivot"),
-            ("SPACING", "Repeated Spacing", "One definition producing parallel snap lines"),
-        ],
-        default="NONE",
-    )
-    source_a: bpy.props.PointerProperty(type=CADDIM_PG_GuideSource)
-    source_b: bpy.props.PointerProperty(type=CADDIM_PG_GuideSource)
-    construction_pivot: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    spacing_end: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    guide_angle: bpy.props.FloatProperty(name="Angle", default=0.7853981633974483, subtype="ANGLE", update=update_dimension_display)
-    spacing_mode: bpy.props.EnumProperty(
-        name="Spacing Mode", items=[
-            ("COUNT", "Interval + Count", "Repeat at an interval for a fixed count"),
-            ("EXTENT", "Interval + Extent", "Repeat at an interval until an extent"),
-            ("DISTRIBUTE", "Distribute Evenly", "Distribute a fixed count across an extent"),
-        ], default="COUNT", update=update_dimension_display,
-    )
-    spacing_interval: bpy.props.FloatProperty(name="Interval", default=1.0, min=0.000001, subtype="DISTANCE", update=update_dimension_display)
-    spacing_count: bpy.props.IntProperty(name="Count", default=5, min=2, max=10000, update=update_dimension_display)
-    spacing_extent: bpy.props.FloatProperty(name="Extent", default=4.0, min=0.000001, subtype="DISTANCE", update=update_dimension_display)
-    offset_distance: bpy.props.FloatProperty(name="Offset", default=0.0, min=0.0, subtype="DISTANCE")
-    offset_side: bpy.props.IntProperty(name="Side", default=1, min=-1, max=1)
-    derived_direction: bpy.props.FloatVectorProperty(
-        name="Derived Direction", size=3, subtype="DIRECTION", default=(0.0, 1.0, 0.0),
-    )
-    derived_state: bpy.props.EnumProperty(
-        name="Derived State",
-        items=[
-            ("LIVE", "Live", "Every derived source resolves"),
-            ("NEEDS_REPAIR", "Needs Repair", "A source is missing or invalid"),
-            ("CYCLE", "Cycle", "The guide dependency contains a cycle"),
-        ],
-        default="LIVE",
-        options={"HIDDEN"},
-    )
-    last_resolved_origin: bpy.props.FloatVectorProperty(name="Last Origin", size=3, subtype="XYZ", options={"HIDDEN"})
-    last_resolved_direction: bpy.props.FloatVectorProperty(
-        name="Last Direction", size=3, subtype="DIRECTION", default=(1.0, 0.0, 0.0), options={"HIDDEN"},
-    )
-    plane_definition: bpy.props.EnumProperty(
-        name="Plane Definition",
-        items=[
-            ("THREE_POINTS", "Three Points", "Plane through three persistent points"),
-            ("POINT_NORMAL", "Point + Normal", "Plane through one point with a stored normal"),
-            ("FACE", "Face", "Plane following a persistent mesh face"),
-            ("OFFSET", "Offset", "Plane offset from another guide plane"),
-        ],
-        default="POINT_NORMAL",
-    )
-    plane_point_a: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    plane_point_b: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    plane_point_c: bpy.props.PointerProperty(type=CADDIM_PG_Anchor)
-    plane_normal: bpy.props.FloatVectorProperty(
-        name="Normal", size=3, subtype="DIRECTION", default=(0.0, 0.0, 1.0),
-    )
-    plane_axis_u: bpy.props.FloatVectorProperty(
-        name="In-Plane X", size=3, subtype="DIRECTION", default=(1.0, 0.0, 0.0),
-    )
     plane_extent: bpy.props.FloatProperty(
-        name="Grid Extent", description="Presentation-only half-size of the bounded plane grid",
-        default=2.0, min=0.01, soft_max=100.0, subtype="DISTANCE", update=update_dimension_display,
+        name="Half Size",
+        description="Distance from the plane center to each edge of its grid, before object scale",
+        default=2.0, min=0.01, soft_max=100.0, subtype="DISTANCE", update=update_guide_plane_grid,
     )
-    plane_state: bpy.props.EnumProperty(
-        name="Plane State",
-        items=[
-            ("LIVE", "Live", "Every plane source resolves"),
-            ("NEEDS_REPAIR", "Needs Repair", "A plane source is missing or degenerate"),
-            ("CYCLE", "Cycle", "The plane dependency contains a cycle"),
-        ],
-        default="LIVE", options={"HIDDEN"},
+    plane_spacing: bpy.props.FloatProperty(
+        name="Grid Spacing",
+        description="Distance between grid lines, before object scale. Grid intersections are snap points",
+        default=0.25, min=0.001, soft_max=10.0, subtype="DISTANCE", update=update_guide_plane_grid,
     )
 
 
@@ -938,36 +703,61 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
     active_annotation_manager_index: bpy.props.IntProperty(
         default=-1, min=-1, update=update_annotation_manager_index,
     )
-    annotation_manager_search: bpy.props.StringProperty(name="Search", default="")
-    annotation_manager_kind_linear: bpy.props.BoolProperty(name="Linear", default=True)
-    annotation_manager_kind_dimension_set: bpy.props.BoolProperty(name="Sets", default=True)
-    annotation_manager_kind_circle: bpy.props.BoolProperty(name="Circular", default=True)
-    annotation_manager_kind_angle: bpy.props.BoolProperty(name="Angle", default=True)
-    annotation_manager_kind_area: bpy.props.BoolProperty(name="Area", default=True)
-    annotation_manager_kind_measurement: bpy.props.BoolProperty(name="Measurement", default=True)
-    annotation_manager_kind_guide: bpy.props.BoolProperty(name="Guide", default=True)
-    annotation_manager_kind_point: bpy.props.BoolProperty(name="Point", default=True)
-    annotation_manager_kind_plane: bpy.props.BoolProperty(name="Plane", default=True)
-    annotation_manager_kind_coordinate: bpy.props.BoolProperty(name="Coordinate", default=True)
-    annotation_manager_kind_elevation: bpy.props.BoolProperty(name="Elevation", default=True)
-    annotation_manager_kind_datum: bpy.props.BoolProperty(name="Datum", default=True)
-    annotation_manager_state_live: bpy.props.BoolProperty(name="Live", default=True)
-    annotation_manager_state_fallback: bpy.props.BoolProperty(name="Fallback", default=True)
-    annotation_manager_state_captured: bpy.props.BoolProperty(name="Captured", default=True)
-    annotation_manager_state_needs_repair: bpy.props.BoolProperty(name="Needs Repair", default=True)
+    annotation_manager_search: bpy.props.StringProperty(
+        name="Search", description="Show only rows whose name contains this text", default="",
+    )
+    annotation_manager_kind_linear: bpy.props.BoolProperty(
+        name="Linear", description="Show linear dimensions", default=True,
+    )
+    annotation_manager_kind_angle: bpy.props.BoolProperty(
+        name="Angle", description="Show angle dimensions", default=True,
+    )
+    annotation_manager_kind_area: bpy.props.BoolProperty(
+        name="Area", description="Show area dimensions", default=True,
+    )
+    annotation_manager_kind_measurement: bpy.props.BoolProperty(
+        name="Measurement", description="Show saved measurements", default=True,
+    )
+    annotation_manager_kind_guide: bpy.props.BoolProperty(
+        name="Guide Line", description="Show construction guide lines", default=True,
+    )
+    annotation_manager_kind_point: bpy.props.BoolProperty(
+        name="Guide Point", description="Show construction guide points", default=True,
+    )
+    annotation_manager_kind_plane: bpy.props.BoolProperty(
+        name="Guide Plane", description="Show construction guide planes", default=True,
+    )
+    annotation_manager_state_live: bpy.props.BoolProperty(
+        name="Live", description="Show annotations that follow their source geometry", default=True,
+    )
+    annotation_manager_state_fallback: bpy.props.BoolProperty(
+        name="Fallback", description="Show annotations using a stored position that needs confirmation", default=True,
+    )
+    annotation_manager_state_captured: bpy.props.BoolProperty(
+        name="Captured", description="Show annotations holding a deliberately frozen value", default=True,
+    )
+    annotation_manager_state_needs_repair: bpy.props.BoolProperty(
+        name="Needs Repair", description="Show annotations whose source geometry is missing", default=True,
+    )
     annotation_manager_references_active: bpy.props.BoolProperty(
-        name="References Active", default=False, update=update_annotation_manager_reference,
+        name="Uses Active Object",
+        description="Show only annotations measuring the object that was active when this was turned on",
+        default=False, update=update_annotation_manager_reference,
     )
     annotation_manager_reference_object: bpy.props.PointerProperty(
         name="Reference Object", type=bpy.types.Object,
     )
+    annotation_manager_show_filters: bpy.props.BoolProperty(
+        name="Filters", description="Show the type and state filters for the list", default=False,
+    )
     annotation_manager_bulk_scope: bpy.props.EnumProperty(
-        name="Bulk Scope",
+        name="Apply To",
+        description="Which annotations the actions below change",
         items=[
-            ("FILTERED", "Filtered", "Operate on every row matching the manager filters"),
-            ("SELECTED", "Selected", "Operate on selected managed objects"),
+            ("SELECTED", "Selected", "Annotations and guides selected in the viewport"),
+            ("FILTERED", "All Listed", "Every row currently shown by the search and filters"),
         ],
-        default="FILTERED",
+        default="SELECTED",
     )
     annotation_manager_isolate_records: bpy.props.CollectionProperty(
         type=CADDIM_PG_AnnotationIsolateRecord,
@@ -1352,31 +1142,6 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
     snap_measurement_segment: bpy.props.BoolProperty(
         name="Measurement Segment", default=True, update=update_dimension_display
     )
-    active_plane_mode: bpy.props.EnumProperty(
-        name="Active Construction Plane",
-        items=[
-            ("NONE", "None", "Use view-derived free placement and world axes"),
-            ("GUIDE", "Guide Plane", "Use the selected saved guide plane"),
-            ("FACE", "Face", "Use a captured mesh face plane"),
-            ("VIEW", "Current View", "Use a captured plane facing the current view"),
-            ("WORLD_XY", "World XY", "Use the world XY plane"),
-            ("WORLD_YZ", "World YZ", "Use the world YZ plane"),
-            ("WORLD_ZX", "World ZX", "Use the world ZX plane"),
-        ],
-        default="NONE", update=update_dimension_display,
-    )
-    active_plane_object: bpy.props.PointerProperty(
-        name="Active Guide Plane", type=bpy.types.Object, update=update_dimension_display,
-    )
-    active_plane_origin: bpy.props.FloatVectorProperty(
-        name="Active Plane Origin", size=3, subtype="XYZ", options={"HIDDEN"},
-    )
-    active_plane_normal: bpy.props.FloatVectorProperty(
-        name="Active Plane Normal", size=3, subtype="DIRECTION", default=(0.0, 0.0, 1.0), options={"HIDDEN"},
-    )
-    active_plane_axis_u: bpy.props.FloatVectorProperty(
-        name="Active Plane X", size=3, subtype="DIRECTION", default=(1.0, 0.0, 0.0), options={"HIDDEN"},
-    )
 
     show_overlay_volume: bpy.props.BoolProperty(
         name="Show Volume",
@@ -1645,9 +1410,7 @@ classes = (
     CADDIM_PG_AnnotationStyle,
     CADDIM_PG_AnnotationManagerItem,
     CADDIM_PG_AnnotationIsolateRecord,
-    CADDIM_PG_DimensionSetMember,
     CADDIM_PG_Dimension,
-    CADDIM_PG_GuideSource,
     CADDIM_PG_Guide,
     CADDIM_PG_OutputSourceBinding,
     CADDIM_PG_SceneSettings,

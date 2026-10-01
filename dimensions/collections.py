@@ -1,4 +1,5 @@
 import bpy
+from mathutils import Matrix
 
 from .anchors import resolve_anchor
 from .constants import (
@@ -158,21 +159,56 @@ def create_guide_object(context, name="GUIDE Construction Line"):
 def create_measurement_object(context, name="MEASURE Construction Segment"):
     measurement_object = create_guide_object(context, name)
     measurement_object.guide_props.kind = "MEASUREMENT"
-    measurement_object.guide_props.axis = "ALIGNED"
     return measurement_object
 
 
-def create_guide_point_object(context, name="POINT Construction Point"):
+def create_guide_point_object(context, name="POINT Construction Point", location=None):
     point_object = create_guide_object(context, name)
     point_object.guide_props.kind = "POINT"
-    point_object.guide_props.axis = "ALIGNED"
+    if location is not None:
+        # Setting the world matrix updates it immediately, before depsgraph evaluation,
+        # so the snap proxy built next starts at the right place.
+        point_object.matrix_world = Matrix.Translation(location)
     return point_object
 
 
-def create_guide_plane_object(context, name="PLANE Construction Plane"):
-    plane_object = create_guide_object(context, name)
-    plane_object.guide_props.kind = "PLANE"
-    plane_object.guide_props.axis = "ALIGNED"
+def create_guide_plane_object(context, frame, extent=None, spacing=None, name="PLANE Construction Grid"):
+    """Create a construction grid mesh on ``frame``.
+
+    The grid is a real mesh so Blender's own snapping, selection, and transform
+    tools work on it. It is construction data in the Construction Guides
+    collection, never rendered and never part of the user's model.
+    """
+    from .migrations import prepare_scene_for_write, stamp_scene_if_needed
+
+    prepare_scene_for_write(context.scene)
+    collection = get_or_create_guide_collection(context)
+    plane_object = build_guide_plane_object(collection, frame, extent, spacing, name)
+    stamp_scene_if_needed(context.scene)
+    return plane_object
+
+
+def build_guide_plane_object(collection, frame, extent=None, spacing=None, name="PLANE Construction Grid"):
+    """Create a construction grid object in ``collection`` without needing a context."""
+    from .construction import GUIDE_PLANE_FLAG, fill_grid_mesh, frame_matrix, nice_grid_spacing
+
+    extent = 2.0 if extent is None else max(float(extent), 0.01)
+    spacing = nice_grid_spacing(extent) if spacing is None else max(float(spacing), 0.001)
+    mesh = bpy.data.meshes.new(name)
+    fill_grid_mesh(mesh, extent, spacing)
+    plane_object = bpy.data.objects.new(name, mesh)
+    plane_object[GUIDE_PLANE_FLAG] = True
+    plane_object.display_type = "WIRE"
+    plane_object.hide_render = True
+    plane_object.visible_shadow = False
+    plane_object.matrix_world = frame_matrix(frame)
+    collection.objects.link(plane_object)
+    props = plane_object.guide_props
+    # Size first: the kind is not PLANE yet, so these updates do not rebuild the grid again.
+    props.plane_extent = extent
+    props.plane_spacing = spacing
+    props.enabled = True
+    props.kind = "PLANE"
     return plane_object
 
 
@@ -185,9 +221,7 @@ def ensure_guide_point_snap_proxy(point_object, scene=None):
         or getattr(point_object.guide_props, "kind", "GUIDE") != "POINT"
     ):
         return None
-    point_world = resolve_anchor(point_object.guide_props.start)
-    if point_world is None:
-        return None
+    point_world = point_object.matrix_world.translation.copy()
     flagged = [child for child in point_object.children if child.get(GUIDE_POINT_SNAP_PROXY_FLAG, False)]
     proxy = next((child for child in flagged if child.type == "MESH"), None)
     for duplicate in flagged:
