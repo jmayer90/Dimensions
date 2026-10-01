@@ -2,23 +2,25 @@
 
 import bpy
 
-from ..interaction import modal_cleanup_on_exception
+from ..interaction import is_navigation_event, modal_cleanup_on_exception, set_tool_status_text
 
 from ..viewport_state import viewport_key
 from mathutils import Vector
 
 from .. import messages
-from ..anchors import anchor_resolution, dimension_source_anchors, set_world_anchor
+from ..anchors import anchor_resolution, is_construction_grid, set_world_anchor
+from ..area_binding import area_source_is_read_only
 from ..annotation_manager import annotation_manager_objects
 from ..drawing import clear_preview_state, set_preview_state
 from ..properties import is_dimension_object, is_read_only_dimensions_object
 from ..repair import (
     apply_repair_issue,
     apply_suggested_repairs,
-    repair_cause,
-    repair_issues,
     rebind_area_preserving_presentation,
     repair_anchor,
+    repair_cause,
+    repair_issues,
+    stored_repair_issues,
 )
 from ..scene_sync import sync_scene_objects
 from ..snapping import find_nearest_snap_point, raycast_from_mouse
@@ -120,15 +122,15 @@ class DIMENSIONS_OT_RepairFrameIssue(bpy.types.Operator):
         if context.region_data is None:
             self.report(messages.WARNING, messages.RUN_FROM_3D_VIEW)
             return {"CANCELLED"}
+        # Only the view moves: a tool preview here would outlive the operator and leave a stale badge.
         context.region_data.view_location = Vector(issues[0]["world_co"])
-        set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None), "state": "REPAIR", "repair_markers": _repair_markers(issues)})
         return {"FINISHED"}
 
 
 class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
     bl_idname = "dimensions.repair_pick_area_source"
     bl_label = "Pick Replacement Area Face"
-    bl_description = "Pick a base-mesh face using the standard acquisition path"
+    bl_description = "Click a face on an object without modifiers to become this Area's new source"
     bl_options = {"REGISTER", "UNDO"}
 
     object_name: bpy.props.StringProperty()
@@ -152,6 +154,7 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
         self.hover_source = None
         self.hover_face_index = -1
         context.window_manager.modal_handler_add(self)
+        set_tool_status_text(context, "Repair Area: click the replacement face · Esc cancels")
         return {"RUNNING_MODAL"}
 
     @modal_cleanup_on_exception
@@ -175,6 +178,9 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
             if self.hover_source is None or self.hover_face_index < 0:
                 self.report(messages.WARNING, messages.REPAIR_PICK_BASE_FACE)
                 return {"RUNNING_MODAL"}
+            if area_source_is_read_only(self.hover_source):
+                self.report(messages.WARNING, messages.AREA_SOURCE_LINKED)
+                return {"RUNNING_MODAL"}
             if self.hover_source.modifiers:
                 self.report(messages.WARNING, messages.AREA_BASE_MESH_REQUIRED)
                 return {"RUNNING_MODAL"}
@@ -188,10 +194,10 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
             sync_scene_objects(context.scene)
             self.report(messages.INFO, messages.accepted_repairs(1))
             return {"FINISHED"}
-        if event.type in {"ESC", "RIGHTMOUSE"}:
+        if event.type in {"ESC", "RIGHTMOUSE"} and event.value == "PRESS":
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+        if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
@@ -203,6 +209,9 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
             context, event.mouse_region_x, event.mouse_region_y,
             include_guides=False, include_free=False,
         )
+        if snap is not None and (snap.get("guide_plane") or is_construction_grid(snap.get("object"))):
+            # Construction grids are never Area sources; use the model surface under the cursor.
+            snap = None
         source = None if snap is None else snap.get("object")
         face_index = -1 if snap is None else snap.get("face_index", -1)
         if source is None or face_index < 0:
@@ -212,12 +221,19 @@ class DIMENSIONS_OT_RepairPickAreaSource(bpy.types.Operator):
                 face_index = hit.get("face_index", -1)
         self.hover_source = source if source is not None and source.type == "MESH" else None
         self.hover_face_index = face_index
-        issues = repair_issues(bpy.data.objects[self.annotation_name])
+        # Mouse moves read the recorded issues; the live candidate search scans the mesh.
+        issues = stored_repair_issues(bpy.data.objects[self.annotation_name])
         markers = _repair_markers(issues)
         if self.hover_source is not None and 0 <= face_index < len(self.hover_source.data.polygons):
             polygon = self.hover_source.data.polygons[face_index]
             markers.append({"world_co": tuple(self.hover_source.matrix_world @ polygon.center), "candidate": True})
-        set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None), "state": "REPAIR_AREA", "repair_markers": markers})
+        set_preview_state({
+            "viewport_key": getattr(self, "_session_viewport_key", None),
+            "state": "REPAIR_AREA",
+            "tool_label": "REPAIR",
+            "prompt": "Click the replacement face",
+            "repair_markers": markers,
+        })
 
 
 class DIMENSIONS_OT_RepairBulkCause(bpy.types.Operator):

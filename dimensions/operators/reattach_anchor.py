@@ -6,10 +6,23 @@ from ..viewport_state import viewport_key
 
 from .. import messages
 from ..anchors import resolve_anchor, set_anchor_from_snap
+from ..angle_binding import derive_angle_from_world_edges
 from ..drawing import clear_preview_state, set_preview_state
+from ..interaction import is_navigation_event, set_tool_status_text
 from ..properties import is_dimension_object, is_read_only_dimensions_object
 from ..snapping import copy_snap, find_nearest_snap_point
 from ..snap_targets import handle_snap_target_event
+
+
+_ANCHOR_LABELS = {
+    "START": "start",
+    "CENTER": "vertex",
+    "END": "end",
+    "ANGLE_A_START": "first edge start",
+    "ANGLE_A_END": "first edge end",
+    "ANGLE_B_START": "second edge start",
+    "ANGLE_B_END": "second edge end",
+}
 
 
 class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
@@ -50,6 +63,7 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
 
         self._update_preview()
         context.window_manager.modal_handler_add(self)
+        set_tool_status_text(context, f"Reattach: {self._prompt()} · S cycles snapping · Esc cancels")
         return {"RUNNING_MODAL"}
 
     @modal_cleanup_on_exception
@@ -98,17 +112,21 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             self.report(messages.INFO, messages.reattached_anchor(self.anchor_name))
             return {"FINISHED"}
 
-        if event.type in {"RIGHTMOUSE", "ESC"}:
+        if event.type in {"RIGHTMOUSE", "ESC"} and event.value == "PRESS":
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
 
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+        if is_navigation_event(event):
             return {"PASS_THROUGH"}
 
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
         clear_preview_state(key=getattr(self, "_session_viewport_key", None))
+
+    def _prompt(self):
+        label = _ANCHOR_LABELS.get(self.anchor_name, "anchor")
+        return f"Click the new {label} point"
 
     def _get_target_anchor(self):
         props = self.dimension_object.dimension_props
@@ -129,6 +147,7 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
 
         preview = {
             "state": f"REATTACH_{self.anchor_name}",
+            "prompt": self._prompt(),
             "dimension_type": props.dimension_type,
             "measurement_mode": props.measurement_mode,
             "offset_distance": props.offset_distance,
@@ -142,14 +161,46 @@ class CADDIM_OT_ReattachAnchor(bpy.types.Operator):
             preview["hover_label"] = self.hover_snap.get("label", "Point")
             preview["hover_snap"] = copy_snap(self.hover_snap)
 
-        if self.anchor_name in {"START", "ANGLE_A_START"}:
+        if props.annotation_kind == "ANGLE":
+            preview.update(self._angle_preview(props))
+        elif self.anchor_name == "START":
             preview["start_world"] = self.hover_snap["world_co"] if self.hover_snap is not None else start_world
-            preview["end_world"] = end_world
-        elif self.anchor_name == "CENTER":
-            preview["start_world"] = start_world
             preview["end_world"] = end_world
         else:
             preview["start_world"] = start_world
             preview["end_world"] = self.hover_snap["world_co"] if self.hover_snap is not None else end_world
 
         set_preview_state(preview, key=getattr(self, "_session_viewport_key", None))
+
+    def _angle_preview(self, props):
+        """Preview the angle with the hovered point in place of the reattached anchor."""
+        names = (
+            ("ANGLE_A_START", "ANGLE_A_END", "ANGLE_B_START", "ANGLE_B_END")
+            if props.angle_source_mode == "EDGES"
+            else ("START", "CENTER", "END")
+        )
+        anchors = {
+            "START": props.start, "CENTER": props.center, "END": props.end,
+            "ANGLE_A_START": props.angle_a_start, "ANGLE_A_END": props.angle_a_end,
+            "ANGLE_B_START": props.angle_b_start, "ANGLE_B_END": props.angle_b_end,
+        }
+        points = [
+            self.hover_snap["world_co"] if name == self.anchor_name and self.hover_snap is not None
+            else resolve_anchor(anchors[name])
+            for name in names
+        ]
+        arc_mode = "REFLEX" if props.angle_mode == "REFLEX" else "MINOR"
+        if len(points) == 4:
+            source = derive_angle_from_world_edges(*points, props.angle_mode)
+            if source is None:
+                return {}
+            points = (source["start"], source["center"], source["end"])
+            arc_mode = source.get("arc_mode", "MINOR")
+        return {
+            "annotation_kind": "ANGLE",
+            "start_world": points[0],
+            "center_world": points[1],
+            "end_world": points[2],
+            "angle_radius": props.angle_radius,
+            "angle_mode": arc_mode,
+        }

@@ -86,7 +86,6 @@ from dimensions.interaction import (
     axis_from_event,
     constrained_delta,
     is_confirm_event,
-    nearest_axis_from_screen_vectors,
     update_distance_text,
 )
 from dimensions.migrations import migrate_scene
@@ -413,13 +412,6 @@ class DimensionsBlenderSmokeTests(unittest.TestCase):
         self.assertEqual(axis_from_event(axis_event), "X")
         self.assertTrue(is_confirm_event(enter_event))
         self.assertEqual(constrained_delta(Vector((2.0, 3.0, 4.0)), "Y"), Vector((0.0, 3.0, 0.0)))
-        self.assertEqual(
-            nearest_axis_from_screen_vectors(
-                Vector((8.0, 1.0)),
-                {"X": Vector((1.0, 0.0)), "Y": Vector((0.0, 1.0))},
-            ),
-            "X",
-        )
 
     def test_dimension_and_guide_apply_typed_scene_unit_distances(self):
         unit_settings = bpy.context.scene.unit_settings
@@ -2048,6 +2040,14 @@ class DimensionsNamedStyleTests(unittest.TestCase):
         self.assertEqual(bpy.ops.dimensions.select_annotation_style_users(), {"FINISHED"})
         self.assertTrue(dimension.select_get())
 
+    @staticmethod
+    def _as_pre_v4_annotation(props):
+        """Make an annotation look like one saved before schema v4 introduced style overrides."""
+        props.schema_version = 0
+        raw = props.id_data.bl_system_properties_get()["dimension_props"]
+        for key in [key for key in raw.keys() if key.startswith("override_")]:
+            del raw[key]
+
     def test_scene_fallback_uses_the_active_metric_or_imperial_format(self):
         unit_settings = bpy.context.scene.unit_settings
         original_system = unit_settings.system
@@ -2060,6 +2060,7 @@ class DimensionsNamedStyleTests(unittest.TestCase):
             self.settings.metric_unit_style = "MILLIMETERS"
             self.assertEqual(configured_scene_unit_style(self.settings), "MILLIMETERS")
             self.assertEqual(resolve_dimension_style(self.settings, props).unit_style, "MILLIMETERS")
+            self._as_pre_v4_annotation(props)
             self.settings.schema_version = 3
             self.assertTrue(migrate_scene(bpy.context.scene))
             self.assertTrue(props.override_unit_style)
@@ -2070,6 +2071,7 @@ class DimensionsNamedStyleTests(unittest.TestCase):
             self.assertEqual(configured_scene_unit_style(self.settings), "INCH_FRACTION")
             props.override_unit_style = False
             self.assertEqual(resolve_dimension_style(self.settings, props).unit_style, "INCH_FRACTION")
+            self._as_pre_v4_annotation(props)
             self.settings.schema_version = 3
             self.assertTrue(migrate_scene(bpy.context.scene))
             self.assertEqual(props.unit_style, "INCH_FRACTION")
@@ -2662,14 +2664,25 @@ class DimensionsKeymapTests(unittest.TestCase):
                 "CONFIRM",
                 "CYCLE_SNAP_TARGETS",
                 "TOGGLE_INFERENCE_LOCK",
-                "FLIP_OFFSET",
                 "SAVE_TRANSIENT_MEASURE",
                 "COPY_TRANSIENT_MEASURE",
-                "STEP_BACK",
-                "CANCEL",
-                "CANCEL_IMMEDIATE",
             },
         )
+
+    def test_every_modal_action_has_a_readable_preferences_label(self):
+        # The carrier operator's own label would name every row "Dimensions Modal Action".
+        for _keymap, item in keymaps._modal_keymap_items:
+            self.assertIn(item.properties.action, keymaps._ACTION_LABELS)
+
+    def test_every_bound_action_is_read_by_a_tool(self):
+        # A binding nothing reads shows in Preferences but does nothing when rebound.
+        sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (REPOSITORY_ROOT / "dimensions").rglob("*.py")
+            if path.name != "keymaps.py"
+        )
+        for _keymap, item in keymaps._modal_keymap_items:
+            self.assertIn(f'"{item.properties.action}"', sources, item.properties.action)
 
     def test_no_default_binding_can_collide_with_blender(self):
         """The collision check the ticket asks to be documented, run as a test.
@@ -3151,7 +3164,7 @@ class DimensionsPackagingTests(unittest.TestCase):
         # A registered operator subclassing another registered operator once left
         # Measure and Guide Line without a Python class, so invoking them did nothing,
         # and operators without a description show "Undocumented" on hover.
-        from dimensions.operators import classes
+        classes = tuple(cls for cls in dimensions.CLASSES if issubclass(cls, bpy.types.Operator))
 
         for operator_class in classes:
             with self.subTest(operator=operator_class.bl_idname):
@@ -3225,6 +3238,304 @@ class DimensionsPackagingTests(unittest.TestCase):
         self.assertEqual(registered, [migrations._run_deferred_migration])
 
 
+class DimensionsBindingRegressionTests(unittest.TestCase):
+    """Area and Angle source binding defects found in the 0.7 release review."""
+
+    class _RecordingLayout:
+        def __init__(self, root=None):
+            self.root = root or self
+            self.enabled = True
+            if root is None:
+                self.labels = []
+                self.operators = []
+
+        def label(self, text="", icon="NONE"):
+            self.root.labels.append(text)
+
+        def operator(self, idname, text="", icon="NONE"):
+            self.root.operators.append((idname, self.enabled))
+            return SimpleNamespace()
+
+        def box(self):
+            return type(self)(self.root)
+
+        def row(self, align=False):
+            return type(self)(self.root)
+
+        def column(self, align=False):
+            return type(self)(self.root)
+
+    def setUp(self):
+        self.before_objects = set(bpy.data.objects)
+        self.before_meshes = set(bpy.data.meshes)
+        self.before_libraries = set(bpy.data.libraries)
+        self.created_collections = []
+
+    def tearDown(self):
+        if bpy.context.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        for library in list(bpy.data.libraries):
+            if library not in self.before_libraries:
+                bpy.data.libraries.remove(library)
+        for obj in list(bpy.data.objects):
+            if obj not in self.before_objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        for mesh in list(bpy.data.meshes):
+            if mesh not in self.before_meshes and mesh.users == 0:
+                bpy.data.meshes.remove(mesh)
+        for collection in self.created_collections:
+            bpy.data.collections.remove(collection)
+        sync_scene_objects(bpy.context.scene)
+
+    def _mesh(self, name, location=(0.0, 0.0, 0.0)):
+        # Two adjacent quads sharing an edge: face 0 has area 1, face 1 has area 3.
+        mesh = bpy.data.meshes.new(f"{name} Mesh")
+        mesh.from_pydata(
+            [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (4, 0, 0), (4, 1, 0)],
+            [],
+            [(0, 1, 2, 3), (1, 4, 5, 2)],
+        )
+        obj = bpy.data.objects.new(name, mesh)
+        obj.location = location
+        bpy.context.scene.collection.objects.link(obj)
+        bpy.context.view_layer.update()
+        return obj
+
+    def _area(self, name, source, face_indices):
+        from dimensions.anchors import set_object_anchor
+
+        annotation = create_dimension_object(bpy.context, name)
+        props = annotation.dimension_props
+        props.annotation_kind = "AREA"
+        result = bind_area_face_indices(props, source, face_indices)
+        set_object_anchor(props.start, source, result["center"])
+        set_object_anchor(props.end, source, result["center"] + Vector((0.0, 2.0, 0.0)))
+        return annotation
+
+    def _select_only(self, objects, active):
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in objects:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = active
+
+    def _area_with_face_id(self, name, source, face_id):
+        annotation = create_dimension_object(bpy.context, name)
+        props = annotation.dimension_props
+        props.annotation_kind = "AREA"
+        props.area_source_object = source
+        binding = props.area_faces.add()
+        binding.face_id = face_id
+        binding.vertex_count = 4
+        return props
+
+    def test_linked_area_source_is_refused_without_changing_the_binding(self):
+        import os
+        import tempfile
+        from dimensions.area_binding import FACE_ID_ATTRIBUTE, area_source_is_read_only
+
+        local = self._mesh("Binding Local Source")
+        props = self._area("AREA Linked Refusal", local, [0]).dimension_props
+        bound_ids = [item.face_id for item in props.area_faces]
+        library_mesh = bpy.data.meshes.new("Binding Library Mesh")
+        library_mesh.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])
+        library_object = bpy.data.objects.new("Binding Library Plane", library_mesh)
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "binding_library.blend")
+            bpy.data.libraries.write(path, {library_object, library_mesh})
+            bpy.data.objects.remove(library_object)
+            bpy.data.meshes.remove(library_mesh)
+            with bpy.data.libraries.load(path, link=True) as (_source, target):
+                target.objects = ["Binding Library Plane"]
+            linked = target.objects[0]
+            bpy.context.scene.collection.objects.link(linked)
+
+            self.assertTrue(area_source_is_read_only(linked))
+            self.assertFalse(area_source_is_read_only(local))
+            # Face IDs written to linked data are lost on reload, so binding is refused.
+            self.assertIsNone(bind_area_face_indices(props, linked, [0]))
+            self.assertEqual(props.area_source_object, local)
+            self.assertEqual([item.face_id for item in props.area_faces], bound_ids)
+            self.assertIsNone(linked.data.attributes.get(FACE_ID_ATTRIBUTE))
+
+    def test_new_area_renumbers_every_copy_of_a_duplicated_face_id(self):
+        from dimensions.area_binding import FACE_ID_ATTRIBUTE
+
+        source = self._mesh("Binding Duplicate Source")
+        attribute = source.data.attributes.new(FACE_ID_ATTRIBUTE, "INT", "FACE")
+        attribute.data[0].value = 7
+        attribute.data[1].value = 7
+        existing = self._area_with_face_id("AREA Duplicate Existing", source, 7)
+        self.assertIsNone(evaluate_area_binding(existing))
+
+        created = create_dimension_object(bpy.context, "AREA Duplicate New").dimension_props
+        created.annotation_kind = "AREA"
+        self.assertAlmostEqual(bind_area_face_indices(created, source, [0])["area"], 1.0)
+        values = [item.value for item in source.data.attributes[FACE_ID_ATTRIBUTE].data]
+        self.assertNotIn(7, values)
+        self.assertEqual(len(set(values)), 2)
+        # The existing Area must stay unresolved rather than adopt the surviving copy.
+        self.assertIsNone(evaluate_area_binding(existing))
+
+    def test_new_edit_mode_area_renumbers_every_copy_of_a_duplicated_face_id(self):
+        from dimensions.area_binding import FACE_ID_ATTRIBUTE
+
+        source = self._mesh("Binding Duplicate Edit Source")
+        existing = self._area_with_face_id("AREA Duplicate Edit Existing", source, 7)
+        self._select_only([source], source)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bm = bmesh.from_edit_mesh(source.data)
+        layer = bm.faces.layers.int.new(FACE_ID_ATTRIBUTE)
+        for face in bm.faces:
+            face[layer] = 7
+        self.assertIsNone(evaluate_area_binding(existing))
+
+        created = create_dimension_object(bpy.context, "AREA Duplicate Edit New").dimension_props
+        created.annotation_kind = "AREA"
+        self.assertAlmostEqual(bind_area_face_indices(created, source, [1])["area"], 3.0)
+        bm = bmesh.from_edit_mesh(source.data)
+        layer = bm.faces.layers.int.get(FACE_ID_ATTRIBUTE)
+        values = [face[layer] for face in bm.faces]
+        self.assertNotIn(7, values)
+        self.assertEqual(len(set(values)), 2)
+        self.assertIsNone(evaluate_area_binding(existing))
+
+    def test_apply_faces_targets_the_selected_area_and_rebinds_its_label(self):
+        first = self._mesh("Binding Rebind First")
+        second = self._mesh("Binding Rebind Second", location=(10.0, 0.0, 0.0))
+        area_a = self._area("AREA Rebind A", first, [0])
+        area_b = self._area("AREA Rebind B", second, [0])
+        a_faces = [item.face_id for item in area_a.dimension_props.area_faces]
+
+        self._select_only([area_a], area_a)
+        self.assertEqual(bpy.ops.dimensions.select_area_source(), {"FINISHED"})
+        self.assertTrue(area_a.select_get())
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+        # Later the user selects Area B with the first mesh; A was only inspected earlier.
+        self._select_only([area_b, first], first)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bm = bmesh.from_edit_mesh(first.data)
+        for face in bm.faces:
+            face.select = True
+        bmesh.update_edit_mesh(first.data)
+        self.assertEqual(bpy.ops.dimensions.rebind_area_from_selection(), {"FINISHED"})
+
+        props_b = area_b.dimension_props
+        self.assertEqual(props_b.area_source_object, first)
+        self.assertEqual(props_b.end.target_object, first)
+        self.assertAlmostEqual(props_b.area_value, 4.0)
+        self.assertEqual(area_a.dimension_props.area_source_object, first)
+        self.assertEqual([item.face_id for item in area_a.dimension_props.area_faces], a_faces)
+
+        area_b.select_set(False)
+        self.assertFalse(bpy.ops.dimensions.rebind_area_from_selection.poll())
+
+    def test_guided_repair_panel_reads_stored_state_without_searching_the_mesh(self):
+        from dimensions.area_binding import FACE_ID_ATTRIBUTE
+        from dimensions.repair import stored_repair_issues
+        from dimensions.ui import CADDIM_PT_GuidedRepair
+
+        source = self._mesh("Binding Repair Source")
+        area = self._area("AREA Binding Repair", source, [0])
+        source.data.attributes[FACE_ID_ATTRIBUTE].data[0].value = 0
+        dimension = create_dimension_object(bpy.context, "DIM Binding Repair")
+        set_anchor(dimension.dimension_props.start, source, 0)
+        set_anchor(dimension.dimension_props.end, source, 4)
+        source.data.attributes["dimensions_anchor_id"].data[0].value = 0
+        sync_scene_objects(bpy.context.scene)
+
+        for annotation, expected in ((area, [("AREA", "BY_FALLBACK")]), (dimension, [("ANCHOR", "BY_FALLBACK")])):
+            live = [(issue["type"], issue["status"]) for issue in repair_issues(annotation)]
+            stored = [(issue["type"], issue["status"]) for issue in stored_repair_issues(annotation)]
+            self.assertEqual(live, expected)
+            self.assertEqual(stored, expected)
+
+        self._select_only([area], area)
+        context = SimpleNamespace(view_layer=bpy.context.view_layer)
+        layout = self._RecordingLayout()
+        searched = AssertionError("the sidebar scanned the source mesh")
+        with patch("dimensions.repair.suggest_area_candidate", side_effect=searched), \
+                patch("dimensions.repair.suggest_vertex_candidate", side_effect=searched), \
+                patch("dimensions.repair.anchor_resolution", side_effect=searched), \
+                patch("dimensions.repair.evaluate_area_binding", side_effect=searched):
+            self.assertTrue(CADDIM_PT_GuidedRepair.poll(context))
+            CADDIM_PT_GuidedRepair.draw(SimpleNamespace(layout=layout), context)
+        self.assertIn("Area: Fallback", layout.labels)
+        self.assertIn(("dimensions.repair_accept_suggestion", True), layout.operators)
+
+    def test_annotations_on_a_shared_mesh_stay_live_while_its_twin_is_edited(self):
+        source = self._mesh("Binding Shared Source")
+        twin = bpy.data.objects.new("Binding Shared Twin", source.data)
+        bpy.context.scene.collection.objects.link(twin)
+        area = self._area("AREA Binding Shared", source, [0])
+        dimension = create_dimension_object(bpy.context, "DIM Binding Shared")
+        set_anchor(dimension.dimension_props.start, source, 0)
+        set_anchor(dimension.dimension_props.end, source, 4)
+
+        self._select_only([twin], twin)
+        bpy.ops.object.mode_set(mode="EDIT")
+        self.assertEqual(source.mode, "OBJECT")
+        self.assertIsNotNone(evaluate_area_binding(area.dimension_props))
+        self.assertEqual(anchor_resolution(dimension.dimension_props.start)[1], "BY_ID")
+
+    def test_select_area_source_warns_for_hidden_sources_and_flushes_selection(self):
+        source = self._mesh("Binding Select Source")
+        area = self._area("AREA Binding Select", source, [0])
+        self._select_only([area], area)
+
+        source.hide_viewport = True
+        self.assertEqual(bpy.ops.dimensions.select_area_source(), {"CANCELLED"})
+        source.hide_viewport = False
+        collection = bpy.data.collections.new("Binding Excluded")
+        self.created_collections.append(collection)
+        bpy.context.scene.collection.children.link(collection)
+        collection.objects.link(source)
+        bpy.context.scene.collection.objects.unlink(source)
+        bpy.context.view_layer.layer_collection.children[collection.name].exclude = True
+        self.assertEqual(bpy.ops.dimensions.select_area_source(), {"CANCELLED"})
+        self.assertEqual(bpy.context.mode, "OBJECT")
+        self.assertEqual(bpy.context.view_layer.objects.active, area)
+        self.assertTrue(area.select_get())
+
+        bpy.context.view_layer.layer_collection.children[collection.name].exclude = False
+        tool_settings = bpy.context.scene.tool_settings
+        select_mode = tuple(tool_settings.mesh_select_mode)
+        tool_settings.mesh_select_mode = (True, False, False)
+        try:
+            self.assertEqual(bpy.ops.dimensions.select_area_source(), {"FINISHED"})
+            self.assertTrue(area.select_get())
+            bm = bmesh.from_edit_mesh(source.data)
+            bm.faces.ensure_lookup_table()
+            # Face 1 shares an edge with the bound face; deselecting it once cleared that edge.
+            self.assertTrue(all(vertex.select for vertex in bm.faces[0].verts))
+            self.assertEqual([face.index for face in bm.faces if face.select], [0])
+        finally:
+            tool_settings.mesh_select_mode = select_mode
+
+    def test_disconnected_angle_rays_point_toward_their_edges(self):
+        from math import degrees
+
+        # An L with a gap at the corner, with every stored vertex order.
+        for a_start, a_end, b_start, b_end in (
+            ((1, 0, 0), (3, 0, 0), (0, 1, 0), (0, 3, 0)),
+            ((3, 0, 0), (1, 0, 0), (0, 1, 0), (0, 3, 0)),
+            ((3, 0, 0), (1, 0, 0), (0, 3, 0), (0, 1, 0)),
+        ):
+            source = derive_angle_from_world_edges(
+                Vector(a_start), Vector(a_end), Vector(b_start), Vector(b_end), "MINOR",
+            )
+            self.assertGreater((source["start"] - source["center"]).x, 0.5)
+            self.assertGreater((source["end"] - source["center"]).y, 0.5)
+            self.assertAlmostEqual(degrees(source["value"]), 90.0, places=4)
+        # A 45-degree gap whose corner lies at (-1, 0), away from both edges.
+        source = derive_angle_from_world_edges(
+            Vector((3, 0, 0)), Vector((1, 0, 0)), Vector((2, 3, 0)), Vector((0, 1, 0)), "MINOR",
+        )
+        self.assertGreater((source["start"] - source["center"]).x, 0.5)
+        self.assertGreater((source["end"] - source["center"]).y, 0.5)
+        self.assertAlmostEqual(degrees(source["value"]), 45.0, places=4)
+
+
 def main():
     dimensions.register()
     try:
@@ -3244,6 +3555,7 @@ def main():
                 DimensionsConstructionTests,
                 DimensionsTransientMeasurementTests,
                 DimensionsPackagingTests,
+                DimensionsBindingRegressionTests,
             )
         )
         result = unittest.TextTestRunner(verbosity=2).run(suite)

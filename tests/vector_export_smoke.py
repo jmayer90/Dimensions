@@ -14,12 +14,19 @@ from mathutils import Vector
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dimensions
 from dimensions.anchors import set_world_anchor
 from dimensions.collections import create_dimension_object
 from dimensions.grease_pencil_output import OutputStroke
-from dimensions.operators.export_vector import build_scene_vector_document, vector_output_strokes
+from dimensions.operators.export_vector import (
+    DIMENSIONS_OT_ExportSVG,
+    build_scene_vector_document,
+    vector_output_strokes,
+)
+from support.operator_harness import make_operator_harness
 from dimensions.sheet_layout import SheetMetadata
 from dimensions.vector_export import (
     VectorExportError,
@@ -314,6 +321,23 @@ class DimensionsVectorExportTests(unittest.TestCase):
         document = build_scene_vector_document(bpy.context)
         self.assertEqual(document.annotation_count, 1)
         self.assertEqual(document.skipped_count, 2)
+
+    def test_annotations_outside_the_camera_frame_are_not_counted_as_exported(self):
+        self.camera.data.ortho_scale = 1.0
+        self._dimension("DIM OUT-02 Inside Frame")
+        self._dimension("DIM OUT-02 Outside Frame", start=(50.0, 0.0, 0.0), end=(50.1, 0.0, 0.0))
+        document = build_scene_vector_document(bpy.context)
+        self.assertEqual(document.annotation_count, 1)
+        self.assertEqual(document.outside_count, 1)
+        self.assertIn("annotations=1;", svg_text(document))
+        with tempfile.TemporaryDirectory(prefix="dimensions-vector-outside-") as directory:
+            operator = make_operator_harness(
+                DIMENSIONS_OT_ExportSVG, filepath=str(Path(directory) / "outside.svg"),
+            )
+            self.assertEqual(operator.execute(bpy.context), {"FINISHED"})
+        message = operator.reports[-1][1]
+        self.assertIn("Exported 1 annotation(s)", message)
+        self.assertIn("1 annotation(s) lie outside the camera frame", message)
 
     def test_exporting_one_hundred_annotations_stays_interactive(self):
         self.camera.data.ortho_scale = 1.0

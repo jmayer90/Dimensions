@@ -1,3 +1,5 @@
+from contextlib import redirect_stderr
+from io import StringIO
 from math import floor, gcd, pi
 import re
 
@@ -52,7 +54,10 @@ def parse_distance_input(context, text):
     if unit_system not in {"METRIC", "IMPERIAL"}:
         return float(value_text)
 
-    meters = bpy.utils.units.to_value(unit_system, "LENGTH", value_text)
+    # Partial input such as "2f" while typing "2ft" is expected to fail; Blender
+    # would print each failure's traceback to the console before raising.
+    with redirect_stderr(StringIO()):
+        meters = bpy.utils.units.to_value(unit_system, "LENGTH", value_text)
     return meters / (unit_settings.scale_length or 1.0)
 
 

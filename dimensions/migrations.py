@@ -15,6 +15,10 @@ from .properties import (
 
 
 _warned_newer_versions = set()
+# Scene synchronization stamps scenes on every depsgraph update. Unconverted objects
+# can only arrive with new objects (Append, Link), so the scan for them waits until
+# the object count changes instead of walking the scene on every update.
+_object_counts_scanned = {}
 
 
 def scene_has_dimensions_data(scene):
@@ -31,20 +35,88 @@ def scene_has_dimensions_data(scene):
     )
 
 
-def _writable_scene_objects(scene):
-    return (obj for obj in scene.objects if not is_read_only_dimensions_object(obj))
+def object_schema_version(obj):
+    """Return the saved-data schema an owned object was created in or converted to.
+
+    Objects saved before schema 16 carry no stamp and report 0. The scene stamp
+    cannot stand in for it: Append, Link, and a new scene sharing a collection all
+    bring objects into scenes whose stamp says nothing about them.
+    """
+    versions = [
+        props.schema_version
+        for props in (getattr(obj, "dimension_props", None), getattr(obj, "guide_props", None))
+        if props is not None and props.enabled
+    ]
+    return max(versions, default=0)
+
+
+def mark_object_current(obj):
+    """Record that an owned object already has the current saved-data shape."""
+    for name in ("dimension_props", "guide_props"):
+        props = getattr(obj, name, None)
+        if props is not None and props.enabled and props.schema_version < CURRENT_SCHEMA_VERSION:
+            props.schema_version = CURRENT_SCHEMA_VERSION
+
+
+def _writable_scene_objects(scene, target_version=CURRENT_SCHEMA_VERSION):
+    """Objects the step that produces ``target_version`` may rewrite.
+
+    Linked and overridden objects are never written, and objects already stamped
+    at or past the step's schema keep their data.
+    """
+    return (
+        obj for obj in scene.objects
+        if not is_read_only_dimensions_object(obj) and object_schema_version(obj) < target_version
+    )
+
+
+def evaluate_scene_transforms(scene):
+    """Evaluate world matrices before a conversion reads them.
+
+    ``load_post`` runs before Blender first evaluates the opened file, and appended
+    objects stay unevaluated until the next update, so ``matrix_world`` still reads
+    as identity there. Anchors on transformed meshes would then resolve in local space.
+    """
+    from .scene_sync import scene_sync_suspended
+
+    with scene_sync_suspended():
+        for view_layer in scene.view_layers:
+            try:
+                view_layer.update()
+            except (AttributeError, ReferenceError, RuntimeError):
+                pass
+
+
+def scene_is_newer_than_supported(scene):
+    settings = getattr(scene, "dimensions_settings", None)
+    return settings is not None and settings.schema_version > CURRENT_SCHEMA_VERSION
 
 
 def stamp_scene_if_needed(scene):
     """Stamp a scene when Dimensions first creates persistent data in it."""
     if scene is not None and scene_has_dimensions_data(scene):
         migrate_scene(scene)
+        if _objects_arrived_since_last_scan(scene):
+            convert_unmarked_objects(scene)
+
+
+def _objects_arrived_since_last_scan(scene):
+    key = scene.as_pointer()
+    count = len(bpy.data.objects)
+    if _object_counts_scanned.get(key) == count:
+        return False
+    _object_counts_scanned[key] = count
+    return True
 
 
 def prepare_scene_for_write(scene):
     """Advance saved settings before creating a new annotation in the scene."""
     if scene is None:
         return
+    if scene_is_newer_than_supported(scene):
+        from . import messages
+
+        raise RuntimeError(messages.SCENE_SCHEMA_NEWER)
     if scene_has_dimensions_data(scene):
         migrate_scene(scene)
     else:
@@ -69,6 +141,8 @@ def migrate_scene(scene):
             _warned_newer_versions.add(key)
         return False
 
+    if version < CURRENT_SCHEMA_VERSION:
+        evaluate_scene_transforms(scene)
     changed = False
     while version < CURRENT_SCHEMA_VERSION:
         migration = _MIGRATIONS.get(version)
@@ -78,13 +152,16 @@ def migrate_scene(scene):
         version += 1
         settings.schema_version = version
         changed = True
+    if changed:
+        for obj in list(_writable_scene_objects(scene)):
+            mark_object_current(obj)
     return changed
 
 
 def migrate_v0_to_v1(scene):
     """Give legacy vertex anchors durable point IDs."""
     changed = False
-    for obj in _writable_scene_objects(scene):
+    for obj in _writable_scene_objects(scene, 1):
         anchors = []
         if is_dimension_object(obj):
             props = obj.dimension_props
@@ -167,8 +244,10 @@ def migrate_v2_to_v3(scene):
 def migrate_v3_to_v4(scene):
     """Preserve every existing annotation value as an explicit style override."""
     changed = False
-    for obj in _writable_scene_objects(scene):
-        if not is_dimension_object(obj):
+    for obj in _writable_scene_objects(scene, 4):
+        # Objects that already store override flags were written by v4 or later,
+        # for example ones appended from a newer file into an unstamped scene.
+        if not is_dimension_object(obj) or _has_raw_key(obj, "dimension_props", "override_color"):
             continue
         props = obj.dimension_props
         props.style_name = ""
@@ -185,7 +264,7 @@ def migrate_v3_to_v4(scene):
 def migrate_v4_to_v5(scene):
     """Record truthful anchor resolution state and last-known source names."""
     changed = False
-    for obj in _writable_scene_objects(scene):
+    for obj in _writable_scene_objects(scene, 5):
         anchors = []
         if is_dimension_object(obj):
             props = obj.dimension_props
@@ -279,8 +358,8 @@ def migrate_v8_to_v9(scene):
         style.label_orientation = "HORIZONTAL"
         style.label_line_mode = line_mode
 
-    for obj in _writable_scene_objects(scene):
-        if not is_dimension_object(obj):
+    for obj in _writable_scene_objects(scene, 9):
+        if not is_dimension_object(obj) or _has_raw_key(obj, "dimension_props", "override_start_end_style"):
             continue
         props = obj.dimension_props
         props.start_end_style = endpoint(props.arrow_end_style)
@@ -414,6 +493,10 @@ def _raw_value(group, key, default=None):
         return default
 
 
+def _has_raw_key(owner, group_name, key):
+    return _raw_value(_raw_group(owner, group_name), key) is not None
+
+
 def _raw_vector(group, key, default):
     from mathutils import Vector
 
@@ -457,6 +540,44 @@ def _copy_simple_properties(source, target, skip=()):
             pass
 
 
+def _capture_object_state(obj):
+    """Record the viewport state a replacement object has to keep."""
+    hidden_layers = []
+    for scene in bpy.data.scenes:
+        for view_layer in scene.view_layers:
+            if view_layer.objects.get(obj.name) == obj and obj.hide_get(view_layer=view_layer):
+                hidden_layers.append(view_layer)
+    return {
+        "hidden_layers": hidden_layers,
+        "hide_viewport": obj.hide_viewport,
+        "hide_select": obj.hide_select,
+        "parent": obj.parent,
+        "parent_type": obj.parent_type,
+        "parent_bone": obj.parent_bone,
+        "matrix_parent_inverse": obj.matrix_parent_inverse.copy(),
+    }
+
+
+def _apply_object_state(obj, state):
+    """Restore captured visibility and parenting; the caller sets the transform afterwards."""
+    obj.hide_viewport = state["hide_viewport"]
+    obj.hide_select = state["hide_select"]
+    if state["parent"] is not None:
+        obj.parent = state["parent"]
+        try:
+            obj.parent_type = state["parent_type"]
+            obj.parent_bone = state["parent_bone"]
+        except (TypeError, ValueError):
+            pass
+        obj.matrix_parent_inverse = state["matrix_parent_inverse"]
+    for view_layer in state["hidden_layers"]:
+        try:
+            # ``hide_set`` resynchronizes the layer, which a fresh link still needs.
+            obj.hide_set(True, view_layer=view_layer)
+        except (ReferenceError, RuntimeError):
+            pass
+
+
 def _convert_dimension_set(obj, raw):
     """Replace one saved chain/baseline set with ordinary linear dimensions."""
     members = list(_raw_value(raw, "set_members", ()) or ())
@@ -466,6 +587,7 @@ def _convert_dimension_set(obj, raw):
     pitch = spacing if spacing > 1e-6 else max(0.05, float(props.text_size) * 0.015)
     axis = props.dimension_type
     collections = tuple(obj.users_collection)
+    state = _capture_object_state(obj)
     created = []
     for index, member in enumerate(members):
         new_object = bpy.data.objects.new(f"{obj.name} {index + 1}", None)
@@ -484,7 +606,9 @@ def _convert_dimension_set(obj, raw):
         new_object["_dimensions_new_locator"] = True
         _copy_raw_anchor(_raw_value(member, "start"), new_object, "start")
         _copy_raw_anchor(_raw_value(member, "end"), new_object, "end")
+        _apply_object_state(new_object, state)
         new_object.location = obj.location
+        mark_object_current(new_object)
         created.append(new_object)
     bpy.data.objects.remove(obj, do_unlink=True)
     return created
@@ -501,6 +625,9 @@ def _convert_guide_line(obj, raw):
         origin = _raw_vector(raw, "last_resolved_origin", obj.matrix_world.translation)
         direction = _raw_vector(raw, "last_resolved_direction", (1.0, 0.0, 0.0))
     else:
+        if _raw_value(raw, "start") is None:
+            # Nothing saved to derive a line from: the transform already defines it.
+            return
         origin = resolve_anchor(props.start)
         axis = _LEGACY_AXIS_NAMES.get(int(_raw_value(raw, "axis", 0) or 0))
         if axis is not None:
@@ -515,9 +642,11 @@ def _convert_guide_line(obj, raw):
     set_world_anchor(props.end, origin + direction)
 
 
-def _convert_guide_point(obj):
+def _convert_guide_point(obj, raw):
     from .anchors import resolve_anchor, set_world_anchor
 
+    if _raw_value(raw, "start") is None:
+        return
     point = resolve_anchor(obj.guide_props.start)
     matrix = obj.matrix_world.copy()
     matrix.translation = point
@@ -528,7 +657,7 @@ def _convert_guide_point(obj):
 def _convert_guide_plane(obj, raw):
     """Replace a saved Empty plane with a snappable grid mesh on its last frame."""
     from .collections import build_guide_plane_object
-    from .construction import plane_frame
+    from .construction import frame_matrix, plane_frame
 
     origin = _raw_vector(raw, "last_resolved_origin", obj.matrix_world.translation)
     normal = _raw_vector(raw, "last_resolved_direction", (0.0, 0.0, 1.0))
@@ -540,15 +669,71 @@ def _convert_guide_plane(obj, raw):
     name = obj.name
     extent = obj.guide_props.plane_extent
     visible = obj.guide_props.visible
-    hidden = obj.hide_viewport
+    state = _capture_object_state(obj)
     bpy.data.objects.remove(obj, do_unlink=True)
     plane = build_guide_plane_object(collections[0], frame, extent, None, name)
     for collection in collections[1:]:
         collection.objects.link(plane)
     plane.name = name
     plane.guide_props.visible = visible
-    plane.hide_viewport = hidden
+    _apply_object_state(plane, state)
+    plane.matrix_world = frame_matrix(frame)
     return plane
+
+
+def _convert_legacy_object(obj, removed):
+    """Bring one object saved before schema 16 to the 0.7 model."""
+    dimension_raw = _raw_group(obj, "dimension_props")
+    if dimension_raw is not None and _raw_value(dimension_raw, "enabled", 0):
+        kind = _LEGACY_ANNOTATION_KINDS.get(int(_raw_value(dimension_raw, "annotation_kind", 0) or 0))
+        if kind == "DIMENSION_SET":
+            _convert_dimension_set(obj, dimension_raw)
+            return
+        if kind in {"CIRCLE", "COORDINATE", "ELEVATION"}:
+            removed.append(obj.name)
+            bpy.data.objects.remove(obj, do_unlink=True)
+            return
+        _drop_raw_keys(dimension_raw, _LEGACY_DIMENSION_KEYS)
+    guide_raw = _raw_group(obj, "guide_props")
+    if guide_raw is not None and _raw_value(guide_raw, "enabled", 0):
+        kind = obj.guide_props.kind
+        if kind == "GUIDE":
+            _convert_guide_line(obj, guide_raw)
+        elif kind == "POINT":
+            _convert_guide_point(obj, guide_raw)
+        elif kind == "PLANE" and obj.type != "MESH":
+            obj = _convert_guide_plane(obj, guide_raw)
+            guide_raw = None if obj is None else _raw_group(obj, "guide_props")
+        _drop_raw_keys(guide_raw, _LEGACY_GUIDE_KEYS)
+    if obj is not None:
+        mark_object_current(obj)
+
+
+def _remove_orphan_output(scene):
+    """Remove generated output whose source annotation no longer exists."""
+    from .grease_pencil_output import remove_generated_output
+
+    if scene.library is not None:
+        return False
+    bindings = scene.dimensions_settings.output_source_bindings
+    changed = False
+    for index in reversed(range(len(bindings))):
+        binding = bindings[index]
+        if binding.source is not None:
+            continue
+        if binding.key:
+            remove_generated_output(scene, binding.key)
+        bindings.remove(index)
+        changed = True
+    return changed
+
+
+def _report_removed(scene, removed):
+    if removed:
+        print(
+            "Dimensions 0.7 removed radial, diameter, arc, coordinate, and elevation "
+            f"annotations from scene {scene.name!r}: {', '.join(sorted(removed))}"
+        )
 
 
 def migrate_v15_to_v16(scene):
@@ -559,46 +744,41 @@ def migrate_v15_to_v16(scene):
     Guide lines and points become transform-defined movable objects, and guide
     planes become snappable grid meshes. Radial, diameter, arc-length,
     coordinate, and elevation annotations are removed because 0.7 has no
-    equivalent; their names are printed to the console.
+    equivalent; their names are printed to the console, and generated output
+    left without a source is removed.
     """
-    changed = False
     removed = []
-    for obj in list(scene.objects):
-        if is_read_only_dimensions_object(obj):
-            continue
-        dimension_raw = _raw_group(obj, "dimension_props")
-        if dimension_raw is not None and _raw_value(dimension_raw, "enabled", 0):
-            kind = _LEGACY_ANNOTATION_KINDS.get(int(_raw_value(dimension_raw, "annotation_kind", 0) or 0))
-            if kind == "DIMENSION_SET":
-                _convert_dimension_set(obj, dimension_raw)
-                changed = True
-                continue
-            if kind in {"CIRCLE", "COORDINATE", "ELEVATION"}:
-                removed.append(obj.name)
-                bpy.data.objects.remove(obj, do_unlink=True)
-                changed = True
-                continue
-            _drop_raw_keys(dimension_raw, _LEGACY_DIMENSION_KEYS)
-        guide_raw = _raw_group(obj, "guide_props")
-        if guide_raw is None or not _raw_value(guide_raw, "enabled", 0):
-            continue
-        kind = obj.guide_props.kind
-        if kind == "GUIDE":
-            _convert_guide_line(obj, guide_raw)
-        elif kind == "POINT":
-            _convert_guide_point(obj)
-        elif kind == "PLANE" and obj.type != "MESH":
-            obj = _convert_guide_plane(obj, guide_raw)
-            guide_raw = None if obj is None else _raw_group(obj, "guide_props")
-        _drop_raw_keys(guide_raw, _LEGACY_GUIDE_KEYS)
-        changed = True
+    for obj in list(_writable_scene_objects(scene, 16)):
+        _convert_legacy_object(obj, removed)
     _drop_raw_keys(_raw_group(scene, "dimensions_settings"), _LEGACY_SCENE_KEYS)
-    if removed:
-        print(
-            "Dimensions 0.7 removed radial, diameter, arc, coordinate, and elevation "
-            f"annotations from scene {scene.name!r}: {', '.join(sorted(removed))}"
-        )
-    return changed
+    _remove_orphan_output(scene)
+    _report_removed(scene, removed)
+    return True
+
+
+def convert_unmarked_objects(scene):
+    """Convert objects saved before schema 16 that entered an already-current scene.
+
+    Append, or making linked data local, brings 0.6 objects into a scene whose own
+    stamp is current, so the scene migration never sees them. Only the shape
+    conversion runs; the earlier object steps would reinterpret their styles.
+    Linked and overridden objects cannot be written and stay as saved.
+    """
+    if scene is None or scene.dimensions_settings.schema_version != CURRENT_SCHEMA_VERSION:
+        return False
+    pending = [
+        obj for obj in _writable_scene_objects(scene)
+        if is_dimension_object(obj) or is_guide_object(obj)
+    ]
+    if not pending:
+        return False
+    evaluate_scene_transforms(scene)
+    removed = []
+    for obj in pending:
+        _convert_legacy_object(obj, removed)
+    _remove_orphan_output(scene)
+    _report_removed(scene, removed)
+    return True
 
 
 _MIGRATIONS = {
@@ -631,6 +811,7 @@ def _load_post_handler(_dummy):
     from .viewport_state import clear_all_states
 
     clear_all_states()
+    _object_counts_scanned.clear()
     migrate_open_scenes()
 
 
@@ -656,3 +837,4 @@ def unregister_migrations():
     if bpy.app.timers.is_registered(_run_deferred_migration):
         bpy.app.timers.unregister(_run_deferred_migration)
     _warned_newer_versions.clear()
+    _object_counts_scanned.clear()

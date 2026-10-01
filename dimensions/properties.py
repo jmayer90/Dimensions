@@ -67,7 +67,8 @@ def poll_mesh_objects(_self, obj):
 
 
 def _anchor_vertex_count(obj):
-    if obj.mode != "EDIT":
+    # A linked duplicate sharing a mesh in Edit Mode must read the live BMesh too.
+    if not obj.data.is_editmode:
         return len(obj.data.vertices)
     import bmesh
 
@@ -128,7 +129,8 @@ def _refresh_anchor_vertex_id(anchor):
 
 def update_dimension_display(_dimension, context):
     try:
-        from .drawing import invalidate_dimension_geometry_cache, tag_redraw_all_view3d
+        from .drawing import invalidate_dimension_geometry_cache
+        from .viewport_state import tag_redraw_all_view3d
 
         invalidate_dimension_geometry_cache()
         tag_redraw_all_view3d()
@@ -294,6 +296,13 @@ class CADDIM_PG_Dimension(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(
         name="Enabled",
         default=False,
+    )
+    schema_version: bpy.props.IntProperty(
+        name="Object Schema",
+        description="Saved-data schema this object was created in or last converted to",
+        default=0,
+        min=0,
+        options={"HIDDEN"},
     )
 
     annotation_kind: bpy.props.EnumProperty(
@@ -652,6 +661,13 @@ def update_guide_plane_grid(props, _context):
 
 class CADDIM_PG_Guide(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(name="Enabled", default=False)
+    schema_version: bpy.props.IntProperty(
+        name="Object Schema",
+        description="Saved-data schema this object was created in or last converted to",
+        default=0,
+        min=0,
+        options={"HIDDEN"},
+    )
     kind: bpy.props.EnumProperty(
         name="Construction Type",
         items=[
@@ -753,9 +769,10 @@ class CADDIM_PG_SceneSettings(bpy.types.PropertyGroup):
     annotation_manager_bulk_scope: bpy.props.EnumProperty(
         name="Apply To",
         description="Which annotations the actions below change",
+        # Saved files store the item number: keep 0.6's FILTERED=0 and SELECTED=1.
         items=[
-            ("SELECTED", "Selected", "Annotations and guides selected in the viewport"),
-            ("FILTERED", "All Listed", "Every row currently shown by the search and filters"),
+            ("SELECTED", "Selected", "Annotations and guides selected in the viewport", 1),
+            ("FILTERED", "All Listed", "Every row currently shown by the search and filters", 0),
         ],
         default="SELECTED",
     )

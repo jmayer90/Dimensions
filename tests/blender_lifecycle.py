@@ -32,7 +32,12 @@ from dimensions.construction import (
     set_guide_line_transform,
 )
 from dimensions.migrations import migrate_scene, scene_has_dimensions_data
-from dimensions.properties import STYLE_PROPERTY_NAMES, resolve_dimension_style
+from dimensions.properties import (
+    STYLE_PROPERTY_NAMES,
+    is_dimension_object,
+    is_guide_object,
+    resolve_dimension_style,
+)
 from dimensions.collections import (
     GUIDE_POINT_SNAP_PROXY_FLAG,
     MEASUREMENT_SNAP_PROXY_FLAG,
@@ -47,11 +52,75 @@ from dimensions.collections import (
     iter_scene_role_objects,
     remove_measurement_snap_proxies,
 )
+from dimensions.grease_pencil_output import generate_grease_pencil_output, generated_output_objects
+from dimensions.migrations import object_schema_version
 from dimensions.operators.generate_output import annotation_output_key
 from dimensions.projected_snap import get_projected_snap_timings
-from dimensions.scene_sync import _run_scheduled_sync, sync_scene_objects
+from dimensions.scene_sync import _run_scheduled_sync, scene_sync_suspended, sync_scene_objects
 from dimensions.snap_targets import TARGET_IDS, enabled_snap_targets
 from dimensions.viewport_state import get_state, set_state
+
+
+# Saved files store an enum's item number, not its identifier, so a reordered or
+# renumbered item silently changes what older files mean. Each tuple lists the
+# identifiers in item-number order. annotation_kind numbers 3-6 belonged to the
+# removed set, circle, coordinate, and elevation kinds that schema 16 converts, and
+# must never be reused.
+_END_STYLES = ("OPEN", "FILLED", "ARCHITECTURAL_TICK", "DOT", "NONE")
+_UNIT_STYLES = (
+    "AUTO", "METRIC_AUTO", "MILLIMETERS", "CENTIMETERS", "METERS",
+    "FEET_INCHES", "INCH_DECIMAL", "INCH_FRACTION", "BLENDER",
+)
+_SECONDARY_UNIT_STYLES = ("NONE", *_UNIT_STYLES[1:])
+_ARROW_STYLES = ("ARROW", "ARCHITECTURAL_TICK")
+_TOLERANCE_MODES = ("NONE", "SYMMETRIC", "DEVIATION")
+_DUAL_UNIT_ARRANGEMENTS = ("BRACKETS", "PARENTHESES", "STACKED")
+_LABEL_ORIENTATIONS = ("ALIGNED", "HORIZONTAL")
+_LABEL_LINE_MODES = ("ABOVE", "BROKEN")
+_STYLE_ENUMS = {
+    "arrow_end_style": _ARROW_STYLES,
+    "start_end_style": _END_STYLES,
+    "end_end_style": _END_STYLES,
+    "tolerance_mode": _TOLERANCE_MODES,
+    "unit_style": _UNIT_STYLES,
+    "secondary_unit_style": _SECONDARY_UNIT_STYLES,
+    "dual_unit_arrangement": _DUAL_UNIT_ARRANGEMENTS,
+    "label_orientation": _LABEL_ORIENTATIONS,
+    "label_line_mode": _LABEL_LINE_MODES,
+}
+PERSISTED_ENUM_ITEMS = {
+    "CADDIM_PG_Anchor.anchor_type": ("VERTEX", "OBJECT_POINT", "WORLD"),
+    "CADDIM_PG_Anchor.resolution_status": ("BY_ID", "BY_FALLBACK", "UNRESOLVABLE"),
+    **{f"CADDIM_PG_AnnotationStyle.{name}": items for name, items in _STYLE_ENUMS.items()},
+    **{f"CADDIM_PG_Dimension.{name}": items for name, items in _STYLE_ENUMS.items()},
+    "CADDIM_PG_Dimension.annotation_kind": ("LINEAR", "AREA", "ANGLE"),
+    "CADDIM_PG_Dimension.angle_source_mode": ("THREE_POINT", "EDGES"),
+    "CADDIM_PG_Dimension.measurement_state": ("LIVE", "FALLBACK", "CAPTURED", "NEEDS_REPAIR"),
+    "CADDIM_PG_Dimension.angle_mode": ("MINOR", "SUPPLEMENT", "REFLEX"),
+    "CADDIM_PG_Dimension.dimension_type": ("ALIGNED", "X", "Y", "Z"),
+    "CADDIM_PG_Dimension.measurement_mode": ("TRUE", "DELTA_X", "DELTA_Y", "DELTA_Z"),
+    "CADDIM_PG_Dimension.custom_text_position": ("ABOVE", "BELOW"),
+    "CADDIM_PG_Guide.kind": ("GUIDE", "MEASUREMENT", "POINT", "PLANE"),
+    # 0.6 saved FILTERED as 0 and SELECTED as 1; 0.7 lists Selected first.
+    "CADDIM_PG_SceneSettings.annotation_manager_bulk_scope": ("FILTERED", "SELECTED"),
+    "CADDIM_PG_SceneSettings.unit_style": _UNIT_STYLES,
+    "CADDIM_PG_SceneSettings.metric_unit_style": ("AUTO", "METRIC_AUTO", "MILLIMETERS", "CENTIMETERS", "METERS", "BLENDER"),
+    "CADDIM_PG_SceneSettings.imperial_unit_style": ("AUTO", "FEET_INCHES", "INCH_DECIMAL", "INCH_FRACTION", "BLENDER"),
+    "CADDIM_PG_SceneSettings.imperial_denominator": ("2", "4", "8", "16", "32", "64"),
+    "CADDIM_PG_SceneSettings.dimension_arrow_end_style": _ARROW_STYLES,
+    "CADDIM_PG_SceneSettings.dimension_start_end_style": _END_STYLES,
+    "CADDIM_PG_SceneSettings.dimension_end_end_style": _END_STYLES,
+    "CADDIM_PG_SceneSettings.dimension_secondary_unit_style": _SECONDARY_UNIT_STYLES,
+    "CADDIM_PG_SceneSettings.dimension_dual_unit_arrangement": _DUAL_UNIT_ARRANGEMENTS,
+    "CADDIM_PG_SceneSettings.dimension_label_orientation": _LABEL_ORIENTATIONS,
+    "CADDIM_PG_SceneSettings.dimension_label_line_mode": _LABEL_LINE_MODES,
+    "CADDIM_PG_SceneSettings.output_sizing_mode": ("CAMERA", "WORLD"),
+    "CADDIM_PG_SceneSettings.output_scope": ("SELECTED", "VISIBLE"),
+    "CADDIM_PG_SceneSettings.vector_paper_size": ("A4", "A3", "LETTER"),
+    "CADDIM_PG_SceneSettings.vector_orientation": ("PORTRAIT", "LANDSCAPE"),
+    "CADDIM_PG_SceneSettings.text_placement": ("INLINE", "ABOVE", "OUTSIDE", "OUTSIDE_START"),
+    "CADDIM_PG_SceneSettings.hud_corner": ("BOTTOM_LEFT", "BOTTOM_RIGHT", "TOP_LEFT", "TOP_RIGHT"),
+}
 
 
 class DimensionsLifecycleTests(unittest.TestCase):
@@ -235,6 +304,55 @@ class DimensionsLifecycleTests(unittest.TestCase):
         self.assertLess((origin - Vector((0.0, 4.0, 0.0))).length, 1e-6)
         self.assertLess((direction - Vector((0.0, 1.0, 0.0))).length, 1e-6)
         bpy.data.objects.remove(guide, do_unlink=True)
+
+    def test_dimensions_snapped_to_guides_follow_them_through_save_and_reload(self):
+        from dimensions.anchors import resolve_anchor, set_anchor_from_snap
+
+        point = create_guide_point_object(
+            bpy.context, "Dimensions Lifecycle Followed Point", location=Vector((1.0, 0.0, 0.0)),
+        )
+        line = create_guide_object(bpy.context, "Dimensions Lifecycle Followed Line")
+        set_guide_line_transform(line, Vector((0.0, 2.0, 0.0)), Vector((1.0, 0.0, 0.0)))
+        bpy.context.view_layer.update()
+        dimension = create_dimension_object(bpy.context, "Dimensions Lifecycle Followed Dimension")
+        props = dimension.dimension_props
+        set_anchor_from_snap(props.start, {
+            "type": "GUIDE_POINT", "object": None, "guide_object": point,
+            "world_co": Vector((1.0, 0.0, 0.0)), "screen_co": Vector(),
+        })
+        set_anchor_from_snap(props.end, {
+            "type": "GUIDE", "object": None, "guide_object": line,
+            "world_co": Vector((3.0, 2.0, 0.0)), "screen_co": Vector(),
+        })
+        point.location = (1.0, 0.0, 5.0)
+        line.location = (0.0, 2.0, 5.0)
+        bpy.context.view_layer.update()
+        sync_scene_objects(bpy.context.scene)
+        self.assertLess((resolve_anchor(props.start) - Vector((1.0, 0.0, 5.0))).length, 1e-6)
+        self.assertLess((resolve_anchor(props.end) - Vector((3.0, 2.0, 5.0))).length, 1e-6)
+        self.assertEqual(props.measurement_state, "LIVE")
+
+        names = (point.name, line.name, dimension.name)
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "dimensions-followed-guides.blend"
+            bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
+            bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
+            point, line, dimension = (bpy.data.objects[name] for name in names)
+            point.location.z = 9.0
+            bpy.context.view_layer.update()
+            sync_scene_objects(bpy.context.scene)
+            props = dimension.dimension_props
+            self.assertLess((resolve_anchor(props.start) - Vector((1.0, 0.0, 9.0))).length, 1e-6)
+
+            # Clearing guides keeps dependent dimensions where they are instead of breaking them.
+            with bpy.context.temp_override(scene=bpy.context.scene):
+                bpy.ops.dimensions.clear_guides()
+            sync_scene_objects(bpy.context.scene)
+            self.assertEqual((props.start.anchor_type, props.end.anchor_type), ("WORLD", "WORLD"))
+            self.assertLess((resolve_anchor(props.start) - Vector((1.0, 0.0, 9.0))).length, 1e-6)
+            self.assertLess((resolve_anchor(props.end) - Vector((3.0, 2.0, 5.0))).length, 1e-6)
+            self.assertEqual(props.measurement_state, "LIVE")
+            bpy.data.objects.remove(dimension, do_unlink=True)
 
     def test_save_reload_preserves_scene_owned_output_identity(self):
         dimension = create_dimension_object(
@@ -1094,6 +1212,300 @@ class DimensionsReleasedFileTests(unittest.TestCase):
                 if anchor.target_object is not None:
                     self.assertEqual(anchor.source_object_name, anchor.target_object.name)
         self.assertFalse(migrate_scene(scene))
+
+    def test_persisted_enum_item_numbers_never_move(self):
+        from dimensions.properties import classes
+
+        actual = {
+            f"{cls.__name__}.{prop.identifier}": {item.identifier: item.value for item in prop.enum_items}
+            for cls in classes
+            for prop in cls.bl_rna.properties
+            if prop.type == "ENUM" and not prop.is_enum_flag
+        }
+        expected = {
+            name: {identifier: number for number, identifier in enumerate(items)}
+            for name, items in PERSISTED_ENUM_ITEMS.items()
+        }
+        self.assertEqual(actual, expected)
+
+        bpy.ops.wm.read_homefile(use_empty=True)
+        settings = bpy.context.scene.dimensions_settings
+        settings.annotation_manager_bulk_scope = "FILTERED"
+        raw = bpy.context.scene.bl_system_properties_get()["dimensions_settings"]
+        self.assertEqual(raw["annotation_manager_bulk_scope"], 0)
+        raw["annotation_manager_bulk_scope"] = 1  # what 0.6 saved for Selected
+        self.assertEqual(settings.annotation_manager_bulk_scope, "SELECTED")
+
+    def _current_construction_and_style(self):
+        context = bpy.context
+        line = create_guide_object(context, "GUIDE Kept Line")
+        set_guide_line_transform(line, Vector((3.0, 4.0, 5.0)), Vector((0.0, 1.0, 0.0)))
+        create_guide_point_object(context, "POINT Kept", location=Vector((1.0, 2.0, 3.0)))
+        create_guide_plane_object(
+            context, plane_frame(Vector((0.0, 0.0, 2.0)), Vector((0.0, 1.0, 0.0))), 1.5, 0.5, "PLANE Kept",
+        )
+        dimension = create_dimension_object(context, "DIM Kept Style")
+        set_world_anchor(dimension.dimension_props.start, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(dimension.dimension_props.end, Vector((2.0, 0.0, 0.0)))
+        context.scene.dimensions_settings.annotation_styles.add().name = "House"
+        props = dimension.dimension_props
+        props.style_name = "House"
+        props.start_end_style = "DOT"
+        props.override_start_end_style = True
+        props.extension_gap = 4.0
+        props.override_extension_gap = True
+        sync_scene_objects(context.scene)
+
+    def _construction_and_style_snapshot(self):
+        objects = bpy.data.objects
+        line = guide_line_world(objects["GUIDE Kept Line"])
+        plane = objects["PLANE Kept"]
+        frame = guide_plane_frame(plane)
+        props = objects["DIM Kept Style"].dimension_props
+        return (
+            tuple(round(value, 5) for value in (*line[0], *line[1])),
+            tuple(round(value, 5) for value in guide_point_world(objects["POINT Kept"])),
+            tuple(round(value, 5) for value in (*frame[0], *frame[3])),
+            (round(plane.guide_props.plane_extent, 5), round(plane.guide_props.plane_spacing, 5)),
+            (props.style_name, props.start_end_style, props.override_start_end_style,
+             round(props.extension_gap, 5), props.override_extension_gap, props.override_color),
+        )
+
+    def test_current_objects_keep_their_shape_in_new_scenes_and_on_append(self):
+        bpy.ops.wm.read_homefile(use_empty=True)
+        scene = bpy.context.scene
+        self._current_construction_and_style()
+        expected = self._construction_and_style_snapshot()
+        owned = [obj for obj in scene.objects if is_dimension_object(obj) or is_guide_object(obj)]
+        self.assertTrue(owned)
+        self.assertTrue(all(object_schema_version(obj) == CURRENT_SCHEMA_VERSION for obj in owned))
+
+        # Shift+D carries the stamp to the copy.
+        for obj in bpy.context.selected_objects:
+            obj.select_set(False)
+        line = bpy.data.objects["GUIDE Kept Line"]
+        line.select_set(True)
+        bpy.context.view_layer.objects.active = line
+        self.assertEqual(bpy.ops.object.duplicate(), {"FINISHED"})
+        self.assertIsNot(bpy.context.active_object, line)
+        self.assertEqual(bpy.context.active_object.guide_props.schema_version, CURRENT_SCHEMA_VERSION)
+        bpy.data.objects.remove(bpy.context.active_object, do_unlink=True)
+
+        # A new, never-stamped scene showing the same collections.
+        second = bpy.data.scenes.new("Dimensions Unstamped Scene")
+        self.assertEqual(second.dimensions_settings.schema_version, 0)
+        for role in ("DIMENSIONS", "GUIDES"):
+            second.collection.children.link(get_scene_collection(scene, role))
+        _run_scheduled_sync()
+        self.assertEqual(second.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
+        self.assertEqual(self._construction_and_style_snapshot(), expected)
+        bpy.data.scenes.remove(second)
+
+        with tempfile.TemporaryDirectory() as directory:
+            saved = Path(directory) / "dimensions-current-shape.blend"
+            library = Path(directory) / "dimensions-current-library.blend"
+            bpy.data.libraries.write(
+                str(library),
+                {get_scene_collection(scene, "DIMENSIONS"), get_scene_collection(scene, "GUIDES")},
+            )
+            bpy.ops.wm.save_as_mainfile(filepath=str(saved))
+            bpy.ops.wm.open_mainfile(filepath=str(saved), load_ui=False)
+            reloaded = [obj for obj in bpy.context.scene.objects if is_dimension_object(obj) or is_guide_object(obj)]
+            self.assertTrue(all(object_schema_version(obj) == CURRENT_SCHEMA_VERSION for obj in reloaded))
+            self.assertEqual(self._construction_and_style_snapshot(), expected)
+
+            # File > New, then Append the collections into the unstamped startup scene.
+            bpy.ops.wm.read_homefile(use_empty=True)
+            fresh = bpy.context.scene
+            self.assertEqual(fresh.dimensions_settings.schema_version, 0)
+            with bpy.data.libraries.load(str(library), link=False) as (data_from, data_to):
+                data_to.collections = list(data_from.collections)
+            for collection in data_to.collections:
+                fresh.collection.children.link(collection)
+            _run_scheduled_sync()
+            bpy.context.view_layer.update()
+            self.assertEqual(fresh.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
+            props = bpy.data.objects["DIM Kept Style"].dimension_props
+            # The named style itself is scene-owned and stays behind, but the reference is kept.
+            self.assertEqual(props.style_name, "House")
+            self.assertEqual(self._construction_and_style_snapshot(), expected)
+
+    def test_0_6_objects_appended_into_a_current_scene_are_converted(self):
+        bpy.ops.wm.read_homefile(use_empty=True)
+        scene = bpy.context.scene
+        current = create_dimension_object(bpy.context, "DIM Current")
+        set_world_anchor(current.dimension_props.start, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(current.dimension_props.end, Vector((1.0, 0.0, 0.0)))
+        self.assertEqual(scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
+        names = (
+            "GUIDE Axis Z", "GUIDE Offset Derived", "DIM Chain Set", "PLANE Point Normal",
+            "DIM Circle Removed", "POINT World",
+        )
+        with bpy.data.libraries.load(str(self.SCHEMA_V15_FIXTURE), link=False) as (_data_from, data_to):
+            data_to.objects = list(names)
+        for obj in data_to.objects:
+            scene.collection.objects.link(obj)
+        _run_scheduled_sync()
+
+        objects = scene.objects
+        for name, origin, direction in (
+            ("GUIDE Axis Z", (3.0, 3.0, 0.0), (0.0, 0.0, 1.0)),
+            ("GUIDE Offset Derived", (0.0, 6.0, 0.0), (1.0, 0.0, 0.0)),
+        ):
+            line = guide_line_world(objects[name])
+            self.assertLess((line[0] - Vector(origin)).length, 1e-5, name)
+            self.assertLess((line[1] - Vector(direction)).length, 1e-5, name)
+        self.assertLess((guide_point_world(objects["POINT World"]) - Vector((2.0, 2.0, 2.0))).length, 1e-5)
+        self.assertIsNone(objects.get("DIM Chain Set"))
+        self.assertIsNone(objects.get("DIM Circle Removed"))
+        for index in (1, 2):
+            member = objects[f"DIM Chain Set {index}"]
+            self.assertEqual(member.dimension_props.annotation_kind, "LINEAR")
+            self.assertEqual(member.dimension_props.measurement_mode, "DELTA_X")
+            self.assertTrue(member.dimension_props.override_color)
+        plane = objects["PLANE Point Normal"]
+        self.assertEqual(plane.type, "MESH")
+        self.assertTrue(plane.get(GUIDE_PLANE_FLAG))
+        origin, _axis_u, _axis_v, normal = guide_plane_frame(plane)
+        self.assertLess((origin - Vector((0.0, 8.0, 0.0))).length, 1e-5)
+        self.assertAlmostEqual(abs(normal.y), 1.0, places=5)
+        owned = [obj for obj in objects if is_dimension_object(obj) or is_guide_object(obj)]
+        self.assertTrue(all(object_schema_version(obj) == CURRENT_SCHEMA_VERSION for obj in owned))
+        before = self._scene_state(scene)
+        _run_scheduled_sync()
+        self.assertEqual(self._scene_state(scene), before)
+
+    def _scene_state(self, scene):
+        return sorted((obj.name, tuple(round(value, 5) for value in obj.matrix_world.col[3])) for obj in scene.objects)
+
+    def test_0_6_annotations_appended_into_an_unstamped_scene_keep_their_style(self):
+        bpy.ops.wm.read_homefile(use_empty=True)
+        scene = bpy.context.scene
+        self.assertEqual(scene.dimensions_settings.schema_version, 0)
+        with bpy.data.libraries.load(str(self.SCHEMA_V15_FIXTURE), link=False) as (_data_from, data_to):
+            data_to.objects = ["DIM Linear Kept", "DIM Chain Set"]
+        kept, chain = data_to.objects
+        kept.dimension_props.style_name = "House"
+        kept.dimension_props.override_line_width = False
+        kept.dimension_props.start_end_style = "DOT"
+        kept.dimension_props.override_start_end_style = True
+        for obj in (kept, chain):
+            scene.collection.objects.link(obj)
+        _run_scheduled_sync()
+
+        self.assertEqual(scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
+        props = kept.dimension_props
+        self.assertEqual(props.style_name, "House")
+        self.assertFalse(props.override_line_width)
+        self.assertEqual(props.start_end_style, "DOT")
+        self.assertEqual(object_schema_version(kept), CURRENT_SCHEMA_VERSION)
+        member = scene.objects["DIM Chain Set 1"].dimension_props
+        self.assertTrue(member.override_color)
+        self.assertAlmostEqual(member.color[1], 0.2, places=5)
+
+    def test_a_scene_from_a_newer_schema_is_never_written(self):
+        bpy.ops.wm.read_homefile(use_empty=True)
+        scene = bpy.context.scene
+        settings = scene.dimensions_settings
+        measurement = create_measurement_object(bpy.context, "MEASURE Future")
+        set_world_anchor(measurement.guide_props.start, Vector((0.0, 1.0, 0.0)))
+        set_world_anchor(measurement.guide_props.end, Vector((2.0, 1.0, 0.0)))
+        measurement.location = (1.0, 1.0, 0.0)
+        dimension = create_dimension_object(bpy.context, "DIM Future")
+        set_world_anchor(dimension.dimension_props.start, Vector((0.0, 0.0, 0.0)))
+        set_world_anchor(dimension.dimension_props.end, Vector((2.0, 0.0, 0.0)))
+        sync_scene_objects(scene)
+
+        settings.schema_version = CURRENT_SCHEMA_VERSION + 1
+        measurement.location = (9.0, 9.0, 9.0)
+        dimension.location = (5.0, 5.0, 5.0)
+
+        def state():
+            return (
+                tuple(measurement.guide_props.start.world_co),
+                tuple(measurement.guide_props.end.world_co),
+                tuple(dimension.dimension_props.presentation_offset),
+                sorted(obj.name for obj in scene.objects),
+            )
+
+        before = state()
+        _run_scheduled_sync()
+        sync_scene_objects(scene)
+        self.assertEqual(state(), before)
+        with self.assertRaises(RuntimeError):
+            create_dimension_object(bpy.context, "DIM Refused")
+        with self.assertRaises(RuntimeError):
+            create_guide_object(bpy.context, "GUIDE Refused")
+        self.assertIsNone(bpy.data.objects.get("DIM Refused"))
+        self.assertIsNone(bpy.data.objects.get("GUIDE Refused"))
+        self.assertEqual(settings.schema_version, CURRENT_SCHEMA_VERSION + 1)
+
+    def test_conversion_keeps_visibility_and_parenting(self):
+        scene = self._open_without_migration(self.SCHEMA_V15_FIXTURE)
+        view_layer = bpy.context.view_layer
+        chain = scene.objects["DIM Chain Set"]
+        chain.hide_set(True)
+        chain.hide_select = True
+        plane = scene.objects["PLANE Point Normal"]
+        parent = bpy.data.objects.new("Plane Parent", None)
+        scene.collection.objects.link(parent)
+        parent.location = (0.0, 0.0, 3.0)
+        parent.rotation_euler = (0.0, 0.0, 0.5)
+        with scene_sync_suspended():
+            view_layer.update()
+        plane.parent = parent
+        plane.matrix_parent_inverse = parent.matrix_world.inverted()
+        plane.hide_viewport = True
+        plane.hide_set(True)
+
+        self.assertTrue(migrate_scene(scene))
+        for index in (1, 2):
+            member = scene.objects[f"DIM Chain Set {index}"]
+            self.assertTrue(member.hide_get(view_layer=view_layer))
+            self.assertTrue(member.hide_select)
+        converted = scene.objects["PLANE Point Normal"]
+        self.assertEqual(converted.type, "MESH")
+        self.assertEqual(converted.parent, parent)
+        self.assertTrue(converted.hide_viewport)
+        self.assertTrue(converted.hide_get(view_layer=view_layer))
+        with scene_sync_suspended():
+            view_layer.update()
+        origin, _axis_u, _axis_v, normal = guide_plane_frame(converted)
+        self.assertLess((origin - Vector((0.0, 8.0, 0.0))).length, 1e-5)
+        self.assertAlmostEqual(abs(normal.y), 1.0, places=5)
+
+    def test_conversion_removes_output_left_by_deleted_annotations(self):
+        scene = self._open_without_migration(self.SCHEMA_V15_FIXTURE)
+        settings = scene.dimensions_settings
+        for name, key in (("DIM Circle Removed", "removed-source"), ("DIM Linear Kept", "kept-source")):
+            binding = settings.output_source_bindings.add()
+            binding.source = scene.objects[name]
+            binding.key = key
+            generate_grease_pencil_output(
+                scene, {"source_key": key, "strokes": [{"points": [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]}]},
+            )
+        self.assertEqual(len(generated_output_objects(scene, "removed-source")), 1)
+
+        self.assertTrue(migrate_scene(scene))
+        self.assertEqual(generated_output_objects(scene, "removed-source"), ())
+        self.assertEqual(len(generated_output_objects(scene, "kept-source")), 1)
+        self.assertEqual([binding.key for binding in settings.output_source_bindings], ["kept-source"])
+
+    def test_opening_a_0_6_file_resolves_anchors_on_transformed_meshes(self):
+        scene = self._open_without_migration(self.SCHEMA_V15_FIXTURE)
+        with tempfile.TemporaryDirectory() as directory:
+            moved = Path(directory) / "schema-v15-moved-block.blend"
+            with scene_sync_suspended():
+                scene.objects["Fixture Block"].location = (10.0, 0.0, 0.0)
+                bpy.ops.wm.save_as_mainfile(filepath=str(moved), copy=True)
+            # load_post runs before Blender evaluates the file's transforms.
+            bpy.ops.wm.open_mainfile(filepath=str(moved), load_ui=False)
+        objects = bpy.context.scene.objects
+        self.assertEqual(bpy.context.scene.dimensions_settings.schema_version, CURRENT_SCHEMA_VERSION)
+        self.assertLess((guide_point_world(objects["POINT Vertex Anchored"]) - Vector((11.0, 1.0, 1.0))).length, 1e-5)
+        line = guide_line_world(objects["GUIDE Vertex Anchored"])
+        self.assertLess((line[0] - Vector((9.0, -1.0, 1.0))).length, 1e-5)
+        self.assertLess((line[1] - Vector((0.0, 1.0, 0.0))).length, 1e-5)
 
 
 def main():

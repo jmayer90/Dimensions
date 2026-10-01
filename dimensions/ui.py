@@ -9,7 +9,6 @@ from .properties import (
     is_read_only_dimensions_object,
     resolve_dimension_style,
 )
-from .repair import repair_issues
 from .units import format_area, format_length, get_configured_unit_style
 
 
@@ -214,7 +213,7 @@ class CADDIM_PT_AnnotationManager(CADDIM_PT_PanelBase, bpy.types.Panel):
                 delete = edits.operator("dimensions.manager_delete", text="Delete")
                 delete.object_name = managed.name
                 if item.state in {"NEEDS_REPAIR", "FALLBACK"}:
-                    repair = detail.operator("dimensions.manager_repair_entry", text="Repair", icon="TOOL_SETTINGS")
+                    repair = detail.operator("dimensions.manager_repair_entry", text="Show Sources", icon="TOOL_SETTINGS")
                     repair.object_name = managed.name
         layout.prop(settings, "annotation_manager_bulk_scope", expand=True)
         visibility = layout.row(align=True)
@@ -240,15 +239,21 @@ class CADDIM_PT_GuidedRepair(CADDIM_PT_PanelBase, bpy.types.Panel):
     bl_parent_id = CADDIM_PT_MainPanel.bl_idname
     bl_order = 3
 
+    # Polls and redraws read the state recorded by scene sync. The live candidate
+    # search scans the whole source mesh, so it runs only when the user acts.
     @classmethod
     def poll(cls, context):
+        from .repair import stored_repair_issues
+
         active = context.view_layer.objects.active
-        return is_dimension_object(active) and bool(repair_issues(active))
+        return is_dimension_object(active) and bool(stored_repair_issues(active))
 
     def draw(self, context):
+        from .repair import stored_repair_issues
+
         layout = self.layout
         annotation = context.view_layer.objects.active
-        issues = repair_issues(annotation)
+        issues = stored_repair_issues(annotation)
         read_only = is_read_only_dimensions_object(annotation)
         layout.label(text=annotation.name, icon="ERROR")
         for issue in issues:
@@ -258,9 +263,8 @@ class CADDIM_PT_GuidedRepair(CADDIM_PT_PanelBase, bpy.types.Panel):
             box.label(text=f"Source: {issue['source_name']}")
             frame = box.operator("dimensions.repair_frame_issue", text="Frame Last Known Position", icon="VIEWZOOM")
             frame.object_name = annotation.name
-            candidate = issue.get("candidate")
-            if candidate is not None:
-                box.label(text=f"Suggested: {candidate['label']}", icon="QUESTION")
+            if issue["status"] == "BY_FALLBACK":
+                box.label(text="Accept rebinds it to the nearest match on this source", icon="QUESTION")
             actions = box.row(align=True)
             actions.enabled = not read_only
             if issue["type"] == "AREA":
@@ -274,7 +278,8 @@ class CADDIM_PT_GuidedRepair(CADDIM_PT_PanelBase, bpy.types.Panel):
                     convert.object_name = annotation.name
                     convert.anchor_name = issue["anchor_name"]
         confirm = layout.column(align=True)
-        confirm.enabled = not read_only and any(issue.get("candidate") is not None for issue in issues)
+        # Only a source that still exists can offer a suggested match.
+        confirm.enabled = not read_only and any(issue["status"] == "BY_FALLBACK" for issue in issues)
         accept = confirm.operator("dimensions.repair_accept_suggestion", text="Accept Suggested Repair", icon="CHECKMARK")
         accept.object_name = annotation.name
         bulk = confirm.operator("dimensions.repair_bulk_cause", text="Repair Matching Cause", icon="DUPLICATE")
@@ -350,7 +355,10 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
 
-        if is_guide_object(active_object) and not is_read_only_dimensions_object(active_object):
+        if is_guide_object(active_object):
+            if is_read_only_dimensions_object(active_object):
+                layout.label(text="Linked guide: read-only", icon="LOCKED")
+                return
             _draw_construction_object(layout, context, active_object)
             return
         if not is_dimension_object(active_object):
@@ -437,8 +445,8 @@ class CADDIM_PT_SelectedDimension(CADDIM_PT_PanelBase, bpy.types.Panel):
             box.label(text=f"{label} Anchor")
             box.prop(anchor, "target_object", text="Object")
             row = box.row(align=True)
-            row.label(text="Anchor")
-            pick = row.operator("dimensions.reattach_anchor", text=_vertex_picker_text(anchor), icon="EYEDROPPER")
+            row.label(text=_anchor_description(anchor))
+            pick = row.operator("dimensions.reattach_anchor", text="Repick", icon="EYEDROPPER")
             pick.anchor_name = anchor_name
 
 
@@ -673,18 +681,18 @@ class CADDIM_PT_MeshSizeHUD(CADDIM_PT_PanelBase, bpy.types.Panel):
             layout.prop(settings, "hud_padding_vertical")
 
 
-def _vertex_picker_text(anchor):
-    if getattr(anchor, "anchor_type", "VERTEX") == "WORLD":
-        return "World Point"
-    if getattr(anchor, "anchor_type", "VERTEX") == "OBJECT_POINT":
-        return "Object Point"
-
+def _anchor_description(anchor):
+    """Say in plain words what an anchor follows."""
+    anchor_type = getattr(anchor, "anchor_type", "VERTEX")
+    if anchor_type == "WORLD":
+        return "Fixed point in space"
+    if anchor_type == "OBJECT_POINT":
+        guide = getattr(anchor.target_object, "guide_props", None)
+        kind = guide.kind if guide is not None and guide.enabled else None
+        return {"POINT": "Follows a guide point", "GUIDE": "Follows a guide line"}.get(kind, "Point on the object")
     if anchor.vertex_index < 0:
-        return "Pick Vertex"
-
-    if getattr(anchor, "vertex_id", 0) > 0:
-        return f"ID {anchor.vertex_id}"
-    return f"Legacy Vertex {anchor.vertex_index}"
+        return "Not attached"
+    return "Follows a vertex"
 
 
 classes = (

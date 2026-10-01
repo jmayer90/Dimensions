@@ -6,20 +6,27 @@ import tempfile
 import unittest
 from pathlib import Path
 from time import perf_counter
+from unittest.mock import patch
 
 import bpy
+from bpy_extras.object_utils import world_to_camera_view
 from mathutils import Vector
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dimensions
-from dimensions.anchors import set_world_anchor
+from dimensions import messages
+from dimensions.anchors import set_anchor, set_world_anchor
 from dimensions.collections import create_dimension_object
 from dimensions.grease_pencil_output import _remove_generated_object, generated_output_objects
+from dimensions.operators import generate_output
 from dimensions.operators.generate_output import (
+    DIMENSIONS_OT_GenerateOutput,
     _camera_world_units_per_pixel,
     _annotation_world_depth_point,
     annotation_output_key,
@@ -27,6 +34,7 @@ from dimensions.operators.generate_output import (
     output_sizing_for_annotation,
     output_text_height_for_annotation,
 )
+from support.operator_harness import make_operator_harness
 
 
 class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
@@ -197,13 +205,13 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
         bpy.context.view_layer.objects.active = duplicate
 
         keys = annotation_output_keys(self.scene, (original, duplicate))
-        self.assertEqual(keys[original.name], original_key)
-        self.assertNotEqual(keys[duplicate.name], original_key)
+        self.assertEqual(keys[original.as_pointer()], original_key)
+        self.assertNotEqual(keys[duplicate.as_pointer()], original_key)
         self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
         outputs = generated_output_objects(self.scene)
         self.created.extend(outputs)
         self.assertEqual(len(outputs), 1)
-        self.assertEqual(outputs[0].get("dimensions_output_source_key"), keys[duplicate.name])
+        self.assertEqual(outputs[0].get("dimensions_output_source_key"), keys[duplicate.as_pointer()])
 
     def test_renamed_duplicate_preserves_preexisting_source_output(self):
         self._remove_existing_output()
@@ -273,6 +281,144 @@ class DimensionsOutputOperatorSmokeTests(unittest.TestCase):
             ),
             places=6,
         )
+
+    def _output_camera(self, camera_type):
+        camera_data = bpy.data.cameras.new("Dimensions Output Frame Camera")
+        camera_data.type = camera_type
+        camera_data.ortho_scale = 6.0
+        camera_data.lens = 50.0
+        camera = bpy.data.objects.new("Dimensions Output Frame Camera", camera_data)
+        self.scene.collection.objects.link(camera)
+        self.created.append(camera)
+        camera.location = (0.0, 0.0, 10.0)
+        return camera
+
+    def test_camera_sizing_matches_rendered_pixels_for_any_aspect_and_camera_scale(self):
+        render = self.scene.render
+        original = (render.resolution_x, render.resolution_y, render.resolution_percentage)
+        try:
+            render.resolution_percentage = 100
+            for camera_type in ("ORTHO", "PERSP"):
+                camera = self._output_camera(camera_type)
+                for resolution in ((1920, 1080), (1080, 1920), (128, 128)):
+                    for scale in (1.0, 2.0):
+                        with self.subTest(camera_type=camera_type, resolution=resolution, scale=scale):
+                            render.resolution_x, render.resolution_y = resolution
+                            camera.scale = (scale, scale, scale)
+                            bpy.context.view_layer.update()
+                            point = Vector((0.0, 0.0, 0.0))
+                            below = world_to_camera_view(self.scene, camera, point)
+                            above = world_to_camera_view(self.scene, camera, point + Vector((0.0, 1.0, 0.0)))
+                            rendered = 1.0 / ((above.y - below.y) * render.resolution_y)
+                            self.assertAlmostEqual(
+                                _camera_world_units_per_pixel(self.scene, camera, point) / rendered,
+                                1.0,
+                                places=6,
+                            )
+        finally:
+            render.resolution_x, render.resolution_y, render.resolution_percentage = original
+
+    def test_camera_sizing_requires_a_real_camera_object(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_sizing_mode = "CAMERA"
+        settings.output_scope = "VISIBLE"
+        self._dimension("DIM Output Empty Camera")
+        empty = bpy.data.objects.new("Dimensions Output Not A Camera", None)
+        self.scene.collection.objects.link(empty)
+        self.created.append(empty)
+        self.scene.camera = empty
+
+        operator = make_operator_harness(DIMENSIONS_OT_GenerateOutput)
+        self.assertEqual(operator.execute(bpy.context), {"CANCELLED"})
+        self.assertEqual(operator.reports[-1][1], messages.OUTPUT_CAMERA_REQUIRED)
+
+    def test_annotation_that_can_no_longer_be_sized_loses_its_stale_artifact(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_sizing_mode = "CAMERA"
+        settings.output_scope = "VISIBLE"
+        self.scene.camera = self._output_camera("PERSP")
+        dimension = self._dimension("DIM Output Behind Camera", start=(-1.0, 0.0, 0.0), end=(1.0, 0.0, 0.0))
+        bpy.context.view_layer.update()
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        key = annotation_output_key(self.scene, dimension)
+        self.assertEqual(len(generated_output_objects(self.scene, key)), 1)
+
+        set_world_anchor(dimension.dimension_props.start, Vector((-1.0, 0.0, 20.0)))
+        set_world_anchor(dimension.dimension_props.end, Vector((1.0, 0.0, 20.0)))
+        dimension.location = _annotation_world_depth_point(dimension)
+        bpy.context.view_layer.update()
+        self.assertIsNone(output_sizing_for_annotation(self.scene, dimension, settings))
+        self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        self.assertEqual(generated_output_objects(self.scene, key), ())
+
+    def test_broken_linear_annotation_reports_a_kind_neutral_repair_warning(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_sizing_mode = "WORLD"
+        settings.output_scope = "VISIBLE"
+        mesh = bpy.data.meshes.new("Dimensions Output Broken Source")
+        mesh.from_pydata([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)], [], [])
+        source = bpy.data.objects.new("Dimensions Output Broken Source", mesh)
+        self.scene.collection.objects.link(source)
+        dimension = create_dimension_object(bpy.context, "DIM Output Broken Linear")
+        self.created.append(dimension)
+        set_anchor(dimension.dimension_props.start, source, 0)
+        set_anchor(dimension.dimension_props.end, source, 1)
+        bpy.data.objects.remove(source, do_unlink=True)
+        bpy.data.meshes.remove(mesh)
+
+        operator = make_operator_harness(DIMENSIONS_OT_GenerateOutput)
+        self.assertEqual(operator.execute(bpy.context), {"CANCELLED"})
+        self.assertEqual(operator.reports[-1][1], messages.OUTPUT_REPAIR_REQUIRED)
+        self.assertNotIn("Area", messages.OUTPUT_REPAIR_REQUIRED)
+
+    def test_generation_prunes_the_output_registry_once_per_run(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_sizing_mode = "WORLD"
+        settings.output_scope = "VISIBLE"
+        for index in range(5):
+            self._dimension(f"DIM Output Prune {index}", start=(0.0, index, 0.0), end=(1.0, index, 0.0))
+        calls = []
+        prune = generate_output._prune_output_source_bindings
+
+        def counting_prune(*arguments, **keywords):
+            calls.append(arguments)
+            return prune(*arguments, **keywords)
+
+        with patch.object(generate_output, "_prune_output_source_bindings", counting_prune):
+            self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+        self.created.extend(generated_output_objects(self.scene))
+        self.assertLessEqual(len(calls), 2)
+
+    def test_linked_annotation_sharing_a_local_name_keeps_its_own_output(self):
+        self._remove_existing_output()
+        settings = self.scene.dimensions_settings
+        settings.output_sizing_mode = "WORLD"
+        settings.output_scope = "VISIBLE"
+        local = self._dimension("DIM Output Shared Name", start=(0.0, 3.0, 0.0), end=(2.0, 3.0, 0.0))
+        with tempfile.TemporaryDirectory(prefix="dimensions-linked-output-") as directory:
+            library_path = str(Path(directory) / "library.blend")
+            bpy.data.libraries.write(library_path, {local}, fake_user=True)
+            with bpy.data.libraries.load(library_path, link=True) as (_source, target):
+                target.objects = [local.name]
+            linked = target.objects[0]
+            library = linked.library
+            try:
+                self.scene.collection.objects.link(linked)
+                self.assertEqual(linked.name, local.name)
+                self.assertEqual(bpy.ops.dimensions.generate_output(), {"FINISHED"})
+                keys = annotation_output_keys(self.scene, (local, linked))
+                self.assertNotEqual(keys[local.as_pointer()], keys[linked.as_pointer()])
+                for annotation in (local, linked):
+                    self.assertEqual(
+                        len(generated_output_objects(self.scene, keys[annotation.as_pointer()])), 1,
+                    )
+            finally:
+                self._remove_existing_output()
+                bpy.data.libraries.remove(library)
 
     def test_area_camera_depth_uses_the_offset_label_not_the_source_center(self):
         area = self._captured_area("DIM Output Area Depth")

@@ -1,5 +1,6 @@
 """Camera-framed, scale-correct SVG and PDF export operators."""
 
+from dataclasses import replace
 from math import ceil
 from types import SimpleNamespace
 
@@ -24,18 +25,19 @@ from ..vector_export import (
     camera_frame_fits_page,
     paper_dimensions_mm,
     paper_mm_to_model,
+    strokes_inside_camera_frame,
     write_pdf,
     write_svg,
 )
 
 
-def vector_output_strokes(context):
-    """Resolve valid visible annotations into scale-aware world-space strokes."""
+def _vector_output_groups(context):
+    """Resolve valid visible annotations into one world-space stroke group each."""
     scene = context.scene
     settings = scene.dimensions_settings
     annotations = annotations_for_output(context, settings.output_scope)
     if not annotations:
-        return (), 0, 0
+        return (), 0
 
     denominator = settings.vector_scale_denominator
     sizing = WorldSizingPolicy(
@@ -43,8 +45,7 @@ def vector_output_strokes(context):
         paper_mm_to_model(scene, settings.vector_arrow_size_mm, denominator),
     )
     text_height = paper_mm_to_model(scene, settings.vector_text_height_mm, denominator)
-    strokes = []
-    exported = 0
+    groups = []
     skipped = 0
     for index, annotation in enumerate(annotations):
         props = annotation.dimension_props
@@ -62,9 +63,14 @@ def vector_output_strokes(context):
         if spec is None:
             skipped += 1
             continue
-        strokes.extend(spec.strokes)
-        exported += 1
-    return tuple(strokes), exported, skipped
+        groups.append(spec.strokes)
+    return tuple(groups), skipped
+
+
+def vector_output_strokes(context):
+    """Resolve valid visible annotations into scale-aware world-space strokes."""
+    groups, skipped = _vector_output_groups(context)
+    return tuple(stroke for group in groups for stroke in group), len(groups), skipped
 
 
 def build_scene_vector_document(context):
@@ -82,21 +88,25 @@ def build_scene_vector_document(context):
         )
     except SheetLayoutError as error:
         raise VectorExportError(str(error)) from error
-    strokes, exported, skipped = vector_output_strokes(context)
-    if exported == 0:
+    groups, skipped = _vector_output_groups(context)
+    if not groups:
         raise VectorExportError(messages.VECTOR_NO_VALID_ANNOTATIONS)
-    return build_vector_document(
+    document = build_vector_document(
         scene,
         scene.camera,
-        strokes,
+        tuple(stroke for group in groups for stroke in group),
         paper_size=settings.vector_paper_size,
         orientation=settings.vector_orientation,
         scale_denominator=settings.vector_scale_denominator,
-        annotation_count=exported,
+        annotation_count=len(groups),
         skipped_count=skipped,
         sheet_strokes=sheet_strokes,
         annotation_bounds=annotation_bounds,
     )
+    framed = sum(
+        1 for group in groups if strokes_inside_camera_frame(scene, scene.camera, group)
+    )
+    return replace(document, annotation_count=framed, outside_count=len(groups) - framed)
 
 
 def _sheet_geometry(settings, width_mm, height_mm, scene, camera, denominator):
@@ -145,6 +155,7 @@ class _VectorExportOperator:
             return {"CANCELLED"}
         report_message = messages.exported_vector(
             self.format_label, document.annotation_count, document.skipped_count,
+            document.outside_count,
         )
         self.report(messages.INFO, report_message)
         return {"FINISHED"}

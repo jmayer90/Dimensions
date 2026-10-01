@@ -10,24 +10,20 @@ from .. import messages
 from ..anchors import set_anchor_from_snap
 from ..collections import create_dimension_object
 from ..constants import DEFAULT_OFFSET_DISTANCE
-from ..drawing import (
-    clear_preview_state,
-    get_dimension_world_geometry,
-    get_measure_world_points,
-    get_offset_basis,
-    set_preview_state,
-)
+from ..dimension_geometry import get_dimension_world_geometry, get_measure_world_points, get_offset_basis
+from ..drawing import clear_preview_state, set_preview_state
 from ..interaction import (
     set_tool_status_text,
     axis_label,
     axis_from_event,
-    axis_from_mouse_direction,
     axis_world_direction,
     constrained_delta,
+    continues_typed_distance,
     continuous_placement_enabled,
     is_confirm_event,
     is_navigation_event,
     push_undo_step,
+    refuse_newer_scene,
     remember_session_context,
     session_axis,
     session_context_changed,
@@ -108,6 +104,8 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         if context.mode not in {"OBJECT", "EDIT_MESH"}:
             self.report(messages.WARNING, messages.DIMENSIONS_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
+        if refuse_newer_scene(self, context):
+            return {"CANCELLED"}
 
         continuous_placement = continuous_placement_enabled(context) or self.chain
         if context.mode == "EDIT_MESH" and not self.chain:
@@ -126,7 +124,6 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.end_snap = None
         self.offset_distance = getattr(get_preferences(context), "default_offset_distance", DEFAULT_OFFSET_DISTANCE)
         self.offset_plane_normal = None
-        self.axis_gesture_active = False
         self.inference_axis = self.dimension_type
         self.inference_session = InferenceSession()
         self.chain_line = None
@@ -152,23 +149,13 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         if self.continuous_placement and session_context_changed(self, context):
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if handle_snap_target_event(context, event):
+        typing = continues_typed_distance(self.distance_text, event)
+        if not typing and handle_snap_target_event(context, event):
             self._update_preview()
             return {"RUNNING_MODAL"}
-        if handle_inference_event(self.inference_session, event):
+        if not typing and handle_inference_event(self.inference_session, event):
             self._update_preview()
             return {"RUNNING_MODAL"}
-
-        if event.type == "MIDDLEMOUSE" and self.state == "SET_OFFSET":
-            if event.value == "PRESS":
-                self.axis_gesture_active = True
-                self._update_axis_gesture(context, event)
-                self._update_preview()
-                return {"RUNNING_MODAL"}
-            if event.value == "RELEASE" and self.axis_gesture_active:
-                self.axis_gesture_active = False
-                self._update_preview()
-                return {"RUNNING_MODAL"}
 
         axis = axis_from_event(event)
         if axis is not None and self.state in {"PICK_START", "SET_OFFSET"}:
@@ -193,8 +180,6 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
-            if self.axis_gesture_active:
-                self._update_axis_gesture(context, event)
             if self.state in {"PICK_START", "PICK_END"}:
                 plane_point = self.start_snap["world_co"] if self.start_snap is not None else None
                 self.hover_snap = find_nearest_snap_point(
@@ -310,8 +295,14 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
 
     def _status_text(self):
         if self.chain:
-            return "Chain: click points in order · X/Y/Z lock direction before the first point · type a distance · Esc ends the run"
-        return "Dimension: click start, click end, click to place the line · X/Y/Z lock direction · type a distance · Esc exits"
+            return (
+                "Chain: click points in order · X/Y/Z before the first point · type a distance · "
+                "S cycles snapping · Backspace starts a new run · Esc ends the run"
+            )
+        return (
+            "Dimension: click start, end, then where the line goes · X/Y/Z before the first point or while "
+            "placing the line · type a distance · S cycles snapping · Backspace steps back · Esc exits"
+        )
 
     def _accept_start(self):
         if self.hover_snap is None:
@@ -326,8 +317,10 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
     def _accept_end(self, context):
         effective_end = self._effective_end_snap(context)
         if effective_end is None:
-            if self.distance_text:
+            if self.distance_text and not self.distance_input_valid:
                 self.report(messages.WARNING, messages.invalid_distance(self.distance_text))
+            elif self.distance_text:
+                self.report(messages.WARNING, messages.TYPED_DISTANCE_DIRECTION_REQUIRED)
             else:
                 # A second pick on the first point cannot define a dimension. Say so
                 # rather than refusing the stage silently.
@@ -375,20 +368,26 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         snap = self._copy_snap(self.hover_snap)
         raw_delta = snap["world_co"] - self.start_snap["world_co"]
         direction = constrained_delta(raw_delta, self.dimension_type, context)
-        if direction.length < 1e-8:
-            return None
-        if self.distance_text.strip():
+        typed = bool(self.distance_text.strip())
+        if typed:
             try:
-                direction.normalize()
-                direction *= parse_distance_input(context, self.distance_text)
+                distance = parse_distance_input(context, self.distance_text)
             except (TypeError, ValueError):
                 self.distance_input_valid = False
                 return None
+            if direction.length < 1e-8:
+                # A locked axis gives a typed distance its direction even while the
+                # cursor still rests on the first point.
+                direction = axis_world_direction(context, self.dimension_type) or Vector()
         self.distance_input_valid = True
-        if self.dimension_type == "ALIGNED" and not self.distance_text.strip():
+        if direction.length < 1e-8:
+            return None
+        if typed:
+            direction = direction.normalized() * distance
+        if self.dimension_type == "ALIGNED" and not typed:
             return snap
         snap["type"] = "WORLD"
-        snap["label"] = "Typed Point" if self.distance_text.strip() else "Constrained Point"
+        snap["label"] = "Typed Point" if typed else "Constrained Point"
         snap["object"] = None
         snap["vertex_index"] = -1
         for key in ("edge_index", "edge_vertices", "edge_factor", "face_index"):
@@ -413,7 +412,6 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
     def _step_back(self):
         self.distance_text = ""
         self.distance_input_valid = True
-        self.axis_gesture_active = False
         self.inference_axis = self.dimension_type
         self.inference_session.clear()
         self.chain_line = None
@@ -428,26 +426,6 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             self.start_snap = None
             self.end_snap = None
             self.offset_plane_normal = None
-
-    def _update_axis_gesture(self, context, event):
-        if self.start_snap is None or self.end_snap is None:
-            return
-        origin = (self.start_snap["world_co"] + self.end_snap["world_co"]) * 0.5
-        axis = axis_from_mouse_direction(
-            context,
-            origin,
-            event.mouse_region_x,
-            event.mouse_region_y,
-        )
-        if axis is None:
-            return
-        self.dimension_type = axis
-        self.inference_axis = axis
-        self._configure_offset_plane(context)
-        if self.distance_text:
-            self._apply_numeric_input(context)
-        else:
-            self._update_offset(context, event.mouse_region_x, event.mouse_region_y)
 
     def _update_offset(self, context, mouse_x, mouse_y):
         if self.start_snap is None or self.end_snap is None:
@@ -602,7 +580,6 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         self.hover_snap = None
         self.hover_mouse = None
         self.end_snap = None
-        self.axis_gesture_active = False
         self.inference_axis = self.dimension_type
         self.inference_session.clear()
         remember_session_context(self, context)
@@ -620,7 +597,6 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
             "offset_distance": self.offset_distance,
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
-            "axis_gesture_active": self.axis_gesture_active,
             "continuous_placement": self.continuous_placement,
         }
         status = inference_status(self.inference_session)
@@ -648,9 +624,6 @@ class CADDIM_OT_CreateDimension(bpy.types.Operator):
         elif self.end_snap is not None:
             preview["end_world"] = self.end_snap["world_co"]
             preview.setdefault("locked_snaps", []).append(self._copy_snap(self.end_snap))
-            preview["axis_origin_world"] = (
-                self.start_snap["world_co"] + self.end_snap["world_co"]
-            ) * 0.5
 
         if self.offset_plane_normal is not None:
             preview.setdefault("offset_plane_normal", tuple(self.offset_plane_normal))

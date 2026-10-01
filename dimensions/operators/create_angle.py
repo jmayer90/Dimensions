@@ -8,14 +8,19 @@ from ..viewport_state import viewport_key
 from mathutils import Vector
 
 from .. import messages
+from ..anchors import resolve_anchor
 from ..angle_binding import derive_angle_from_world_edges, set_angle_edge
 from ..collections import create_dimension_object
 from ..drawing import clear_preview_state, set_preview_state
 from ..interaction import (
     continuous_placement_enabled,
+    is_confirm_event,
+    is_navigation_event,
     push_undo_step,
+    refuse_newer_scene,
     remember_session_context,
     session_context_changed,
+    set_tool_status_text,
 )
 from ..manipulation import angle_radius_from_world
 from ..properties import is_dimension_object, is_read_only_dimensions_object
@@ -46,7 +51,7 @@ def _edge_world_points(snap):
     vertices = snap.get("edge_vertices")
     if obj is None or vertices is None or len(vertices) != 2:
         return None
-    if obj.mode == "EDIT":
+    if obj.data.is_editmode:
         bm = bmesh.from_edit_mesh(obj.data)
         bm.verts.ensure_lookup_table()
         return tuple(obj.matrix_world @ bm.verts[index].co for index in vertices)
@@ -79,6 +84,8 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
         if context.mode not in {"OBJECT", "EDIT_MESH"}:
             self.report(messages.WARNING, messages.ANGLE_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
+        if refuse_newer_scene(self, context):
+            return {"CANCELLED"}
         self.target_name = ""
         self.continuous_placement = continuous_placement_enabled(context)
         self.angle_mode = "MINOR"
@@ -109,9 +116,19 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
                         (source["end"] - source["center"]).length,
                     ) * 0.35)
                     self.state = "PICK_RADIUS"
+                else:
+                    # Parallel selected edges define no angle; pick the edges instead.
+                    self.edge_a_snap = None
+                    self.edge_b_snap = None
+                    self.report(messages.WARNING, messages.SELECT_TWO_NON_PARALLEL_EDGES)
         remember_session_context(self, context)
         self._update_preview()
         context.window_manager.modal_handler_add(self)
+        set_tool_status_text(
+            context,
+            "Angle: click the first edge, the second edge, then where the arc goes · "
+            "S cycles snapping · Backspace steps back · Esc exits",
+        )
         return {"RUNNING_MODAL"}
 
     @modal_cleanup_on_exception
@@ -180,19 +197,14 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
                 return self._commit(context)
             self._update_preview()
             return {"RUNNING_MODAL"}
-        if event.type in {"RET", "NUMPAD_ENTER"} and event.value == "PRESS" and self.state == "PICK_RADIUS":
+        if is_confirm_event(event) and self.state == "PICK_RADIUS":
             return self._commit(context)
+        if event.type in {"BACK_SPACE", "DEL"} and event.value == "PRESS":
+            self._step_back()
+            self._update_preview()
+            return {"RUNNING_MODAL"}
         if event.type == "ESC" and event.value == "PRESS":
-            if self.continuous_placement:
-                clear_preview_state(key=getattr(self, "_session_viewport_key", None))
-                return {"CANCELLED"}
-            if self.state == "PICK_RADIUS":
-                self.edge_b_snap = None
-                self.state = "PICK_EDGE_B"
-            elif self.state == "PICK_EDGE_B":
-                self.edge_a_snap = None
-                self.state = "PICK_EDGE_A"
-            else:
+            if self.continuous_placement or not self._step_back():
                 clear_preview_state(key=getattr(self, "_session_viewport_key", None))
                 return {"CANCELLED"}
             self._update_preview()
@@ -200,12 +212,30 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
         if event.type == "RIGHTMOUSE" and event.value == "PRESS":
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+        if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
         clear_preview_state(key=getattr(self, "_session_viewport_key", None))
+
+    def _step_back(self):
+        """Return to the previous pick, or return False when nothing was picked yet."""
+        if self.state == "PICK_RADIUS":
+            self.edge_b_snap = None
+            self.state = "PICK_EDGE_B"
+        elif self.state == "PICK_EDGE_B":
+            self.edge_a_snap = None
+            self.state = "PICK_EDGE_A"
+        else:
+            return False
+        return True
+
+    def _prompt(self):
+        return {
+            "PICK_EDGE_A": "Click the first edge",
+            "PICK_EDGE_B": "Click the second edge",
+        }.get(self.state, "Click to place the arc")
 
     def _derived_source(self):
         a = _edge_world_points(self.edge_a_snap)
@@ -258,6 +288,7 @@ class DIMENSIONS_OT_CreateAngle(bpy.types.Operator):
         preview = {
             "state": self.state,
             "annotation_kind": "ANGLE",
+            "prompt": self._prompt(),
             "angle_radius": self.radius,
             "angle_mode": "REFLEX" if self.angle_mode == "REFLEX" else "MINOR",
             "continuous_placement": self.continuous_placement,
@@ -296,7 +327,34 @@ class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
         self.annotation_name = context.view_layer.objects.active.name
         self.hover_snap = None
         context.window_manager.modal_handler_add(self)
+        set_tool_status_text(context, f"Replace Edge {self.edge_slot}: click the new edge · S cycles snapping · Esc cancels")
+        self._update_preview()
         return {"RUNNING_MODAL"}
+
+    def _replacement_defines_angle(self, props):
+        """Return whether the hovered edge and the kept edge still form an angle."""
+        replacement = _edge_world_points(self.hover_snap)
+        kept = (
+            (props.angle_b_start, props.angle_b_end)
+            if self.edge_slot == "A"
+            else (props.angle_a_start, props.angle_a_end)
+        )
+        kept = tuple(resolve_anchor(anchor) for anchor in kept)
+        if replacement is None or any(point is None for point in kept):
+            return False
+        edges = (replacement, kept) if self.edge_slot == "A" else (kept, replacement)
+        return derive_angle_from_world_edges(*edges[0], *edges[1], props.angle_mode) is not None
+
+    def _update_preview(self):
+        set_preview_state({
+            "viewport_key": getattr(self, "_session_viewport_key", None),
+            "state": f"REPLACE_EDGE_{self.edge_slot}",
+            "tool_label": "ANGLE",
+            "prompt": f"Click the new Edge {self.edge_slot}",
+            "hover_screen": None if self.hover_snap is None else self.hover_snap["screen_co"],
+            "hover_type": "EDGE",
+            "hover_label": f"Replacement Edge {self.edge_slot}",
+        })
 
     @modal_cleanup_on_exception
     def modal(self, context, event):
@@ -312,12 +370,7 @@ class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
         if handle_snap_target_event(context, event):
-            set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None),
-                "state": f"REPLACE_EDGE_{self.edge_slot}",
-                "hover_screen": None if self.hover_snap is None else self.hover_snap["screen_co"],
-                "hover_type": "EDGE",
-                "hover_label": f"Replacement Edge {self.edge_slot}",
-            })
+            self._update_preview()
             return {"RUNNING_MODAL"}
         if event.type == "MOUSEMOVE":
             snap = find_nearest_snap_point(
@@ -328,14 +381,12 @@ class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
                 include_free=False,
             )
             self.hover_snap = copy_snap(snap) if _valid_edge_snap(snap) else None
-            set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None),
-                "state": f"REPLACE_EDGE_{self.edge_slot}",
-                "hover_screen": None if self.hover_snap is None else self.hover_snap["screen_co"],
-                "hover_type": "EDGE",
-                "hover_label": f"Replacement Edge {self.edge_slot}",
-            })
+            self._update_preview()
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "PRESS" and self.hover_snap is not None:
+            if not self._replacement_defines_angle(annotation.dimension_props):
+                self.report(messages.WARNING, messages.POINT_NON_PARALLEL_EDGES)
+                return {"RUNNING_MODAL"}
             set_angle_edge(
                 annotation.dimension_props,
                 self.edge_slot,
@@ -348,7 +399,7 @@ class DIMENSIONS_OT_ReplaceAngleEdge(bpy.types.Operator):
         if event.type in {"RIGHTMOUSE", "ESC"} and event.value == "PRESS":
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+        if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 

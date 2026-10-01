@@ -27,6 +27,7 @@ The direction from testing was explicit: fewer tools, each one predictable.
   - a guide plane is a wireframe grid mesh, so Blender's own selection, transform, and snapping work on it.
 - **Grids never block model snapping.** Snaps onto a grid bind as object points, so they follow the grid and survive a spacing change.
 - **Isolate** shows only the chosen annotations and keeps the model visible. **Apply To** defaults to the viewport selection.
+- **Release review decisions:** middle mouse always navigates (the middle-drag axis gesture is removed; `X`/`Y`/`Z` lock axes); Offset Guide has no flip key (a typed distance goes on the pointer's side, a negative one on the other side, so `2ft` types normally); and dimensions snapped to guide points and lines follow them, as they follow grids. Deleting guides through Dimensions keeps dependent dimensions as fixed points.
 
 ## Acceptance criteria
 
@@ -45,7 +46,7 @@ The direction from testing was explicit: fewer tools, each one predictable.
 - `tests/blender_smoke.py` — `DimensionsConstructionTests` (grid geometry, transforms, see-through ray casts, coplanar faces, grid anchors), plus operator-registration and interface-icon checks in `DimensionsPackagingTests`.
 - `tests/blender_modal.py` — `ChainDimensionModalTests` and `ConstructionToolModalTests`.
 - `tests/blender_lifecycle.py` — moved grid, point, and line save/reload, and `test_schema_v15_fixture_converts_removed_0_6_features` against `tests/fixtures/schema-v15-0.6.0.blend`.
-- `tests/foreground_workflows.py` — 22 checks driven by real window events in a foreground Blender 5.1.2.
+- `tests/foreground_workflows.py` — 36 checks driven by real window events in foreground Blender 5.1.2 and 5.2, including the release-review fixes: typed axis distances, Angle, Object Mode Area, Clear Guides, guide-point following, typed units, middle-mouse navigation, and dense-mesh hover cost.
 
 ## Code map
 

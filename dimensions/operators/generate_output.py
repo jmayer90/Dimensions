@@ -1,6 +1,5 @@
 """Generate disposable Grease Pencil output from visible linear dimensions."""
 
-from math import atan, tan
 from uuid import uuid4
 
 import bpy
@@ -69,11 +68,13 @@ def linear_annotations_for_output(context, scope):
     )
 
 
-def _is_scene_annotation(scene, annotation):
-    return any(obj == annotation for obj in scene.objects)
+def _scene_object_pointers(scene):
+    return {obj.as_pointer() for obj in scene.objects}
 
 
-def _prune_output_source_bindings(scene):
+def _prune_output_source_bindings(scene, scene_pointers=None):
+    if scene_pointers is None:
+        scene_pointers = _scene_object_pointers(scene)
     bindings = scene.dimensions_settings.output_source_bindings
     invalid_indices = []
     seen_sources = set()
@@ -84,7 +85,7 @@ def _prune_output_source_bindings(scene):
         if (
             source is None
             or not binding.key
-            or not _is_scene_annotation(scene, source)
+            or source_pointer not in scene_pointers
             or source_pointer in seen_sources
             or binding.key in seen_keys
         ):
@@ -126,56 +127,61 @@ def reconcile_stale_output(context, scope):
 
 def annotation_output_key(scene, annotation):
     """Return a persistent scene-owned key for one annotation without mutating it."""
-    if not _is_scene_annotation(scene, annotation):
-        raise ValueError("annotation must belong to the output scene")
-
-    _prune_output_source_bindings(scene)
-    bindings = scene.dimensions_settings.output_source_bindings
-    used_keys = {binding.key for binding in bindings if binding.key}
-    for binding in bindings:
-        if binding.source == annotation:
-            return binding.key
-
-    key = f"annotation-{uuid4().hex}"
-    while key in used_keys:
-        key = f"annotation-{uuid4().hex}"
-    binding = bindings.add()
-    binding.source = annotation
-    binding.key = key
-    return key
+    return annotation_output_keys(scene, (annotation,))[annotation.as_pointer()]
 
 
 def annotation_output_keys(scene, annotations):
-    """Return persistent keys for the annotations participating in this run."""
-    return {
-        annotation.name: annotation_output_key(scene, annotation)
-        for annotation in annotations
-    }
+    """Return persistent keys, by annotation pointer, for the annotations in this run."""
+    scene_pointers = _scene_object_pointers(scene)
+    if any(annotation.as_pointer() not in scene_pointers for annotation in annotations):
+        raise ValueError("annotation must belong to the output scene")
+
+    _prune_output_source_bindings(scene, scene_pointers)
+    bindings = scene.dimensions_settings.output_source_bindings
+    keys = {binding.source.as_pointer(): binding.key for binding in bindings}
+    used_keys = set(keys.values())
+    for annotation in annotations:
+        pointer = annotation.as_pointer()
+        if pointer in keys:
+            continue
+        key = f"annotation-{uuid4().hex}"
+        while key in used_keys:
+            key = f"annotation-{uuid4().hex}"
+        binding = bindings.add()
+        binding.source = annotation
+        binding.key = key
+        keys[pointer] = key
+        used_keys.add(key)
+    return {annotation.as_pointer(): keys[annotation.as_pointer()] for annotation in annotations}
+
+
+def _is_render_camera(camera):
+    return camera is not None and camera.type == "CAMERA"
 
 
 def _camera_world_units_per_pixel(scene, camera, world_co):
     """Resolve vertical world units per output pixel at one camera depth."""
-    if camera is None or camera.type != "CAMERA":
+    if not _is_render_camera(camera):
         return None
     resolution_y = float(scene.render.resolution_y) * (
         float(scene.render.resolution_percentage) / 100.0
     )
     if resolution_y <= 0.0:
         return None
-    camera_co = camera.matrix_world.inverted_safe() @ Vector(world_co)
-    depth = -camera_co.z
+    # Rendering ignores camera object scale, so measure depth in an unscaled frame.
+    location, rotation, _scale = camera.matrix_world.decompose()
+    depth = -(rotation.inverted() @ (Vector(world_co) - location)).z
     if depth <= 1e-6:
         return None
-    camera_data = camera.data
-    if camera_data.type == "ORTHO":
-        return float(camera_data.ortho_scale) / resolution_y
-    try:
-        vertical_fov = float(camera_data.angle_y)
-    except AttributeError:
-        vertical_fov = 2.0 * atan(
-            float(camera_data.sensor_height) / (2.0 * float(camera_data.lens))
-        )
-    return (2.0 * depth * tan(vertical_fov * 0.5)) / resolution_y
+    # The view frame honors sensor fit, render aspect, and pixel aspect.
+    frame = camera.data.view_frame(scene=scene)
+    frame_height = max(corner.y for corner in frame) - min(corner.y for corner in frame)
+    if camera.data.type != "ORTHO":
+        frame_depth = abs(frame[0].z)
+        if frame_depth <= 1e-9:
+            return None
+        frame_height *= depth / frame_depth
+    return frame_height / resolution_y
 
 
 def _annotation_world_depth_point(annotation):
@@ -260,7 +266,10 @@ def output_text_height_for_annotation(scene, annotation, settings):
 class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
     bl_idname = "dimensions.generate_output"
     bl_label = "Generate Grease Pencil Output"
-    bl_description = "Generate disposable renderable output for visible dimensions"
+    bl_description = (
+        "Turn the annotations in the Output Scope into renderable Grease Pencil strokes; "
+        "regenerating replaces earlier output"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -278,7 +287,7 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
                 return {"FINISHED"}
             self.report(messages.WARNING, messages.OUTPUT_NO_ANNOTATIONS)
             return {"CANCELLED"}
-        if settings.output_sizing_mode == "CAMERA" and context.scene.camera is None:
+        if settings.output_sizing_mode == "CAMERA" and not _is_render_camera(context.scene.camera):
             self.report(messages.WARNING, messages.OUTPUT_CAMERA_REQUIRED)
             return {"CANCELLED"}
 
@@ -287,14 +296,16 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
         skipped_repair = 0
         output_keys = annotation_output_keys(context.scene, annotations)
         for annotation in annotations:
+            output_key = output_keys[annotation.as_pointer()]
             if annotation_output_state(annotation) not in {"LIVE", "CAPTURED"}:
-                removed += remove_generated_output(context.scene, output_keys[annotation.name])
+                removed += remove_generated_output(context.scene, output_key)
                 skipped += 1
                 skipped_repair += 1
                 continue
             resolved_annotation = _ResolvedAnnotation(annotation, settings)
             sizing = output_sizing_for_annotation(context.scene, annotation, settings)
             if sizing is None:
+                removed += remove_generated_output(context.scene, output_key)
                 skipped += 1
                 if (
                     getattr(annotation.dimension_props, "annotation_kind", "LINEAR") == "AREA"
@@ -305,11 +316,11 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
             annotation_kind = getattr(annotation.dimension_props, "annotation_kind", "LINEAR")
             text_height = output_text_height_for_annotation(context.scene, annotation, settings)
             spec = build_annotation_output_spec(
-                context, resolved_annotation, output_keys[annotation.name], sizing,
+                context, resolved_annotation, output_key, sizing,
                 text_height, context.scene.camera,
             )
             if spec is None:
-                removed += remove_generated_output(context.scene, output_keys[annotation.name])
+                removed += remove_generated_output(context.scene, output_key)
                 skipped += 1
                 if annotation_kind == "AREA" and annotation.dimension_props.measurement_state == "NEEDS_REPAIR":
                     skipped_repair += 1
@@ -322,7 +333,7 @@ class DIMENSIONS_OT_GenerateOutput(bpy.types.Operator):
                 self.report(messages.INFO, messages.generated_output(0, skipped, skipped_repair, removed))
                 return {"FINISHED"}
             report_message = (
-                messages.OUTPUT_AREA_REPAIR_REQUIRED
+                messages.OUTPUT_REPAIR_REQUIRED
                 if skipped_repair
                 else messages.OUTPUT_NO_VALID_ANNOTATIONS
             )

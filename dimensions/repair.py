@@ -10,7 +10,7 @@ from .anchors import (
     set_anchor,
     set_object_anchor,
 )
-from .area_binding import bind_area_face_indices, evaluate_area_binding
+from .area_binding import area_source_is_read_only, bind_area_face_indices, evaluate_area_binding
 from .properties import is_dimension_object
 
 
@@ -59,13 +59,51 @@ def repair_issues(annotation):
     return tuple(issues)
 
 
+def stored_repair_issues(annotation):
+    """Return the issues recorded by the last scene sync, without reading mesh data.
+
+    Sidebar polls and redraws use this. Live resolution and the candidate search
+    in ``repair_issues`` scan the whole source mesh, so they run only when the user
+    acts on an issue. Every returned ``candidate`` is None.
+    """
+    if not is_dimension_object(annotation):
+        return ()
+    props = annotation.dimension_props
+    issues = []
+    for name, anchor in _repair_anchor_items(props):
+        if anchor.resolution_status == "BY_ID":
+            continue
+        source = anchor.target_object
+        issues.append({
+            "type": "ANCHOR",
+            "anchor_name": name,
+            "status": anchor.resolution_status,
+            "source_name": anchor.source_object_name or (source.name if source is not None else "Deleted source"),
+            "world_co": (
+                source.matrix_world @ Vector(anchor.fallback_local_co)
+                if source is not None else Vector(anchor.world_co)
+            ),
+            "candidate": None,
+        })
+    if props.annotation_kind == "AREA" and props.measurement_state == "NEEDS_REPAIR":
+        source = props.area_source_object
+        issues.append({
+            "type": "AREA",
+            "status": "UNRESOLVABLE" if source is None else "BY_FALLBACK",
+            "source_name": source.name if source is not None else (props.start.source_object_name or "Deleted source"),
+            "world_co": area_last_known_world(props),
+            "candidate": None,
+        })
+    return tuple(issues)
+
+
 def suggest_vertex_candidate(anchor):
     _world, status = anchor_resolution(anchor)
     obj = anchor.target_object
     if status == "BY_ID" or obj is None or obj.type != "MESH":
         return None
     fallback = Vector(anchor.fallback_local_co)
-    if obj.mode == "EDIT":
+    if obj.data.is_editmode:
         import bmesh
 
         bm = bmesh.from_edit_mesh(obj.data)
@@ -103,9 +141,9 @@ def area_last_known_world(props):
 def suggest_area_candidate(props):
     obj = props.area_source_object
     bindings = list(props.area_faces)
-    if obj is None or obj.type != "MESH" or not bindings:
+    if obj is None or obj.type != "MESH" or not bindings or area_source_is_read_only(obj):
         return None
-    if obj.mode == "EDIT":
+    if obj.data.is_editmode:
         import bmesh
 
         bm = bmesh.from_edit_mesh(obj.data)

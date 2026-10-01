@@ -68,7 +68,7 @@ Both scripts accept an explicit Blender executable path; on POSIX systems they f
 
 `tests/blender_lifecycle.py` covers persistent data: measurement proxies, save/reload, and schema migration against the released-file fixtures in `tests/fixtures/`.
 
-`tests/foreground_workflows.py` drives real window events — mouse moves, clicks, and keys — through the core tools in a foreground Blender. It needs a window, so it is not part of `validate.ps1` or CI; run it before a release and after any change to a modal tool, snapping, or Edit Mode code:
+`tests/foreground_workflows.py` drives real window events — mouse moves, clicks, and keys — through the core tools in a foreground Blender. Blender's event simulator cannot drive the viewport's own navigation, so the modal suite checks that every tool passes navigation events through. It needs a window, so it is not part of `validate.ps1` or CI; run it before a release and after any change to a modal tool, snapping, or Edit Mode code:
 
 ```bash
 blender --factory-startup --enable-event-simulate --window-geometry 0 0 1600 1000 --python tests/foreground_workflows.py
@@ -76,10 +76,13 @@ blender --factory-startup --enable-event-simulate --window-geometry 0 0 1600 100
 
 `tests/stroke_font_smoke.py`, `tests/output_geometry_smoke.py`, `tests/output_smoke.py`, and `tests/output_operator_smoke.py` cover render output: vector labels, live linear-annotation translation, camera/world sizing, scene isolation, deterministic regeneration, rollback, and minimal EEVEE/Cycles renders.
 
-Three Blender behaviors have hidden real bugs from the background suites:
+These Blender behaviors have hidden real bugs from the background suites:
 
 - **Registered classes must not subclass each other.** When one registered operator subclasses another, Blender loses the parent's Python class and invoking it silently does nothing. Share code through an unregistered base class instead; `DimensionsPackagingTests` checks every operator.
 - **Edit Mode BMesh elements die with their wrapper.** Blender invalidates every BMesh element object when the `bmesh.from_edit_mesh()` object that produced it is freed. Keep that object alive for as long as you use its elements. Tests can hide this bug because they often hold their own reference; the foreground script covers the Edit Mode paths.
+- **Adding a BMesh custom-data layer invalidates element wrappers too.** Creating a vertex or face layer (as the anchor and Area ID helpers do on first use) invalidates every existing Python wrapper of that domain even while the `bmesh.from_edit_mesh()` object is alive. Read what you need from elements before an ID helper can add a layer.
+- **Edit Mode belongs to the mesh, not the object.** When an `Alt+D` duplicate is in Edit Mode, its twin shares the mesh but reports `obj.mode == "OBJECT"`, and its `mesh.vertices` are stale. Branch on `obj.data.is_editmode` before choosing between BMesh and mesh data.
+- **Saved enum options are stored as numbers.** Reordering an `EnumProperty`'s items silently changes what saved files mean. Give persisted items explicit numbers; `test_persisted_enum_item_numbers_never_move` guards every saved enum.
 - **Every icon name must exist in the running Blender.** An unknown icon stops the whole panel from drawing; `DimensionsPackagingTests` checks them.
 
 Two differences between the test environment and a real install have also hidden real bugs, and `DimensionsPackagingTests` guards both. The suites import the add-on as a top-level `dimensions` package, but Blender installs it as `bl_ext.<repository>.dimensions` — so anything deriving an identifier from `__package__` must use the full name. And Blender restricts `bpy.data` while an add-on registers, so registration must not read scene data directly.

@@ -87,6 +87,12 @@ def derive_angle_from_world_edges(a_start, a_end, b_start, b_end, solution="MINO
             center = (a_start + a_end + b_start + b_end) * 0.25
         else:
             center = (closest[0] + closest[1]) * 0.5
+        # Point each ray from the virtual corner toward its own edge, so the arc
+        # opens on the edges' side whatever order their vertices are stored in.
+        midpoints = ((a_start + a_end) * 0.5, (b_start + b_end) * 0.5)
+        for direction, midpoint in zip((first_direction, second_direction), midpoints):
+            if (midpoint - center).dot(direction) < 0.0:
+                direction.negate()
         # Undirected disconnected edges default to the smaller direction angle.
         if first_direction.dot(second_direction) < 0.0:
             second_direction.negate()

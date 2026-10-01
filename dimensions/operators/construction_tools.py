@@ -16,6 +16,7 @@ from ..collections import (
     create_guide_object,
     create_guide_plane_object,
     create_guide_point_object,
+    detach_annotations_from,
     ensure_guide_point_snap_proxy,
     iter_scene_role_objects,
     remove_guide_point_snap_proxies,
@@ -35,21 +36,21 @@ from ..drawing import clear_guide_preview_state, set_guide_preview_state
 from ..inference import InferenceSession, cycle_local_axis, handle_inference_event, inference_status
 from ..interaction import (
     axis_from_event,
-    axis_from_mouse_direction,
     axis_world_direction,
     constrained_delta,
+    continues_typed_distance,
     continuous_placement_enabled,
     is_confirm_event,
     is_navigation_event,
     modal_cleanup_on_exception,
     push_undo_step,
+    refuse_newer_scene,
     remember_session_context,
     session_axis,
     session_context_changed,
     set_tool_status_text,
     update_distance_text,
 )
-from ..keymaps import modal_action_from_event
 from ..properties import is_read_only_dimensions_object
 from ..snap_targets import handle_snap_target_event
 from ..snapping import copy_snap, find_nearest_snap_point, raycast_from_mouse
@@ -131,7 +132,7 @@ class _ConstructionTool:
 
     Subclasses set ``points_required`` and implement ``_commit``. They may
     override ``_find_snap``, ``_effective_snap``, ``_validate``, ``_prompt``,
-    ``_preview_extras``, and ``_handle_tool_event``.
+    and ``_preview_extras``.
     """
 
     tool_label = "GUIDE"
@@ -143,6 +144,8 @@ class _ConstructionTool:
     def invoke(self, context, _event):
         if context.area is None or context.area.type != "VIEW_3D" or context.mode not in {"OBJECT", "EDIT_MESH"}:
             self.report(messages.WARNING, messages.CONSTRUCTION_REQUIRE_SUPPORTED_MODE)
+            return {"CANCELLED"}
+        if refuse_newer_scene(self, context):
             return {"CANCELLED"}
         self.axis = session_axis(context)
         self.inference_axis = self.axis
@@ -176,29 +179,15 @@ class _ConstructionTool:
             return {"CANCELLED"}
         if self.continuous_placement and session_context_changed(self, context):
             return self._exit(context)
-        if handle_snap_target_event(context, event):
+        typing = continues_typed_distance(self.distance_text, event)
+        if not typing and handle_snap_target_event(context, event):
             if self.hover_mouse is not None:
                 self.hover_snap = self._find_snap(context, self.hover_mouse.x, self.hover_mouse.y)
             self._update_preview(context)
             return {"RUNNING_MODAL"}
-        if handle_inference_event(self.inference_session, event):
+        if not typing and handle_inference_event(self.inference_session, event):
             self._update_preview(context)
             return {"RUNNING_MODAL"}
-        if self._handle_tool_event(context, event):
-            self._update_preview(context)
-            return {"RUNNING_MODAL"}
-
-        if self.accepts_axis and self.picked and event.type == "MIDDLEMOUSE":
-            # Middle drag picks the projected axis closest to the drag direction.
-            if event.value == "PRESS":
-                self.axis_gesture_active = True
-                self._update_axis_gesture(context, event)
-                self._update_preview(context)
-                return {"RUNNING_MODAL"}
-            if event.value == "RELEASE" and getattr(self, "axis_gesture_active", False):
-                self.axis_gesture_active = False
-                self._update_preview(context)
-                return {"RUNNING_MODAL"}
 
         if self.accepts_axis:
             axis = axis_from_event(event)
@@ -217,8 +206,6 @@ class _ConstructionTool:
                 return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
-            if getattr(self, "axis_gesture_active", False):
-                self._update_axis_gesture(context, event)
             self.hover_mouse = Vector((event.mouse_region_x, event.mouse_region_y))
             self.hover_snap = self._find_snap(context, event.mouse_region_x, event.mouse_region_y)
             self._update_preview(context)
@@ -266,15 +253,6 @@ class _ConstructionTool:
     def _exit(self, context):
         self.cancel(context)
         return {"CANCELLED"}
-
-    def _handle_tool_event(self, _context, _event):
-        return False
-
-    def _update_axis_gesture(self, context, event):
-        axis = axis_from_mouse_direction(context, self._origin(), event.mouse_region_x, event.mouse_region_y)
-        if axis is not None:
-            self.axis = axis
-            self.inference_axis = axis
 
     def _origin(self):
         return self.picked[-1]["world_co"] if self.picked else None
@@ -400,7 +378,6 @@ class _ConstructionTool:
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
             "continuous_placement": self.continuous_placement,
-            "axis_gesture_active": getattr(self, "axis_gesture_active", False),
         }
         status = inference_status(self.inference_session)
         if status:
@@ -412,7 +389,6 @@ class _ConstructionTool:
             state["hover_snap"] = copy_snap(self.hover_snap)
         if self.picked:
             state["locked_snaps"] = [copy_snap(snap) for snap in self.picked]
-            state["axis_origin_world"] = self._origin()
         self._preview_extras(context, state)
         set_guide_preview_state(state, key=getattr(self, "_session_viewport_key", None))
 
@@ -428,7 +404,10 @@ class DIMENSIONS_OT_CreateGuide(_ConstructionTool, bpy.types.Operator):
 
     tool_label = "GUIDE LINE"
     points_required = 2
-    status_text = "Guide Line: click a point, then a second point for direction · X/Y/Z lock direction · S cycles snapping · Esc exits"
+    status_text = (
+        "Guide Line: click a point, then a second point for direction · X/Y/Z lock direction · "
+        "S cycles snapping · Backspace steps back · Esc exits"
+    )
 
     def _prompt(self):
         return "Click a point on the line" if not self.picked else "Click a second point for its direction"
@@ -549,7 +528,10 @@ class DIMENSIONS_OT_CreateGuidePlane(_ConstructionTool, bpy.types.Operator):
     )
 
     tool_label = "GUIDE PLANE"
-    status_text = "Guide Plane: click three points · X/Y/Z lock direction · S cycles snapping · Esc exits"
+    status_text = (
+        "Guide Plane: click three points · X/Y/Z lock direction · S cycles snapping · "
+        "Backspace steps back · Esc exits"
+    )
 
     @classmethod
     def description(cls, _context, properties):
@@ -680,7 +662,7 @@ def _snap_line(snap):
     vertices = snap.get("edge_vertices", ())
     if snap.get("type") != "EDGE" or obj is None or getattr(obj, "type", None) != "MESH" or len(vertices) != 2:
         return None
-    if obj.mode == "EDIT":
+    if obj.data.is_editmode:
         mesh = bmesh.from_edit_mesh(obj.data)
         mesh.verts.ensure_lookup_table()
         coordinates = mesh.verts
@@ -700,7 +682,7 @@ def _snap_face_normal(snap):
     face_index = snap.get("face_index", -1)
     if obj is None or getattr(obj, "type", None) != "MESH" or face_index is None or face_index < 0:
         return None
-    if obj.mode == "EDIT":
+    if obj.data.is_editmode:
         mesh = bmesh.from_edit_mesh(obj.data)
         mesh.faces.ensure_lookup_table()
         if face_index >= len(mesh.faces):
@@ -719,26 +701,23 @@ class DIMENSIONS_OT_CreateOffsetGuide(_ConstructionTool, bpy.types.Operator):
     bl_label = "Offset Guide"
     bl_description = (
         "Place a guide line parallel to an edge, guide line, or measurement: click the source, "
-        "then click where the new line passes or type its distance. F flips the side"
+        "then click where the new line passes or type its distance. A typed distance goes on the pointer's side; "
+        "a negative one goes on the other side"
     )
     bl_options = {"REGISTER", "UNDO"}
 
     tool_label = "OFFSET GUIDE"
     points_required = 2
     accepts_axis = False
-    status_text = "Offset Guide: click an edge, guide, or measurement · click or type the distance · F flips side · Esc exits"
+    status_text = (
+        "Offset Guide: click an edge, guide, or measurement, then where the line passes · type a distance "
+        "(negative for the other side) · S cycles snapping · Backspace steps back · Esc exits"
+    )
 
     def _begin(self, _context):
         self.source_line = None
         self.offset_normal = None
-        self.flip = 1.0
         return None
-
-    def _handle_tool_event(self, _context, event):
-        if self.picked and modal_action_from_event(event) == "FLIP_OFFSET":
-            self.flip = -self.flip
-            return True
-        return False
 
     def _find_snap(self, context, mouse_x, mouse_y):
         if not self.picked:
@@ -768,7 +747,7 @@ class DIMENSIONS_OT_CreateOffsetGuide(_ConstructionTool, bpy.types.Operator):
             side = offset if offset.length >= 1e-8 else self.offset_normal.cross(direction)
             if side.length < 1e-8:
                 return None
-            return side.normalized() * distance * self.flip
+            return side.normalized() * distance
         self.distance_input_valid = True
         return offset
 
@@ -798,7 +777,6 @@ class DIMENSIONS_OT_CreateOffsetGuide(_ConstructionTool, bpy.types.Operator):
             return
         self.source_line = _snap_line(snap)
         self.offset_normal = _snap_face_normal(snap) or self._view_offset_normal(context, self.source_line[1])
-        self.flip = 1.0
 
     @staticmethod
     def _view_offset_normal(context, direction):
@@ -850,12 +828,16 @@ class DIMENSIONS_OT_CreateOffsetGuide(_ConstructionTool, bpy.types.Operator):
 
 def _clear_construction(context, kinds):
     removed = 0
-    for obj in list(iter_scene_role_objects(context.scene, "GUIDES")):
-        props = getattr(obj, "guide_props", None)
-        if props is None or not props.enabled or getattr(props, "kind", "GUIDE") not in kinds:
-            continue
-        if is_read_only_dimensions_object(obj):
-            continue
+    doomed = [
+        obj for obj in iter_scene_role_objects(context.scene, "GUIDES")
+        if getattr(obj, "guide_props", None) is not None
+        and obj.guide_props.enabled
+        and getattr(obj.guide_props, "kind", "GUIDE") in kinds
+        and not is_read_only_dimensions_object(obj)
+    ]
+    detach_annotations_from(doomed)
+    for obj in doomed:
+        props = obj.guide_props
         kind = props.kind
         if kind == "POINT":
             remove_guide_point_snap_proxies(obj)

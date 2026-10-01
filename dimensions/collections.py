@@ -1,14 +1,18 @@
 import bpy
 from mathutils import Matrix
 
-from .anchors import resolve_anchor
+from .anchors import resolve_anchor, set_world_anchor
 from .constants import (
-    DEFAULT_EMPTY_DISPLAY_SIZE,
     DEFAULT_EMPTY_DISPLAY_TYPE,
     DIMENSION_COLLECTION_NAME,
     GUIDE_COLLECTION_NAME,
 )
-from .properties import apply_scene_style_to_dimension, clear_dimension_style_overrides
+from .properties import (
+    apply_scene_style_to_dimension,
+    clear_dimension_style_overrides,
+    is_dimension_object,
+    is_read_only_dimensions_object,
+)
 from .preferences import get_preferences
 
 
@@ -124,8 +128,9 @@ def create_dimension_object(context, name="DIM Dimension"):
         if settings is not None:
             apply_scene_style_to_dimension(settings, dimension_object.dimension_props)
             clear_dimension_style_overrides(dimension_object.dimension_props)
-        from .migrations import stamp_scene_if_needed
+        from .migrations import mark_object_current, stamp_scene_if_needed
 
+        mark_object_current(dimension_object)
         stamp_scene_if_needed(context.scene)
 
     return dimension_object
@@ -150,8 +155,9 @@ def create_guide_object(context, name="GUIDE Construction Line"):
     guide_object.hide_render = True
     collection.objects.link(guide_object)
     guide_object.guide_props.enabled = True
-    from .migrations import stamp_scene_if_needed
+    from .migrations import mark_object_current, stamp_scene_if_needed
 
+    mark_object_current(guide_object)
     stamp_scene_if_needed(context.scene)
     return guide_object
 
@@ -209,6 +215,9 @@ def build_guide_plane_object(collection, frame, extent=None, spacing=None, name=
     props.plane_spacing = spacing
     props.enabled = True
     props.kind = "PLANE"
+    from .migrations import mark_object_current
+
+    mark_object_current(plane_object)
     return plane_object
 
 
@@ -357,6 +366,29 @@ def remove_measurement_snap_proxies(measurement_object):
         bpy.data.objects.remove(child, do_unlink=True)
         if mesh is not None and mesh.users == 0:
             bpy.data.meshes.remove(mesh)
+
+
+def detach_annotations_from(sources):
+    """Fix anchors bound to ``sources`` at their current position before the sources are deleted.
+
+    Dimensions follow the guides and grids they were snapped to; deleting a guide
+    through Dimensions keeps those dimensions where they are instead of breaking them.
+    """
+    pointers = {source.as_pointer() for source in sources}
+    detached = 0
+    for obj in bpy.data.objects:
+        if not is_dimension_object(obj) or is_read_only_dimensions_object(obj):
+            continue
+        props = obj.dimension_props
+        for anchor in (
+            props.start, props.end, props.center,
+            props.angle_a_start, props.angle_a_end, props.angle_b_start, props.angle_b_end,
+        ):
+            target = anchor.target_object
+            if target is not None and target.as_pointer() in pointers:
+                set_world_anchor(anchor, resolve_anchor(anchor))
+                detached += 1
+    return detached
 
 
 def remove_guide_point_snap_proxies(point_object):

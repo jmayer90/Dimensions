@@ -3,16 +3,20 @@ import bpy
 from mathutils import Vector
 
 from .. import messages
-from ..anchors import set_anchor, set_object_anchor
-from ..area_binding import FACE_ID_ATTRIBUTE, bind_area_faces, evaluate_area_binding
+from ..anchors import resolve_anchor, set_anchor, set_object_anchor
+from ..area_binding import FACE_ID_ATTRIBUTE, area_source_is_read_only, bind_area_faces, evaluate_area_binding
 from ..angle_binding import derive_angle_from_world_edges, set_angle_edge
 from ..collections import create_dimension_object
 from ..constants import DEFAULT_OFFSET_DISTANCE
 from ..dimension_geometry import get_dimension_world_geometry
-from ..properties import is_read_only_dimensions_object
+from ..properties import is_dimension_object, is_read_only_dimensions_object
 
 
-_pending_area_annotation_name = ""
+def _selected_area_annotations(context):
+    return [
+        obj for obj in context.selected_objects
+        if is_dimension_object(obj) and obj.dimension_props.annotation_kind == "AREA"
+    ]
 
 
 def _selected_bmesh(context):
@@ -83,7 +87,10 @@ class DIMENSIONS_OT_DimensionSelectedEdge(bpy.types.Operator):
 class DIMENSIONS_OT_AreaSelectedFaces(bpy.types.Operator):
     bl_idname = "dimensions.area_selected_faces"
     bl_label = "Annotate Selected Face Area"
-    bl_description = "Create a leader annotation for the combined area of selected faces"
+    bl_description = (
+        "Use the selected faces, then click to place the Area label. "
+        "With no faces selected, click faces in the viewport instead"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -136,41 +143,47 @@ class DIMENSIONS_OT_AreaSelectedFaces(bpy.types.Operator):
 class DIMENSIONS_OT_RebindAreaFromSelection(bpy.types.Operator):
     bl_idname = "dimensions.rebind_area_from_selection"
     bl_label = "Rebind Area from Selection"
-    bl_description = "Replace this Area's live source with the currently selected faces"
+    bl_description = (
+        "Bind the selected Area annotation to the faces selected in Edit Mode. "
+        "Keep exactly one Area selected while editing its source; Select Source Faces does this"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
-        source = context.edit_object
-        if context.mode != "EDIT_MESH" or source is None:
+        if context.mode != "EDIT_MESH" or context.edit_object is None:
             return False
-        annotation = bpy.data.objects.get(_pending_area_annotation_name)
-        return bool(
-            annotation
-            and hasattr(annotation, "dimension_props")
-            and annotation.dimension_props.enabled
-            and annotation.dimension_props.annotation_kind == "AREA"
-        )
+        if len(_selected_area_annotations(context)) != 1:
+            cls.poll_message_set(messages.SELECT_ONE_AREA_FOR_SOURCES)
+            return False
+        return True
 
     def execute(self, context):
-        global _pending_area_annotation_name
         source = context.edit_object
-        annotation = bpy.data.objects.get(_pending_area_annotation_name) if source else None
-        if source is None or annotation is None:
-            self.report(messages.WARNING, messages.SELECT_AREA_BEFORE_SOURCES)
+        annotations = _selected_area_annotations(context)
+        if source is None or len(annotations) != 1:
+            self.report(messages.WARNING, messages.SELECT_ONE_AREA_FOR_SOURCES)
+            return {"CANCELLED"}
+        annotation = annotations[0]
+        if is_read_only_dimensions_object(annotation):
+            self.report(messages.WARNING, messages.MANAGER_LINKED_READ_ONLY)
             return {"CANCELLED"}
         bm = bmesh.from_edit_mesh(source.data)
         faces = [face for face in bm.faces if face.select and not face.hide]
         if not faces:
             self.report(messages.WARNING, messages.SELECT_AREA_SOURCES)
             return {"CANCELLED"}
-        result = bind_area_faces(annotation.dimension_props, source, faces)
+        props = annotation.dimension_props
+        label_world = resolve_anchor(props.end)
+        result = bind_area_faces(props, source, faces)
         if result is None:
             self.report(messages.WARNING, messages.AREA_FACES_UNMEASURABLE)
             return {"CANCELLED"}
-        annotation.dimension_props.area_value = result["area"]
-        annotation.dimension_props.area_face_count = result["face_count"]
-        _pending_area_annotation_name = ""
+        props.area_value = result["area"]
+        props.area_face_count = result["face_count"]
+        # Keep the leader and label where they were, but bound to the new source.
+        set_object_anchor(props.start, source, result["center"])
+        set_object_anchor(props.end, source, label_world)
         self.report(messages.INFO, messages.rebound_area(len(faces)))
         return {"FINISHED"}
 
@@ -228,23 +241,41 @@ class DIMENSIONS_OT_SelectAreaSource(bpy.types.Operator):
         )
 
     def execute(self, context):
-        global _pending_area_annotation_name
         annotation = context.view_layer.objects.active
         props = annotation.dimension_props
         source = props.area_source_object
+        if area_source_is_read_only(source):
+            self.report(messages.WARNING, messages.AREA_SOURCE_LINKED)
+            return {"CANCELLED"}
+        # Validate before touching the selection: Blender cannot edit an object
+        # outside this view layer or one hidden by more than its own eye toggle.
+        if context.view_layer.objects.get(source.name) != source:
+            self.report(messages.WARNING, messages.AREA_SOURCE_HIDDEN)
+            return {"CANCELLED"}
+        was_hidden = source.hide_get()
+        source.hide_set(False)
+        if not source.visible_get():
+            source.hide_set(was_hidden)
+            self.report(messages.WARNING, messages.AREA_SOURCE_HIDDEN)
+            return {"CANCELLED"}
         for obj in context.selected_objects:
             obj.select_set(False)
-        source.hide_set(False)
+        # The Area stays selected so Apply Faces to Selected Area knows its target.
+        annotation.select_set(True)
         source.select_set(True)
         context.view_layer.objects.active = source
         bpy.ops.object.mode_set(mode="EDIT")
         bm = bmesh.from_edit_mesh(source.data)
         layer = bm.faces.layers.int.get(FACE_ID_ATTRIBUTE)
         wanted = {binding.face_id for binding in props.area_faces}
+        for elements in (bm.verts, bm.edges, bm.faces):
+            for element in elements:
+                element.select = False
         for face in bm.faces:
-            face.select = bool(layer is not None and face[layer] in wanted)
+            if layer is not None and face[layer] in wanted:
+                face.select = True
+        bm.select_flush_mode()
         bmesh.update_edit_mesh(source.data, loop_triangles=False, destructive=False)
-        _pending_area_annotation_name = annotation.name
         self.report(messages.INFO, messages.SELECTED_BOUND_FACES)
         return {"FINISHED"}
 
@@ -252,7 +283,10 @@ class DIMENSIONS_OT_SelectAreaSource(bpy.types.Operator):
 class DIMENSIONS_OT_AngleSelectedEdges(bpy.types.Operator):
     bl_idname = "dimensions.angle_selected_edges"
     bl_label = "Dimension Selected Angle"
-    bl_description = "Create an angle dimension from any two selected non-parallel edges"
+    bl_description = (
+        "Use the two selected edges, then click to place the arc. "
+        "With any other selection, click two edges in the viewport instead"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod

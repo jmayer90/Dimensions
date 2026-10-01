@@ -62,6 +62,17 @@ PICK_START = PointPlacementState.PICK_START
 PICK_END = PointPlacementState.PICK_END
 PLACE = PointPlacementState.PLACE
 
+NAVIGATION_EVENT_TYPES = ("TRACKPADPAN", "TRACKPADZOOM", "NDOF_MOTION", "NUMPAD_7", "HOME")
+
+
+def key_events(text):
+    """Return key presses as Blender delivers them, with the key type and its character."""
+    names = {" ": "SPACE", ".": "PERIOD"}
+    return [
+        make_event(names.get(character, character.upper()), "PRESS", ascii_character=character)
+        for character in text
+    ]
+
 
 class ModalCleanupTests(unittest.TestCase):
     def tearDown(self):
@@ -296,6 +307,23 @@ class PointPlacementStateTests(unittest.TestCase):
 
 
 class InteractionContextTests(unittest.TestCase):
+    def test_tools_refuse_to_start_in_a_scene_saved_by_a_newer_dimensions(self):
+        from dimensions.interaction import refuse_newer_scene
+        from dimensions.migrations import CURRENT_SCHEMA_VERSION
+
+        settings = bpy.context.scene.dimensions_settings
+        original = settings.schema_version
+        operator = SimpleNamespace(reports=[])
+        operator.report = lambda severity, message: operator.reports.append((severity, message))
+        try:
+            self.assertFalse(refuse_newer_scene(operator, bpy.context))
+            settings.schema_version = CURRENT_SCHEMA_VERSION + 1
+            self.assertTrue(refuse_newer_scene(operator, bpy.context))
+        finally:
+            settings.schema_version = original
+        self.assertEqual(len(operator.reports), 1)
+        self.assertIn("newer", operator.reports[0][1])
+
     def test_session_context_tracks_mode_and_active_object(self):
         first = object()
         second = object()
@@ -418,7 +446,6 @@ class CreateDimensionModalTests(unittest.TestCase):
             end_snap=None,
             offset_distance=0.25,
             offset_plane_normal=None,
-            axis_gesture_active=False,
             continuous_placement=False,
             inference_axis="ALIGNED",
             inference_session=InferenceSession(),
@@ -647,6 +674,53 @@ class CreateDimensionModalTests(unittest.TestCase):
         self.assertIsNone(self.operator.end_snap)
         undo_step.assert_called_once_with("Create Dimension")
 
+    def test_a_locked_axis_gives_a_typed_distance_its_direction_without_moving(self):
+        self.operator.dimension_type = "X"
+        self.operator.inference_axis = "X"
+        events = [make_event("LEFTMOUSE", "PRESS"), *typing_events("2"), make_event("RET", "PRESS")]
+        self._drive(events, [make_snap((1.0, 1.0, 0.0), snap_type="VERTEX", label="Vertex")])
+        self.assertEqual(self.operator.state, PLACE)
+        self.assertEqual(tuple(self.operator.end_snap["world_co"]), (3.0, 1.0, 0.0))
+        self.assertFalse(self.reports)
+
+    def test_a_typed_distance_without_a_direction_says_how_to_give_one(self):
+        events = [make_event("LEFTMOUSE", "PRESS"), *typing_events("2"), make_event("RET", "PRESS")]
+        self._drive(events, [make_snap((1.0, 1.0, 0.0))])
+        self.assertEqual(self.operator.state, PICK_END)
+        messages_reported = [message for _severity, message in self.reports]
+        self.assertTrue(any("direction" in message for message in messages_reported), messages_reported)
+        self.assertFalse(any("valid distance" in message for message in messages_reported))
+
+    def test_unit_letters_continue_a_typed_distance_instead_of_running_shortcuts(self):
+        from dimensions.snap_targets import enabled_snap_targets
+
+        before = enabled_snap_targets(self.context)
+        self._drive(
+            [make_event("LEFTMOUSE", "PRESS"), make_event("MOUSEMOVE", "PRESS"), *key_events("3 meters")],
+            [make_snap((0.0, 0.0, 0.0)), make_snap((1.0, 0.0, 0.0))],
+        )
+        self.assertEqual(self.operator.distance_text, "3 meters")
+        self.assertEqual(enabled_snap_targets(self.context), before)
+        self.assertFalse(self.operator.inference_session.locked)
+
+    def test_trackpad_ndof_and_numpad_view_keys_reach_blender(self):
+        for event_type in NAVIGATION_EVENT_TYPES:
+            with self.subTest(event=event_type):
+                self.assertEqual(self.operator.modal(self.context, make_event(event_type, "NOTHING")), {"PASS_THROUGH"})
+
+    def test_middle_mouse_navigates_at_every_stage(self):
+        for stage in (PICK_START, PICK_END, PLACE):
+            self.operator._state_machine.stage = stage
+            with self.subTest(stage=stage):
+                self.assertEqual(self.operator.modal(self.context, make_event("MIDDLEMOUSE", "PRESS")), {"PASS_THROUGH"})
+
+    def test_a_numpad_digit_types_a_distance_once_typing_is_allowed(self):
+        self._pick_two_points()
+        self.operator._state_machine.step_back()
+        result = self.operator.modal(self.context, make_event("NUMPAD_7", "PRESS", ascii_character="7"))
+        self.assertEqual(result, {"RUNNING_MODAL"})
+        self.assertEqual(self.operator.distance_text, "7")
+
 
 class ChainDimensionModalTests(unittest.TestCase):
     """Chain is Create Dimension continuing each new dimension from the last end point."""
@@ -665,7 +739,6 @@ class ChainDimensionModalTests(unittest.TestCase):
             end_snap=None,
             offset_distance=0.25,
             offset_plane_normal=None,
-            axis_gesture_active=False,
             continuous_placement=True,
             inference_axis="ALIGNED",
             inference_session=InferenceSession(),
@@ -898,6 +971,38 @@ class ConstructionToolModalTests(unittest.TestCase):
         self.assertLess((origin - Vector((0, 1.5, 0))).length, 1e-6)
         self.assertLess((direction - Vector((1, 0, 0))).length, 1e-6)
 
+    def _offset_from_typed_text(self, events):
+        source = bpy.data.objects.new("Offset Source Guide", None)
+        bpy.context.scene.collection.objects.link(source)
+        source.guide_props.enabled = True
+        source.guide_props.kind = "GUIDE"
+        bpy.context.view_layer.update()
+        operator = self._tool(DIMENSIONS_OT_CreateOffsetGuide)
+        guide_snap = make_snap((2, 0, 0), snap_type="GUIDE", label="Guide")
+        guide_snap["guide_object"] = source
+        guide_snap["reference_line"] = (Vector((0, 0, 0)), Vector((1, 0, 0)))
+        self._drive(
+            operator,
+            [make_event("LEFTMOUSE", "PRESS"), make_event("MOUSEMOVE", "PRESS")],
+            [guide_snap, make_snap((2, 3, 0))],
+        )
+        for event in events:
+            operator.modal(self.context, event)
+        typed = operator.distance_text
+        self.assertEqual(operator.modal(self.context, make_event("RET", "PRESS")), {"FINISHED"})
+        created = [obj for obj in self._created("GUIDE") if obj is not source]
+        bpy.context.view_layer.update()
+        return typed, guide_line_world(created[0])[0]
+
+    def test_a_negative_offset_distance_goes_on_the_other_side_of_the_pointer(self):
+        _typed, origin = self._offset_from_typed_text(typing_events("-1.5"))
+        self.assertLess((origin - Vector((0, -1.5, 0))).length, 1e-6)
+
+    def test_offset_distance_accepts_feet_typed_with_letters(self):
+        typed, origin = self._offset_from_typed_text(key_events("2ft"))
+        self.assertEqual(typed, "2ft")
+        self.assertLess((origin - Vector((0, 0.6096, 0))).length, 1e-4)
+
     def test_offset_guide_refuses_a_point_that_is_not_a_line(self):
         operator = self._tool(DIMENSIONS_OT_CreateOffsetGuide)
         results = self._drive(operator, [make_event("LEFTMOUSE", "PRESS")], [make_snap((0, 0, 0))])
@@ -910,6 +1015,12 @@ class ConstructionToolModalTests(unittest.TestCase):
         self.assertIsNotNone(get_state("GUIDE", self.context))
         self.assertEqual(operator.modal(self.context, make_event("ESC", "PRESS")), {"CANCELLED"})
         self.assertIsNone(get_state("GUIDE", self.context))
+
+    def test_trackpad_ndof_and_numpad_view_keys_reach_blender(self):
+        operator = self._tool(DIMENSIONS_OT_CreateGuide)
+        for event_type in NAVIGATION_EVENT_TYPES:
+            with self.subTest(event=event_type):
+                self.assertEqual(operator.modal(self.context, make_event(event_type, "NOTHING")), {"PASS_THROUGH"})
 
 
 class CreateAngleModalTests(unittest.TestCase):
@@ -980,6 +1091,20 @@ class CreateAngleModalTests(unittest.TestCase):
         self.assertEqual(annotation.dimension_props.annotation_kind, "ANGLE")
         self.assertEqual(annotation.dimension_props.angle_a_start.target_object, self.source)
         self.assertEqual(annotation.dimension_props.angle_b_start.target_object, self.source)
+
+    def test_backspace_steps_back_one_edge_and_the_prompt_names_the_next_step(self):
+        self.operator.hover_snap = self._edge_snap(0, (0, 1))
+        self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS"))
+        self.assertEqual(self.operator._prompt(), "Click the second edge")
+        self.assertEqual(self.operator.modal(self.context, make_event("BACK_SPACE", "PRESS")), {"RUNNING_MODAL"})
+        self.assertEqual(self.operator.state, "PICK_EDGE_A")
+        self.assertIsNone(self.operator.edge_a_snap)
+        self.assertEqual(self.operator._prompt(), "Click the first edge")
+
+    def test_trackpad_ndof_and_numpad_view_keys_reach_blender(self):
+        for event_type in NAVIGATION_EVENT_TYPES:
+            with self.subTest(event=event_type):
+                self.assertEqual(self.operator.modal(self.context, make_event(event_type, "NOTHING")), {"PASS_THROUGH"})
 
 
 class CreateAreaModalTests(unittest.TestCase):
@@ -1063,6 +1188,46 @@ class CreateAreaModalTests(unittest.TestCase):
         self.assertEqual(annotation.dimension_props.dimension_type, "X")
         self.assertAlmostEqual(annotation.dimension_props.area_value, 4.0)
 
+    def _face_snap(self, obj=None, **extra):
+        return {
+            "type": "FACE",
+            "label": "Face",
+            "object": self.source if obj is None else obj,
+            "face_index": 0,
+            "world_co": Vector((0.0, 0.0, 0.0)),
+            "screen_co": Vector((0.0, 0.0)),
+            **extra,
+        }
+
+    def test_step_back_forgets_the_picked_faces(self):
+        self.operator.hover_snap = self._face_snap()
+        self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS"))
+        self.assertEqual(self.operator.state, "PLACE_LABEL")
+        self.assertEqual(self.operator.modal(self.context, make_event("BACK_SPACE", "PRESS")), {"RUNNING_MODAL"})
+        self.assertEqual(self.operator.state, "PICK_FACE")
+        self.assertEqual(self.operator.face_indices, [])
+        self.assertIsNone(self.operator.source_object)
+        self.assertEqual(self.operator._prompt(), "Click a face; Shift-click adds more")
+
+    def test_a_construction_grid_is_never_an_area_source(self):
+        from dimensions.collections import create_guide_plane_object
+
+        grid = create_guide_plane_object(
+            self.context, (Vector(), Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))), 1.0, 0.5,
+        )
+        self.operator.hover_snap = self._face_snap(grid, guide_plane=True)
+        with patch("dimensions.operators.create_area.raycast_from_mouse", return_value=None):
+            result = self.operator.modal(self.context, make_event("LEFTMOUSE", "PRESS"))
+        self.assertEqual(result, {"RUNNING_MODAL"})
+        self.assertEqual(self.operator.state, "PICK_FACE")
+        self.assertIsNone(self.operator.source_object)
+        self.assertTrue(self.operator.reports)
+
+    def test_trackpad_ndof_and_numpad_view_keys_reach_blender(self):
+        for event_type in NAVIGATION_EVENT_TYPES:
+            with self.subTest(event=event_type):
+                self.assertEqual(self.operator.modal(self.context, make_event(event_type, "NOTHING")), {"PASS_THROUGH"})
+
 
 class TransientMeasureModalTests(unittest.TestCase):
     def setUp(self):
@@ -1081,7 +1246,6 @@ class TransientMeasureModalTests(unittest.TestCase):
             hover_snap=None,
             distance_text="",
             distance_input_valid=True,
-            axis_gesture_active=False,
             inference_session=InferenceSession(),
             completed_start_world=None,
             completed_end_world=None,

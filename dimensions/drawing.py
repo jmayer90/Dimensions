@@ -1,6 +1,7 @@
 import blf
 import bpy
 import gpu
+import numpy as np
 from math import atan2, cos, degrees, pi, sin, tau
 from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
@@ -14,14 +15,11 @@ from .constants import (
     DEFAULT_HOVER_MARKER_SIZE,
     DEFAULT_LINE_WIDTH,
     DEFAULT_PRECISION,
-    DEFAULT_SELECTION_PIXEL_THRESHOLD,
     DEFAULT_TEXT_SIZE,
 )
 from .dimension_geometry import (
     get_angle_world_geometry,
     get_dimension_world_geometry,
-    get_measure_world_points,
-    get_offset_basis,
     sanitize_plane_normal,
 )
 from .properties import (
@@ -45,7 +43,6 @@ from .viewport_state import (
     clear_state,
     get_state,
     set_state,
-    tag_redraw_all_view3d,
 )
 
 
@@ -58,12 +55,18 @@ _dimension_geometry_cache = {}
 _text_layout_cache = {}
 _text_metrics_cache = {}
 _geometry_build_count = 0
+_mesh_highlight_cache = {}
 _MAX_TEXT_LAYOUT_ENTRIES = 4096
+# Above these sizes the hovered object's wireframe context is skipped: it is drawn
+# on every redraw, and a dense wireframe adds no information to the highlight.
+SNAP_CONTEXT_EDGE_LIMIT = 50000
+EDIT_SNAP_CONTEXT_EDGE_LIMIT = 5000
 
 
 def invalidate_dimension_geometry_cache():
     _dimension_geometry_cache.clear()
     _text_layout_cache.clear()
+    _mesh_highlight_cache.clear()
 
 
 def geometry_build_count():
@@ -486,18 +489,13 @@ def draw_world_guides():
     if context.region_data is None:
         return
 
-    preview_state = get_state("DIMENSION", context)
     guide_preview_state = get_state("GUIDE", context)
-    measure_state = get_state("MEASURE", context)
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
     gpu.state.blend_set("ALPHA")
 
     try:
         _draw_construction_guides(context, shader)
         _draw_tool_snap_highlights(context, shader)
-        for interaction_state in (preview_state, guide_preview_state, measure_state):
-            if interaction_state is not None:
-                _draw_axis_gesture(context, shader, interaction_state)
         if guide_preview_state is not None:
             _draw_guide_preview_world(context, shader, guide_preview_state)
     finally:
@@ -600,32 +598,6 @@ def _draw_world_segment(shader, start_world, end_world, color, line_width):
     batch.draw(shader)
 
 
-def _draw_axis_gesture(context, shader, state):
-    if not state.get("axis_gesture_active"):
-        return
-    origin = state.get("axis_origin_world")
-    if origin is None:
-        return
-    origin = Vector(origin)
-    extent = max(float(context.region_data.view_distance) * 0.22, 0.1)
-    active_axis = state.get("axis", "ALIGNED")
-    directions = (Vector((1.0, 0.0, 0.0)), Vector((0.0, 1.0, 0.0)), Vector((0.0, 0.0, 1.0)))
-    axes = {
-        "X": (directions[0], (1.0, 0.18, 0.12, 0.95)),
-        "Y": (directions[1], (0.22, 1.0, 0.18, 0.95)),
-        "Z": (directions[2], (0.20, 0.48, 1.0, 0.95)),
-    }
-    for axis, (direction, color) in axes.items():
-        width = 5.0 if axis == active_axis else 2.0
-        _draw_world_segment(
-            shader,
-            origin - direction * extent,
-            origin + direction * extent,
-            color,
-            width,
-        )
-
-
 def _draw_tool_snap_highlights(context, shader):
     locked_color = (0.10, 0.72, 1.0, 0.9)
     hover_color = (1.0, 0.58, 0.06, 1.0)
@@ -658,7 +630,7 @@ def _draw_snap_highlight(context, shader, snap, color, show_object_context=False
     kind = geometry["kind"]
     points = geometry["points"]
     object_edges = geometry.get("object_edges", ())
-    if show_object_context and object_edges:
+    if show_object_context and len(object_edges):
         gpu.state.depth_test_set("LESS_EQUAL")
         try:
             gpu.state.line_width_set(1.0)
@@ -667,7 +639,7 @@ def _draw_snap_highlight(context, shader, snap, color, show_object_context=False
             shader.uniform_float("color", (0.015, 0.015, 0.015, 0.72))
             batch.draw(shader)
             object_vertices = geometry.get("object_vertices", ())
-            if object_vertices:
+            if len(object_vertices):
                 gpu.state.point_size_set(3.0)
                 batch = batch_for_shader(shader, "POINTS", {"pos": object_vertices})
                 shader.bind()
@@ -788,13 +760,15 @@ def _snap_highlight_geometry(context, snap, include_object_context=True):
         return None
 
     matrix = obj.matrix_world
-    if obj.mode == "EDIT" and getattr(context, "edit_object", None) == obj:
+    if obj.data.is_editmode:
         import bmesh
 
         bm = bmesh.from_edit_mesh(obj.data)
         bm.verts.ensure_lookup_table()
         bm.edges.ensure_lookup_table()
         bm.faces.ensure_lookup_table()
+        # BMesh has no bulk accessor, and Blender already draws the edit cage.
+        include_object_context = include_object_context and len(bm.edges) <= EDIT_SNAP_CONTEXT_EDGE_LIMIT
         object_edges = (
             [
                 matrix @ vertex.co
@@ -854,30 +828,23 @@ def _snap_highlight_geometry(context, snap, include_object_context=True):
                 }
         return None
 
+    # Whole-mesh context is read in bulk: a per-element Python loop here ran on
+    # every redraw and stalled the viewport on dense meshes.
     mesh = obj.data
-    object_edges = (
-        [
-            matrix @ mesh.vertices[vertex_index].co
-            for edge in mesh.edges
-            if not edge.hide
-            for vertex_index in edge.vertices
-        ]
-        if include_object_context
-        else []
-    )
-    object_vertices = (
-        [matrix @ vertex.co for vertex in mesh.vertices if not vertex.hide]
-        if include_object_context
-        else []
-    )
+    object_edges = object_vertices = ()
+    if include_object_context and len(mesh.edges) <= SNAP_CONTEXT_EDGE_LIMIT:
+        coordinates, edges, visible_vertices = _mesh_highlight_arrays(mesh)
+        rotation = np.array(matrix.to_3x3(), dtype=np.float32)
+        world = coordinates @ rotation.T + np.array(matrix.translation, dtype=np.float32)
+        object_edges = world[edges.ravel()]
+        object_vertices = world[visible_vertices]
     if snap_type == "VERTEX":
         index = snap.get("vertex_index", -1)
         if 0 <= index < len(mesh.vertices):
+            _coordinates, edges, _visible_vertices = _mesh_highlight_arrays(mesh)
             connected_edges = [
-                matrix @ mesh.vertices[vertex_index].co
-                for edge in mesh.edges
-                if not edge.hide and index in edge.vertices
-                for vertex_index in edge.vertices
+                matrix @ mesh.vertices[int(vertex_index)].co
+                for vertex_index in edges[(edges == index).any(axis=1)].ravel()
             ]
             return {
                 "kind": "VERTEX",
@@ -909,6 +876,42 @@ def _snap_highlight_geometry(context, snap, include_object_context=True):
                 "object_vertices": object_vertices,
             }
     return None
+
+
+def _mesh_highlight_arrays(mesh):
+    """Return local vertex coordinates, unhidden edge pairs, and an unhidden-vertex mask.
+
+    Reading edges costs tens of milliseconds on dense meshes, so the arrays are
+    kept until the next depsgraph update instead of being read on every redraw.
+    """
+    key = (mesh.as_pointer(), len(mesh.vertices), len(mesh.edges))
+    arrays = _mesh_highlight_cache.get(key)
+    if arrays is None:
+        coordinates = np.empty((len(mesh.vertices), 3), dtype=np.float32)
+        mesh.vertices.foreach_get("co", coordinates.reshape(-1))
+        edges = np.empty((len(mesh.edges), 2), dtype=np.int32)
+        mesh.edges.foreach_get("vertices", edges.reshape(-1))
+        edges = edges[~_hidden_flags(mesh, ".hide_edge", "EDGE", len(mesh.edges))]
+        visible_vertices = ~_hidden_flags(mesh, ".hide_vert", "POINT", len(mesh.vertices))
+        if len(_mesh_highlight_cache) >= 4:
+            _mesh_highlight_cache.clear()
+        arrays = _mesh_highlight_cache[key] = (coordinates, edges, visible_vertices)
+    return arrays
+
+
+def _hidden_flags(mesh, attribute_name, domain, count):
+    # The hide attributes exist only while something is hidden, and read in bulk
+    # far faster than the per-element ``hide`` properties.
+    hidden = np.zeros(count, dtype=bool)
+    attribute = mesh.attributes.get(attribute_name)
+    if (
+        attribute is not None
+        and attribute.data_type == "BOOLEAN"
+        and attribute.domain == domain
+        and len(attribute.data) == count
+    ):
+        attribute.data.foreach_get("value", hidden)
+    return hidden
 
 
 def _draw_interaction_status(state):
@@ -1243,6 +1246,11 @@ def _draw_preview(context, shader, preview_state):
     )
     if world_geometry is None:
         return
+    placement_offset = Vector(preview_state.get("presentation_offset", (0.0, 0.0, 0.0)))
+    if placement_offset.length_squared > 1e-12:
+        world_geometry = dict(world_geometry)
+        for key in ("line_start_world", "line_end_world", "line_mid_world"):
+            world_geometry[key] = world_geometry[key] + placement_offset
 
     screen_geometry = _project_dimension_geometry(
         context,

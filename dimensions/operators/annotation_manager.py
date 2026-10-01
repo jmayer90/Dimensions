@@ -16,7 +16,11 @@ from ..properties import (
     is_guide_object,
     is_read_only_dimensions_object,
 )
-from ..collections import remove_guide_point_snap_proxies, remove_measurement_snap_proxies
+from ..collections import (
+    detach_annotations_from,
+    remove_guide_point_snap_proxies,
+    remove_measurement_snap_proxies,
+)
 from ..drawing import set_preview_state
 from ..area_binding import evaluate_area_binding
 from ..repair import repair_issues
@@ -37,6 +41,8 @@ def _select_only(context, obj):
 
 
 def _remove_managed_object(obj):
+    if is_guide_object(obj):
+        detach_annotations_from((obj,))
     if is_guide_object(obj) and getattr(obj.guide_props, "kind", "GUIDE") == "MEASUREMENT":
         remove_measurement_snap_proxies(obj)
     if is_guide_object(obj) and getattr(obj.guide_props, "kind", "GUIDE") == "POINT":

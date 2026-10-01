@@ -1,4 +1,5 @@
 import bpy
+from mathutils import Vector
 
 from ..interaction import modal_cleanup_on_exception
 from ..viewport_state import viewport_key
@@ -10,12 +11,15 @@ from ..drawing import clear_measure_state, set_measure_state
 from ..interaction import (
     set_tool_status_text,
     axis_from_event,
-    axis_from_mouse_direction,
+    axis_label,
+    axis_world_direction,
+    continues_typed_distance,
     continuous_placement_enabled,
     constrained_delta,
     is_confirm_event,
     is_navigation_event,
     push_undo_step,
+    refuse_newer_scene,
     remember_session_context,
     session_axis,
     session_context_changed,
@@ -43,6 +47,8 @@ class _MeasureTool:
         if context.area is None or context.area.type != "VIEW_3D" or context.mode not in {"OBJECT", "EDIT_MESH"}:
             self.report(messages.WARNING, messages.MEASURE_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
+        if self.persistent_mode and refuse_newer_scene(self, context):
+            return {"CANCELLED"}
 
         self.state = "PICK_START"
         self.axis = session_axis(context)
@@ -53,7 +59,6 @@ class _MeasureTool:
         self.hover_snap = None
         self.distance_text = ""
         self.distance_input_valid = True
-        self.axis_gesture_active = False
         self.inference_session = InferenceSession()
         self.completed_start_world = None
         self.completed_end_world = None
@@ -83,10 +88,11 @@ class _MeasureTool:
         if self.continuous_placement and session_context_changed(self, context):
             clear_measure_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if handle_snap_target_event(context, event):
+        typing = continues_typed_distance(self.distance_text, event)
+        if not typing and handle_snap_target_event(context, event):
             self._update_overlay(context)
             return {"RUNNING_MODAL"}
-        if handle_inference_event(self.inference_session, event):
+        if not typing and handle_inference_event(self.inference_session, event):
             self._update_overlay(context)
             return {"RUNNING_MODAL"}
         action = modal_action_from_event(event)
@@ -95,23 +101,12 @@ class _MeasureTool:
         if not self.persistent_mode and action == "COPY_TRANSIENT_MEASURE":
             return self._copy_transient(context)
 
-        if event.type == "MIDDLEMOUSE" and self.state == "PICK_END":
-            if event.value == "PRESS":
-                self.axis_gesture_active = True
-                self._update_axis_gesture(context, event)
-                self._update_overlay(context)
-                return {"RUNNING_MODAL"}
-            if event.value == "RELEASE" and self.axis_gesture_active:
-                self.axis_gesture_active = False
-                self._update_overlay(context)
-                return {"RUNNING_MODAL"}
-
         axis = axis_from_event(event)
         if axis is not None:
             self.axis = cycle_local_axis(self.axis, axis, context)
             self._update_effective_end(context)
             self._update_overlay(context)
-            self.report(messages.INFO, messages.measurement_direction(self.axis.title()))
+            self.report(messages.INFO, messages.measurement_direction(axis_label(self.axis)))
             return {"RUNNING_MODAL"}
 
         if self.state == "PICK_END":
@@ -123,8 +118,6 @@ class _MeasureTool:
                 return {"RUNNING_MODAL"}
 
         if event.type == "MOUSEMOVE":
-            if self.axis_gesture_active:
-                self._update_axis_gesture(context, event)
             self.hover_snap = self._find_snap(context, event)
             self._update_effective_end(context)
             self._update_overlay(context)
@@ -184,22 +177,25 @@ class _MeasureTool:
             return
         raw_delta = self.hover_snap["world_co"] - self.start_world
         direction = constrained_delta(raw_delta, self.axis, context)
+        if not self.distance_text.strip():
+            self.distance_input_valid = True
+            self.end_world = self.start_world + direction
+            return
+        try:
+            distance = parse_distance_input(context, self.distance_text)
+        except (TypeError, ValueError):
+            self.distance_input_valid = False
+            self.end_world = self.start_world + direction
+            return
+        self.distance_input_valid = True
+        if direction.length < 1e-8:
+            # A locked axis gives a typed distance its direction even while the
+            # cursor still rests on the first point.
+            direction = axis_world_direction(context, self.axis) or Vector()
         if direction.length < 1e-8:
             self.end_world = self.start_world.copy()
             return
-        if self.distance_text.strip():
-            try:
-                distance = parse_distance_input(context, self.distance_text)
-            except (TypeError, ValueError):
-                self.distance_input_valid = False
-                self.end_world = self.start_world + direction
-                return
-            self.distance_input_valid = True
-            direction.normalize()
-            self.end_world = self.start_world + direction * distance
-        else:
-            self.distance_input_valid = True
-            self.end_world = self.start_world + direction
+        self.end_world = self.start_world + direction.normalized() * distance
 
     def _commit(self, context):
         self._update_effective_end(context)
@@ -232,6 +228,8 @@ class _MeasureTool:
         return {"RUNNING_MODAL"}
 
     def _save_transient(self, context):
+        if refuse_newer_scene(self, context):
+            return {"RUNNING_MODAL"}
         segment = self._current_segment(context, allow_completed=True)
         if segment is None:
             self.report(messages.WARNING, messages.MEASUREMENT_REQUIRED_TO_SAVE)
@@ -272,16 +270,6 @@ class _MeasureTool:
             context.view_layer.objects.active = obj
         return obj
 
-    def _update_axis_gesture(self, context, event):
-        axis = axis_from_mouse_direction(
-            context,
-            self.start_world,
-            event.mouse_region_x,
-            event.mouse_region_y,
-        )
-        if axis is not None:
-            self.axis = axis
-
     def _clear(self, context):
         self.state = "PICK_START"
         self.start_world = None
@@ -289,7 +277,6 @@ class _MeasureTool:
         self.end_world = None
         self.distance_text = ""
         self.distance_input_valid = True
-        self.axis_gesture_active = False
         self.inference_session.clear()
         self.completed_start_world = None
         self.completed_end_world = None
@@ -314,7 +301,6 @@ class _MeasureTool:
             "axis": self.axis,
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
-            "axis_gesture_active": self.axis_gesture_active,
             "continuous_placement": self.continuous_placement,
             "transient_measure": not self.persistent_mode,
         }
@@ -330,12 +316,10 @@ class _MeasureTool:
         if display_segment is not None:
             state["start_world"] = display_segment[0]
             state["end_world"] = display_segment[1]
-            state["axis_origin_world"] = display_segment[0]
             if not self.persistent_mode:
                 state["measurement_lines"] = self._formatted_query(context, *display_segment)["lines"]
         elif self.start_world is not None:
             state["start_world"] = self.start_world
-            state["axis_origin_world"] = self.start_world
         if self.start_snap is not None:
             state["locked_snaps"] = [copy_snap(self.start_snap)]
         set_measure_state(state, context)

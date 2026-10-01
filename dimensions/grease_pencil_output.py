@@ -240,7 +240,8 @@ def generate_grease_pencil_output(scene, spec):
     data = None
     output_object = None
     try:
-        data = _build_data(spec, scene.frame_current)
+        # A Grease Pencil drawing shows nothing before its first keyframe.
+        data = _build_data(spec, min(scene.frame_start, scene.frame_current))
         object_name = f"{spec.name} [{spec.source_key}]"
         output_object = bpy.data.objects.new(object_name, data)
         output_object[GENERATED_OUTPUT_TAG] = True

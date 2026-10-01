@@ -9,19 +9,29 @@ from mathutils import Vector
 from .. import messages
 from mathutils.geometry import intersect_line_line
 
-from ..anchors import resolve_anchor, set_object_anchor
-from ..area_binding import bind_area_face_indices, evaluate_area_binding, evaluate_area_face_indices
+from ..anchors import is_construction_grid, resolve_anchor, set_object_anchor
+from ..area_binding import (
+    area_source_is_read_only,
+    bind_area_face_indices,
+    evaluate_area_binding,
+    evaluate_area_face_indices,
+)
 from ..collections import create_dimension_object
 from ..constants import DEFAULT_OFFSET_DISTANCE
 from ..drawing import clear_preview_state, set_preview_state
 from ..interaction import (
     axis_from_event,
     axis_world_direction,
+    continues_typed_distance,
     continuous_placement_enabled,
+    is_confirm_event,
+    is_navigation_event,
     push_undo_step,
+    refuse_newer_scene,
     remember_session_context,
     session_axis,
     session_context_changed,
+    set_tool_status_text,
     update_distance_text,
 )
 from ..manipulation import apply_area_label_position
@@ -93,6 +103,8 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         if context.mode not in {"OBJECT", "EDIT_MESH"}:
             self.report(messages.WARNING, messages.AREA_REQUIRE_SUPPORTED_MODE)
             return {"CANCELLED"}
+        if refuse_newer_scene(self, context):
+            return {"CANCELLED"}
         self.target_name = ""
         if self.replace_active:
             active = context.view_layer.objects.active
@@ -126,6 +138,11 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         remember_session_context(self, context)
         self._update_preview()
         context.window_manager.modal_handler_add(self)
+        set_tool_status_text(
+            context,
+            "Area: click a face (Shift-click adds faces, Enter continues), then click to place the label · "
+            "X/Y/Z lock direction · type a distance · S cycles snapping · Backspace steps back · Esc exits",
+        )
         return {"RUNNING_MODAL"}
 
     @modal_cleanup_on_exception
@@ -143,7 +160,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         if self.continuous_placement and session_context_changed(self, context):
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if handle_snap_target_event(context, event):
+        if not continues_typed_distance(self.distance_text, event) and handle_snap_target_event(context, event):
             self._update_preview()
             return {"RUNNING_MODAL"}
         axis = axis_from_event(event)
@@ -201,7 +218,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
             if self.state == "PICK_FACE":
                 return self._accept_face(context, event)
             return self._commit(context)
-        if event.type in {"RET", "NUMPAD_ENTER"} and event.value == "PRESS":
+        if is_confirm_event(event):
             if self.state == "PICK_FACE" and self.face_indices:
                 self.area_result = evaluate_area_face_indices(self.source_object, self.face_indices)
                 if self.area_result is not None:
@@ -209,6 +226,10 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
                     self._update_preview()
             elif self.state == "PLACE_LABEL" and self.label_snap is not None:
                 return self._commit(context)
+            return {"RUNNING_MODAL"}
+        if event.type in {"BACK_SPACE", "DEL"} and event.value == "PRESS":
+            self._step_back(context)
+            self._update_preview()
             return {"RUNNING_MODAL"}
         if event.type == "ESC" and event.value == "PRESS":
             if self.continuous_placement:
@@ -221,9 +242,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
                 self._update_effective_label(context)
                 self._update_preview()
                 return {"RUNNING_MODAL"}
-            if self.state == "PLACE_LABEL" and context.mode == "OBJECT":
-                self.state = "PICK_FACE"
-                self.label_snap = None
+            if self._step_back(context):
                 self._update_preview()
                 return {"RUNNING_MODAL"}
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
@@ -231,15 +250,42 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         if event.type == "RIGHTMOUSE" and event.value == "PRESS":
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+        if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
     def cancel(self, _context):
         clear_preview_state(key=getattr(self, "_session_viewport_key", None))
 
+    def _prompt(self):
+        if self.state == "PLACE_LABEL":
+            return "Click to place the label"
+        if self.face_indices:
+            return "Shift-click more faces, or press Enter to place the label"
+        return "Click a face; Shift-click adds more"
+
+    def _step_back(self, context):
+        """Return to face picking with nothing picked, or return False when there is nothing to undo."""
+        if self.state == "PLACE_LABEL" and context.mode != "OBJECT":
+            # In Edit Mode the faces came from the selection; there is no pick to step back to.
+            return False
+        if self.state == "PICK_FACE" and not self.face_indices:
+            return False
+        self.state = "PICK_FACE"
+        self.source_object = None
+        self.face_indices = []
+        self.area_result = None
+        self.label_snap = None
+        self.distance_text = ""
+        self.typed_distance = None
+        self.distance_input_valid = True
+        return True
+
     def _accept_face(self, context, event):
         snap = self.hover_snap
+        if snap is not None and (snap.get("guide_plane") or is_construction_grid(snap.get("object"))):
+            # Construction grids are never Area sources; use the model surface under the cursor.
+            snap = None
         source = None if snap is None else snap.get("object")
         face_index = -1 if snap is None else snap.get("face_index", -1)
         if source is None or face_index < 0:
@@ -249,6 +295,9 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
                 face_index = hit.get("face_index", -1)
         if source is None or source.type != "MESH" or face_index < 0:
             self.report(messages.WARNING, messages.POINT_BASE_MESH_FACE)
+            return {"RUNNING_MODAL"}
+        if area_source_is_read_only(source):
+            self.report(messages.WARNING, messages.AREA_SOURCE_LINKED)
             return {"RUNNING_MODAL"}
         if source.modifiers and context.mode == "OBJECT":
             self.report(messages.WARNING, messages.AREA_BASE_MESH_REQUIRED)
@@ -282,12 +331,16 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         if self.label_snap is None or self.source_object is None or self.area_result is None:
             return {"RUNNING_MODAL"}
         annotation = bpy.data.objects.get(self.target_name) if self.target_name else None
-        if annotation is None:
+        created = annotation is None
+        if created:
             annotation = create_dimension_object(context, "AREA Faces")
         props = annotation.dimension_props
         props.annotation_kind = "AREA"
         result = bind_area_face_indices(props, self.source_object, self.face_indices)
         if result is None:
+            if created:
+                # Never leave an empty annotation behind when its faces cannot be bound.
+                bpy.data.objects.remove(annotation, do_unlink=True)
             self.report(messages.WARNING, messages.AREA_SOURCE_INVALID)
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
@@ -327,6 +380,7 @@ class DIMENSIONS_OT_CreateArea(bpy.types.Operator):
         preview = {
             "state": self.state,
             "annotation_kind": "AREA",
+            "prompt": self._prompt(),
             "axis": self.placement_axis,
             "distance_text": self.distance_text,
             "distance_input_valid": self.distance_input_valid,
@@ -417,6 +471,11 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
         self.typed_distance = None
         self._update_preview(context)
         context.window_manager.modal_handler_add(self)
+        set_tool_status_text(
+            context,
+            "Move Area Label: click to place the label · X/Y/Z lock direction · type a distance · "
+            "S cycles snapping · Esc cancels",
+        )
         return {"RUNNING_MODAL"}
 
     @modal_cleanup_on_exception
@@ -432,7 +491,7 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
         if annotation is None or not has_view3d_window_region(context):
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if handle_snap_target_event(context, event):
+        if not continues_typed_distance(self.distance_text, event) and handle_snap_target_event(context, event):
             self._update_preview(context)
             return {"RUNNING_MODAL"}
         result = evaluate_area_binding(annotation.dimension_props)
@@ -501,7 +560,7 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
         if event.type in {"RIGHTMOUSE", "ESC"} and event.value == "PRESS":
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+        if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
@@ -520,6 +579,7 @@ class DIMENSIONS_OT_MoveAreaLabel(bpy.types.Operator):
         set_preview_state({"viewport_key": getattr(self, "_session_viewport_key", None),
             "state": "MOVE_AREA_LABEL",
             "annotation_kind": "AREA",
+            "prompt": "Click to place the label",
             "start_world": result["center"],
             "end_world": end,
             "area_value": result["area"],

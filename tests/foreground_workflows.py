@@ -14,7 +14,9 @@ The script exits with status 1 when any check fails and prints one line per chec
 
 import os
 import sys
+import time
 import traceback
+from math import degrees
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -396,9 +398,261 @@ def isolate_restore():
 
 
 @step
-def finish():
+def clear_for_release_checks():
     managed = annotations() + construction("GUIDE") + construction("POINT") + construction("PLANE")
     report("exit isolate restores visibility", not any(obj.hide_get() for obj in managed))
+    with viewport_override():
+        bpy.ops.dimensions.clear_guides()
+    report("clear guides removes every guide and grid", not construction("GUIDE") + construction("POINT") + construction("PLANE"))
+    VALUES["dimensions"] = len(annotations())
+    invoke("dimensions.create_dimension")
+
+
+@step
+def typed_axis_first_point():
+    press("X")
+    click(TOP_FRONT_LEFT, (1, 1))
+
+
+@step
+def typed_axis_distance():
+    press("TWO", "2")
+    press("RET")
+
+
+@step
+def typed_axis_place():
+    state = tool_state("DIMENSION") or {}
+    report("a locked axis gives a typed distance its direction", state.get("state") == "SET_OFFSET", state.get("state"))
+    click((0, -1.8, 1))
+
+
+@step
+def typed_axis_check():
+    created = annotations()[VALUES["dimensions"]:]
+    span = None
+    if len(created) == 1:
+        props = created[0].dimension_props
+        span = Vector(props.end.world_co) - Vector(props.start.world_co)
+    report("typing 2 with X locked makes a 2 m dimension", span is not None and (span - Vector((2, 0, 0))).length < 1e-4, span)
+    press("ESC")
+
+
+@step
+def angle_start():
+    VALUES["angles"] = len(annotations("ANGLE"))
+    invoke("dimensions.create_angle")
+    move((0, -1, 1), (0, 1))
+
+
+@step
+def angle_first_edge():
+    state = tool_state("DIMENSION") or {}
+    report("angle names its next step", state.get("prompt") == "Click the first edge", state.get("prompt"))
+    click((0, -1, 1), (0, 1))
+
+
+@step
+def angle_second_edge():
+    click((-1, 0, 1), (1, 0))
+
+
+@step
+def angle_place():
+    click((-0.4, -0.4, 1))
+
+
+@step
+def angle_check():
+    from dimensions.angle_binding import resolve_angle_source
+
+    created = annotations("ANGLE")[VALUES["angles"]:]
+    source = None if len(created) != 1 else resolve_angle_source(created[0].dimension_props)
+    value = None if source is None else round(degrees(source["value"]), 3)
+    report("angle between two cube edges is 90 degrees", value == 90.0, value)
+    press("ESC")
+
+
+@step
+def object_area_start():
+    VALUES["areas"] = len(annotations("AREA"))
+    invoke("dimensions.create_area")
+    move((0.3, 0.3, 1))
+
+
+@step
+def object_area_pick():
+    click((0.3, 0.3, 1))
+
+
+@step
+def object_area_place():
+    state = tool_state("DIMENSION") or {}
+    report("area names its label step", state.get("prompt") == "Click to place the label", state.get("prompt"))
+    click((1.8, -1.8, 1.0))
+
+
+@step
+def object_area_check():
+    created = annotations("AREA")[VALUES["areas"]:]
+    value = None if len(created) != 1 else round(created[0].dimension_props.area_value, 4)
+    report("object-mode area of the top face is 4", value == 4.0, value)
+    press("ESC")
+
+
+@step
+def followed_point_start():
+    from dimensions.collections import create_guide_point_object, ensure_guide_point_snap_proxy
+
+    with viewport_override():
+        point = create_guide_point_object(bpy.context, "POINT Followed", location=Vector((-1.0, -2.5, 1.0)))
+        ensure_guide_point_snap_proxy(point, bpy.context.scene)
+    VALUES["point"] = point.name
+    VALUES["dimensions"] = len(annotations())
+    invoke("dimensions.create_dimension")
+    move((-1.0, -2.5, 1.0), (1, 1))
+
+
+@step
+def followed_point_first():
+    state = tool_state("DIMENSION") or {}
+    report("a guide point is a snap target", state.get("hover_label") == "Guide Point", state.get("hover_label"))
+    click((-1.0, -2.5, 1.0), (1, 1))
+
+
+@step
+def followed_point_second():
+    click(TOP_FRONT_RIGHT, (-1, 1))
+
+
+@step
+def followed_point_place():
+    click((0.0, -3.2, 1.0))
+
+
+@step
+def followed_point_move():
+    press("ESC")
+    created = annotations()[VALUES["dimensions"]:]
+    VALUES["followed"] = created[0].name if len(created) == 1 else None
+    point = bpy.data.objects[VALUES["point"]]
+    for obj in bpy.context.selected_objects:
+        obj.select_set(False)
+    point.select_set(True)
+    bpy.context.view_layer.objects.active = point
+    with viewport_override():
+        bpy.ops.transform.translate(value=(0.0, 0.0, 1.5))
+
+
+@step
+def followed_point_check():
+    from dimensions.anchors import resolve_anchor
+
+    dimension = bpy.data.objects.get(VALUES["followed"] or "")
+    start = None if dimension is None else resolve_anchor(dimension.dimension_props.start)
+    report(
+        "a dimension follows the guide point it was snapped to",
+        start is not None and (start - Vector((-1.0, -2.5, 2.5))).length < 1e-4,
+        None if start is None else tuple(round(value, 4) for value in start),
+    )
+    VALUES["guides"] = len(construction("GUIDE"))
+    invoke("dimensions.create_offset_guide")
+
+
+@step
+def feet_offset_edge():
+    click((0, -1, -1))
+
+
+@step
+def feet_offset_hover():
+    move((0, -2, -1))
+
+
+@step
+def feet_offset_type():
+    for key, character in (("TWO", "2"), ("F", "f"), ("T", "t")):
+        press(key, character)
+
+
+@step
+def feet_offset_confirm():
+    state = tool_state("GUIDE") or {}
+    report("unit letters stay part of a typed distance", state.get("distance_text") == "2ft", state.get("distance_text"))
+    press("RET")
+
+
+@step
+def feet_offset_check():
+    created = construction("GUIDE")
+    distance = None
+    if len(created) == VALUES["guides"] + 1:
+        origin, direction = guide_line_world(created[-1])
+        relative = origin - Vector((0, -1, -1))
+        distance = (relative - direction * relative.dot(direction)).length
+    report("offset guide typed as 2ft is 0.6096 m from the edge", distance is not None and abs(distance - 0.6096) < 1e-4, distance)
+    press("ESC")
+
+
+@step
+def middle_mouse_start():
+    invoke("dimensions.measure")
+    click(TOP_FRONT_LEFT, (1, 1))
+
+
+@step
+def middle_mouse_drag():
+    window, _area, region = view3d()
+    x, y = region.x + region.width // 2, region.y + region.height // 2
+    window.event_simulate(type="MIDDLEMOUSE", value="PRESS", x=x, y=y)
+    for offset in range(20, 180, 20):
+        window.event_simulate(type="MOUSEMOVE", value="NOTHING", x=x + offset, y=y)
+    window.event_simulate(type="MIDDLEMOUSE", value="RELEASE", x=x + 160, y=y)
+
+
+@step
+def middle_mouse_check():
+    # The event simulator cannot drive view navigation itself; the modal tests check
+    # that middle mouse passes through. Here it must not lock an axis.
+    state = tool_state("MEASURE") or {}
+    report("middle drag leaves Measure running without locking an axis", state.get("axis") == "ALIGNED", state.get("axis"))
+    press("ESC")
+
+
+@step
+def dense_mesh_start():
+    mesh = bpy.data.meshes.new("Dense Sphere")
+    sphere = bmesh.new()
+    bmesh.ops.create_icosphere(sphere, subdivisions=7, radius=1.5)
+    sphere.to_mesh(mesh)
+    sphere.free()
+    dense = bpy.data.objects.new("Dense Sphere", mesh)
+    dense.location = (0.0, 0.0, 3.5)
+    bpy.context.scene.collection.objects.link(dense)
+    VALUES["dense"] = dense.name
+    invoke("dimensions.measure")
+
+
+@step
+def dense_mesh_hover():
+    move((0.0, -1.5, 3.5))
+
+
+@step
+def dense_mesh_redraw():
+    state = tool_state("MEASURE") or {}
+    hover = state.get("hover_snap")
+    report("hovering a dense mesh finds a snap", hover is not None and getattr(hover.get("object"), "name", "") == VALUES["dense"])
+    with viewport_override():
+        started = time.perf_counter()
+        bpy.ops.wm.redraw_timer(type="DRAW", iterations=20)
+        per_redraw = (time.perf_counter() - started) / 20.0
+    report("hovering a dense mesh keeps redraws interactive", per_redraw < 0.05, f"{per_redraw * 1000:.1f} ms per redraw")
+    press("ESC")
+
+
+@step
+def finish():
     failed = [name for name, passed in RESULTS.items() if not passed]
     print(f"Foreground workflows: {len(RESULTS) - len(failed)} passed, {len(failed)} failed", flush=True)
     os._exit(1 if failed else 0)

@@ -22,13 +22,13 @@ SELECT_TWO_NON_PARALLEL_EDGES = "Select two non-parallel edges"
 POINT_NON_PARALLEL_EDGES = "Point at two non-parallel, non-degenerate edges"
 SELECT_ONE_EDGE = "Select exactly one edge"
 SELECT_ONE_OR_MORE_FACES = "Select one or more faces"
-SELECT_AREA_BEFORE_SOURCES = "Select an Area annotation before choosing its source faces"
 SELECT_AREA_SOURCES = "Select one or more source faces"
 AREA_FACES_UNMEASURABLE = "Select faces with measurable area"
 AREA_BASE_MESH_REQUIRED = "Choose a face on an object without modifiers"
 AREA_SINGLE_OBJECT_REQUIRED = "Choose faces from one object for each Area annotation"
 AREA_SOURCE_INVALID = "Repair the Area source, then create or move its label"
 DIFFERENT_END_POINT_REQUIRED = "Choose a different end point"
+TYPED_DISTANCE_DIRECTION_REQUIRED = "Move the pointer toward the end point to give the distance a direction"
 DIMENSION_OFFSET_PLANE_REQUIRED = "Adjust the view and choose two distinct points before placing the dimension"
 GUIDE_DIRECTION_DISTANCE_REQUIRED = "Choose a direction and a non-zero guide distance"
 MEASUREMENT_DIRECTION_DISTANCE_REQUIRED = "Choose a direction and a non-zero measurement distance"
@@ -61,17 +61,21 @@ MEASUREMENT_REQUIRED_TO_SAVE = "Acquire a non-zero measurement before saving or 
 OUTPUT_NO_ANNOTATIONS = "No visible annotations match the output scope"
 OUTPUT_CAMERA_REQUIRED = "Set an active camera for Camera Relative output sizing"
 OUTPUT_NO_VALID_ANNOTATIONS = "No valid annotations could be generated"
-OUTPUT_AREA_REPAIR_REQUIRED = "Repair skipped Area sources before generating output"
+OUTPUT_REPAIR_REQUIRED = "Repair or confirm the sources of skipped annotations before generating output"
 VECTOR_CAMERA_REQUIRED = "Set an active camera before exporting SVG or PDF"
 VECTOR_NO_VALID_ANNOTATIONS = "No valid visible annotations are available for vector export"
 CREATED_GUIDE_PLANE = "Created guide plane"
-SELECT_FACE_FOR_PLANE = "Select a mesh face for the construction plane"
+SELECT_FACE_FOR_PLANE = "Pick a face with a measurable area for the guide plane"
 AREA_MODIFIER_IDENTITY_UNRESOLVED = "Modifier faces lack unique source IDs; disable the modifier or capture the base value"
+AREA_SOURCE_LINKED = "Make the linked source mesh local before using its faces for an Area"
+AREA_SOURCE_HIDDEN = "Show the Area source object in this view layer, then select its faces"
+SELECT_ONE_AREA_FOR_SOURCES = "Select one Area annotation together with its source mesh, then apply the selected faces"
 CONSTRUCTION_REQUIRE_SUPPORTED_MODE = "Switch to Object or Mesh Edit Mode to place construction guides"
 GUIDE_PLANE_POINTS_INVALID = "Pick three different points that are not in a straight line"
 OFFSET_SOURCE_REQUIRED = "Click an edge, guide line, or measurement to offset"
 OFFSET_DISTANCE_REQUIRED = "Choose a point away from the source line or type a distance"
 MANAGER_SCOPE_EMPTY = "Select annotations in the viewport or choose All Listed"
+SCENE_SCHEMA_NEWER = "This scene was saved by a newer Dimensions; update the add-on before adding annotations here"
 
 
 def invalid_distance(value):
@@ -176,10 +180,12 @@ def generated_output(generated, skipped=0, skipped_repair=0, removed=0):
     return message
 
 
-def exported_vector(format_label, exported, skipped=0):
+def exported_vector(format_label, exported, skipped=0, outside=0):
     message = f"Exported {exported} annotation(s) to {format_label}"
     if skipped:
         message += f"; skipped {skipped} fallback or repair annotation(s)"
+    if outside:
+        message += f"; {outside} annotation(s) lie outside the camera frame"
     return message
 
 

@@ -42,7 +42,7 @@ def _copy_style(source, target):
 
 
 def assign_style_to_annotations(settings, objects, style_name, *, clear_overrides=False):
-    """Assignment seam used now by selection and later by UX-02 filtered sets."""
+    """Assign a named style to the given annotations, skipping linked ones."""
     if style_name and find_annotation_style(settings, style_name) is None:
         return 0
     count = 0

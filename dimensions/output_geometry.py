@@ -73,6 +73,38 @@ class LinearLabelLayout:
     dimension_line_strokes: tuple = ()
 
 
+def _reading_view_axes(camera, label_normal):
+    """Return the right, up, and toward-viewer axes a label is read in."""
+    if camera is not None and getattr(camera, "type", None) == "CAMERA":
+        rotation = camera.matrix_world.to_quaternion()
+        return (
+            rotation @ Vector((1.0, 0.0, 0.0)),
+            rotation @ Vector((0.0, 1.0, 0.0)),
+            rotation @ Vector((0.0, 0.0, 1.0)),
+        )
+    # Without a camera, read the label from Blender's Top, Front, or Right view,
+    # whichever looks most directly at the label plane, as a drafter would.
+    dominant_axis = max(range(3), key=lambda index: abs(label_normal[index]))
+    if dominant_axis == 2:
+        return Vector((1.0, 0.0, 0.0)), Vector((0.0, 1.0, 0.0)), Vector((0.0, 0.0, 1.0))
+    if dominant_axis == 1:
+        return Vector((1.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0)), Vector((0.0, -1.0, 0.0))
+    return Vector((0.0, 1.0, 0.0)), Vector((0.0, 0.0, 1.0)), Vector((1.0, 0.0, 0.0))
+
+
+def _readable_axes(x_axis, y_axis, camera=None):
+    """Flip label axes so text is neither mirrored nor upside down, like the overlay."""
+    x_axis = Vector(x_axis)
+    y_axis = Vector(y_axis)
+    right, _up, toward_viewer = _reading_view_axes(camera, x_axis.cross(y_axis))
+    if x_axis.cross(y_axis).dot(toward_viewer) < 0.0:
+        y_axis.negate()
+    if x_axis.dot(right) < -1e-6:
+        x_axis.negate()
+        y_axis.negate()
+    return x_axis, y_axis
+
+
 def _camera_axes(camera, fallback_x, fallback_y):
     """Return stable world-space axes for vector labels facing the camera."""
     if camera is not None and getattr(camera, "type", None) == "CAMERA":
@@ -93,7 +125,7 @@ def _camera_axes(camera, fallback_x, fallback_y):
     if y_axis.length <= 1e-6:
         y_axis = x_axis.orthogonal()
     y_axis.normalize()
-    return x_axis, y_axis
+    return _readable_axes(x_axis, y_axis)
 
 
 def _text_strokes_at(text, position, text_height, line_width, color, camera=None,
@@ -529,6 +561,7 @@ def linear_dimension_label_layout(
     if getattr(props, "label_orientation", "HORIZONTAL") == "ALIGNED":
         x_axis = line_direction
         y_axis = Vector(geometry["offset_direction_world"]).normalized()
+    x_axis, y_axis = _readable_axes(x_axis, y_axis, camera)
     projected = Vector((line_direction.dot(x_axis), line_direction.dot(y_axis)))
     projection_scale = projected.length
     if projection_scale <= 1e-6:

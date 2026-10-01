@@ -1,11 +1,19 @@
 """Shared modal input conventions for Dimensions viewport tools."""
 
 from mathutils import Vector
-from bpy_extras.view3d_utils import location_3d_to_region_2d
 
 
 CONFIRM_EVENTS = {"RET", "NUMPAD_ENTER"}
-NAVIGATION_EVENTS = {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}
+# View navigation passes through to Blender: mouse, trackpad, 3D mouse, and the
+# numpad view keys. Tools check typed input first, so a numpad digit that types a
+# distance is consumed before it could change the view.
+NAVIGATION_EVENTS = {
+    "MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE",
+    "TRACKPADPAN", "TRACKPADZOOM", "MOUSEROTATE", "MOUSESMARTZOOM", "NDOF_MOTION",
+    "NUMPAD_0", "NUMPAD_1", "NUMPAD_2", "NUMPAD_3", "NUMPAD_4", "NUMPAD_5",
+    "NUMPAD_6", "NUMPAD_7", "NUMPAD_8", "NUMPAD_9",
+    "NUMPAD_PERIOD", "NUMPAD_PLUS", "NUMPAD_MINUS", "HOME",
+}
 AXIS_EVENTS = {"A", "X", "Y", "Z"}
 
 
@@ -15,6 +23,21 @@ def session_axis(context):
 
     axis = getattr(get_preferences(context), "default_axis_mode", "ALIGNED")
     return axis if axis in {"ALIGNED", "X", "Y", "Z"} else "ALIGNED"
+
+
+def refuse_newer_scene(operator, context):
+    """Warn and return True when the scene was saved by a newer Dimensions.
+
+    Creation would otherwise stop with a traceback, because Dimensions never writes
+    data whose newer shape it does not understand.
+    """
+    from . import messages
+    from .migrations import scene_is_newer_than_supported
+
+    if scene_is_newer_than_supported(getattr(context, "scene", None)):
+        operator.report(messages.WARNING, messages.SCENE_SCHEMA_NEWER)
+        return True
+    return False
 
 
 def continuous_placement_enabled(context):
@@ -130,6 +153,16 @@ def axis_from_event(event):
     return None
 
 
+def continues_typed_distance(current_text, event):
+    """Return whether a key press extends a typed distance rather than acting as a shortcut.
+
+    Once a distance is being typed its letters spell a unit, as in ``2ft`` or
+    ``3 meters``, so single-letter shortcuts such as snap cycling must not take them.
+    """
+    character = getattr(event, "ascii", "")
+    return bool(current_text) and event.value == "PRESS" and bool(character) and character in _DISTANCE_CHARACTERS
+
+
 def update_distance_text(current_text, event):
     """Apply one Blender event to a typed distance, returning (text, handled)."""
     if event.value != "PRESS":
@@ -168,45 +201,3 @@ def axis_world_direction(_context, axis):
         "Y": Vector((0.0, 1.0, 0.0)),
         "Z": Vector((0.0, 0.0, 1.0)),
     }[axis]
-
-
-def nearest_axis_from_screen_vectors(mouse_delta, axis_vectors):
-    """Choose the projected global axis closest to a mouse-drag direction."""
-    mouse_delta = Vector(mouse_delta)
-    if mouse_delta.length < 1e-6:
-        return None
-    mouse_delta.normalize()
-    best = None
-    for axis, vector in axis_vectors.items():
-        vector = Vector(vector)
-        if vector.length < 1e-6:
-            continue
-        vector.normalize()
-        score = abs(mouse_delta.dot(vector))
-        if best is None or score > best[0]:
-            best = (score, axis)
-    return None if best is None else best[1]
-
-
-def axis_from_mouse_direction(context, origin_world, mouse_x, mouse_y):
-    if context.region is None or context.region_data is None or origin_world is None:
-        return None
-    origin_world = Vector(origin_world)
-    origin_screen = location_3d_to_region_2d(context.region, context.region_data, origin_world)
-    if origin_screen is None:
-        return None
-    scale = max(float(context.region_data.view_distance) * 0.25, 0.1)
-    directions = {axis: axis_world_direction(context, axis) for axis in ("X", "Y", "Z")}
-    axis_vectors = {}
-    for axis, direction in directions.items():
-        projected = location_3d_to_region_2d(
-            context.region,
-            context.region_data,
-            origin_world + direction * scale,
-        )
-        if projected is not None:
-            axis_vectors[axis] = projected - origin_screen
-    return nearest_axis_from_screen_vectors(
-        Vector((mouse_x, mouse_y)) - origin_screen,
-        axis_vectors,
-    )

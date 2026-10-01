@@ -3,6 +3,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import bpy
 from mathutils import Vector
@@ -13,7 +14,9 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 import dimensions
+from dimensions import output_geometry
 from dimensions.anchors import set_world_anchor
+from dimensions.stroke_font import text_strokes
 from dimensions.area_binding import bind_area_face_indices
 from dimensions.collections import create_dimension_object
 from dimensions.output_geometry import (
@@ -264,6 +267,55 @@ class DimensionsOutputGeometrySmokeTests(unittest.TestCase):
         props.custom_text_position = "BELOW"
         below = _linear_dimension_label_text(bpy.context, props, 4.0)
         self.assertTrue(below.endswith("\nNOTE"))
+
+    def _label_text_axes(self, build_label):
+        captured = []
+
+        def capturing_text_strokes(text, origin, x_axis, y_axis, height, align="CENTER"):
+            captured.append((Vector(x_axis), Vector(y_axis)))
+            return text_strokes(text, origin, x_axis, y_axis, height, align)
+
+        with patch.object(output_geometry, "text_strokes", capturing_text_strokes):
+            build_label()
+        self.assertTrue(captured)
+        return captured[-1]
+
+    def test_labels_are_neither_upside_down_nor_mirrored(self):
+        camera = bpy.data.objects.new("Output Geometry Top Camera", bpy.data.cameras.new("Output Geometry Top Camera"))
+        bpy.context.scene.collection.objects.link(camera)
+        self.created.append(camera)
+        camera.location = (0.0, 0.0, 10.0)
+        dimension = self._linear_dimension()
+        props = dimension.dimension_props
+        top_view = Vector((0.0, 0.0, 1.0))
+        front_view = Vector((0.0, -1.0, 0.0))
+        for orientation, label_camera, plane_normal, toward_viewer in (
+            ("ALIGNED", camera, (0.0, 0.0, 1.0), top_view),
+            ("ALIGNED", camera, (0.0, 0.0, -1.0), top_view),
+            ("HORIZONTAL", None, (0.0, 0.0, 1.0), top_view),
+            ("HORIZONTAL", None, (0.0, 0.0, -1.0), top_view),
+            ("HORIZONTAL", None, (0.0, 1.0, 0.0), front_view),
+            ("HORIZONTAL", None, (0.0, -1.0, 0.0), front_view),
+        ):
+            for start, end in (((0.0, 0.0, 0.0), (4.0, 0.0, 0.0)), ((4.0, 0.0, 0.0), (0.0, 0.0, 0.0))):
+                with self.subTest(orientation=orientation, camera=label_camera is not None, normal=plane_normal, start=start):
+                    props.label_orientation = orientation
+                    props.offset_plane_normal = plane_normal
+                    set_world_anchor(props.start, Vector(start))
+                    set_world_anchor(props.end, Vector(end))
+                    x_axis, y_axis = self._label_text_axes(lambda: linear_dimension_label_layout(
+                        self.context, dimension, 0.2, 0.01, 0.15, label_camera,
+                    ))
+                    self.assertGreater(x_axis.x, 0.5)
+                    self.assertGreater(x_axis.cross(y_axis).dot(toward_viewer), 0.5)
+
+        area = self._captured_area_dimension()
+        set_world_anchor(area.dimension_props.end, Vector((-2.0, 0.0, 0.0)))
+        x_axis, y_axis = self._label_text_axes(
+            lambda: area_dimension_label_strokes(self.context, area, 0.2, 0.01),
+        )
+        self.assertGreater(x_axis.x, 0.5)
+        self.assertGreater(y_axis.z, 0.5)
 
     def test_annotation_presentation_offset_moves_generated_linework(self):
         dimension = self._linear_dimension()

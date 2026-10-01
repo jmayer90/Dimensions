@@ -34,7 +34,7 @@ def ensure_vertex_id(mesh, vertex_index):
 
 
 def anchor_vertex_count(obj):
-    if obj.mode != "EDIT":
+    if not obj.data.is_editmode:
         return len(obj.data.vertices)
     import bmesh
 
@@ -51,7 +51,7 @@ def ensure_object_vertex_id(obj, vertex_index):
         if attribute is None or not (0 <= vertex_index < len(obj.data.vertices)):
             return 0
         return max(0, int(attribute.data[vertex_index].value))
-    if obj.mode != "EDIT":
+    if not obj.data.is_editmode:
         return ensure_vertex_id(obj.data, vertex_index)
     import bmesh
 
@@ -82,7 +82,7 @@ def set_anchor(anchor, obj, vertex_index):
     if vertex_index < 0 or vertex_index >= anchor_vertex_count(obj):
         raise ValueError("Anchor vertex index is out of range")
 
-    if obj.mode == "EDIT":
+    if obj.data.is_editmode:
         import bmesh
 
         bm = bmesh.from_edit_mesh(obj.data)
@@ -113,8 +113,8 @@ def set_world_anchor(anchor, world_co):
 
 
 def set_object_anchor(anchor, obj, world_co):
-    if obj is None or obj.type != "MESH":
-        raise ValueError("Object-point anchor target must be a mesh object")
+    if obj is None or not (obj.type == "MESH" or is_movable_guide(obj)):
+        raise ValueError("Object-point anchor target must be a mesh object, guide point, or guide line")
     local_co = obj.matrix_world.inverted_safe() @ Vector(world_co)
     anchor.anchor_type = "OBJECT_POINT"
     anchor.target_object = obj
@@ -136,6 +136,12 @@ def set_anchor_from_snap(anchor, snap):
         set_object_anchor(anchor, snap_object, snap["world_co"])
         return
 
+    guide = snap.get("guide_object")
+    if snap.get("type") in {"GUIDE_POINT", "GUIDE"} and is_movable_guide(guide):
+        # Guide points and lines are movable objects; what is snapped to them moves with them.
+        set_object_anchor(anchor, guide, snap["world_co"])
+        return
+
     if snap.get("type") == "VERTEX" and snap_object is not None:
         set_anchor(anchor, snap["object"], snap["vertex_index"])
         return
@@ -145,6 +151,12 @@ def set_anchor_from_snap(anchor, snap):
         return
 
     set_world_anchor(anchor, snap["world_co"])
+
+
+def is_movable_guide(obj):
+    """Return whether ``obj`` is a guide point or guide line that anchors can follow."""
+    props = getattr(obj, "guide_props", None)
+    return bool(props is not None and props.enabled and getattr(props, "kind", "GUIDE") in {"POINT", "GUIDE"})
 
 
 def is_construction_grid(obj):
@@ -169,10 +181,10 @@ def anchor_resolution(anchor):
         return Vector(anchor.world_co), "BY_ID"
 
     obj = anchor.target_object
+    if anchor_type == "OBJECT_POINT" and obj is not None and (obj.type == "MESH" or is_movable_guide(obj)):
+        return obj.matrix_world @ Vector(anchor.fallback_local_co), "BY_ID"
     if obj is None or obj.type != "MESH":
         return Vector(anchor.world_co), "UNRESOLVABLE"
-    if anchor_type == "OBJECT_POINT":
-        return obj.matrix_world @ Vector(anchor.fallback_local_co), "BY_ID"
 
     mesh = obj.data
     vertex_index = anchor.vertex_index
@@ -180,7 +192,8 @@ def anchor_resolution(anchor):
     attribute = mesh.attributes.get(VERTEX_ID_ATTRIBUTE)
     if attribute is not None and not _valid_vertex_id_attribute(attribute):
         return obj.matrix_world @ Vector(anchor.fallback_local_co), "BY_FALLBACK"
-    if obj.mode == "EDIT":
+    # A linked duplicate in Edit Mode puts the shared mesh in Edit Mode too.
+    if mesh.is_editmode:
         import bmesh
 
         bm = bmesh.from_edit_mesh(mesh)

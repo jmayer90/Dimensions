@@ -67,7 +67,9 @@ class DimensionsOutputSmokeTests(unittest.TestCase):
         self.assertEqual(output.data.stroke_depth_order, "3D")
         self.assertEqual(len(output.data.layers), 1)
         frame = output.data.layers[0].frames[0]
-        self.assertEqual(frame.frame_number, self.scene.frame_current)
+        self.assertEqual(
+            frame.frame_number, min(self.scene.frame_start, self.scene.frame_current),
+        )
         drawing = frame.drawing
         self.assertEqual(len(drawing.strokes), 2)
         self.assertEqual(len(drawing.strokes[0].points), 2)
@@ -76,8 +78,24 @@ class DimensionsOutputSmokeTests(unittest.TestCase):
         self.assertAlmostEqual(drawing.strokes[1].points[0].opacity, 0.75, places=6)
         self.assertEqual(len(output.data.materials), 2)
 
+    def test_output_generated_mid_timeline_is_visible_from_the_first_frame(self):
+        original_start = self.scene.frame_start
+        original_frame = self.scene.frame_current
+        try:
+            self.scene.frame_start = 1
+            self.scene.frame_set(10)
+            output = generate_grease_pencil_output(self.scene, self._spec())
+            self.created.append(output)
+            layer = output.data.layers[0]
+            self.assertEqual([frame.frame_number for frame in layer.frames], [1])
+            self.scene.frame_set(1)
+            self.assertIsNotNone(layer.current_frame())
+        finally:
+            self.scene.frame_start = original_start
+            self.scene.frame_set(original_frame)
+
     def test_same_source_key_replaces_without_duplicates(self):
-        first = generate_grease_pencil_output(self.scene, self._spec())
+        generate_grease_pencil_output(self.scene, self._spec())
         second = generate_grease_pencil_output(self.scene, self._spec())
         self.created.append(second)
 

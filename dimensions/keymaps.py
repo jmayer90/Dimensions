@@ -38,12 +38,8 @@ _MODAL_BINDINGS = (
     ("CONFIRM", "NUMPAD_ENTER"),
     ("CYCLE_SNAP_TARGETS", "S"),
     ("TOGGLE_INFERENCE_LOCK", "L"),
-    ("FLIP_OFFSET", "F"),
     ("SAVE_TRANSIENT_MEASURE", "P"),
     ("COPY_TRANSIENT_MEASURE", "C", {"ctrl": True}),
-    ("STEP_BACK", "BACK_SPACE"),
-    ("CANCEL", "ESC"),
-    ("CANCEL_IMMEDIATE", "RIGHTMOUSE"),
 )
 
 
@@ -56,6 +52,7 @@ class DIMENSIONS_OT_ModalAction(bpy.types.Operator):
 
     bl_idname = "dimensions.modal_action"
     bl_label = "Dimensions Modal Action"
+    bl_description = "A key that Dimensions tools respond to while they run; rebind it to change the key"
     bl_options = {"INTERNAL"}
 
     action: bpy.props.StringProperty(name="Action", default="")
@@ -122,6 +119,26 @@ def registered_keymap_items():
     return tuple((*_keymap_items, *_modal_keymap_items))
 
 
+_ACTION_LABELS = {
+    "CONSTRAIN_ALIGNED": "Auto Direction",
+    "CONSTRAIN_X": "Lock X",
+    "CONSTRAIN_Y": "Lock Y",
+    "CONSTRAIN_Z": "Lock Z",
+    "CONFIRM": "Confirm",
+    "CYCLE_SNAP_TARGETS": "Cycle Snap Targets",
+    "TOGGLE_INFERENCE_LOCK": "Lock Inference Reference",
+    "SAVE_TRANSIENT_MEASURE": "Save Measurement",
+    "COPY_TRANSIENT_MEASURE": "Copy Measurement",
+}
+
+
+def _user_item(keyconfig, keymap, item):
+    user_keymap = keyconfig.keymaps.get(keymap.name)
+    if user_keymap is None:
+        return None, None
+    return user_keymap, user_keymap.keymap_items.from_id(item.id)
+
+
 def draw_keymaps(layout, context):
     import rna_keymap_ui
 
@@ -129,14 +146,25 @@ def draw_keymaps(layout, context):
     if keyconfig is None:
         layout.label(text="Keymap entries are unavailable during registration")
         return
-    for keymap, item in registered_keymap_items():
-        user_keymap = keyconfig.keymaps.get(keymap.name)
-        if user_keymap is None:
-            continue
-        user_item = user_keymap.keymap_items.from_id(item.id)
+    layout.label(text="Start a tool (unbound until you assign a key)")
+    for keymap, item in _keymap_items:
+        user_keymap, user_item = _user_item(keyconfig, keymap, item)
+        if user_item is not None:
+            rna_keymap_ui.draw_kmi([], keyconfig, user_keymap, user_item, layout, 0)
+    layout.separator()
+    layout.label(text="While a tool runs")
+    # Every modal key shares one carrier operator, so Blender's own row would label
+    # them all "Dimensions Modal Action"; name each by its action instead.
+    column = layout.column(align=True)
+    for keymap, item in _modal_keymap_items:
+        _user_keymap, user_item = _user_item(keyconfig, keymap, item)
         if user_item is None:
             continue
-        rna_keymap_ui.draw_kmi([], keyconfig, user_keymap, user_item, layout, 0)
+        action = user_item.properties.action
+        row = column.row(align=True)
+        row.prop(user_item, "active", text="")
+        row.label(text=_ACTION_LABELS.get(action, action.replace("_", " ").title()))
+        row.prop(user_item, "type", text="", full_event=True)
 
 
 def modal_action_from_event(event):

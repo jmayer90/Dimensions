@@ -19,10 +19,36 @@ def area_label_world(props, center_world, fallback_world=None):
     return Vector(center_world) + direction.normalized() * props.offset_distance
 
 
+def area_source_is_read_only(obj):
+    """Return whether face IDs written to ``obj`` would be lost on reload.
+
+    Linked and overridden mesh data is reloaded from its library, so an Area
+    bound to it would silently lose its identity when the file is reopened.
+    """
+    data = getattr(obj, "data", None)
+    return bool(
+        getattr(obj, "library", None) is not None
+        or getattr(obj, "override_library", None) is not None
+        or getattr(data, "library", None) is not None
+        or getattr(data, "override_library", None) is not None
+    )
+
+
+def _in_edit_mode(obj):
+    # Ask the mesh, not the object: a linked duplicate in Edit Mode puts a shared
+    # mesh in Edit Mode while this object stays in Object Mode.
+    return bool(getattr(obj.data, "is_editmode", False))
+
+
 def bind_area_faces(props, obj, faces):
-    """Replace an Area annotation's source binding with the supplied BMesh faces."""
+    """Replace an Area annotation's source binding with the supplied BMesh faces.
+
+    Returns None without changing ``props`` when the source is read-only.
+    """
     if obj is None or obj.type != "MESH":
         raise ValueError("Area source must be a mesh object")
+    if area_source_is_read_only(obj):
+        return None
     face_indices = [face.index for face in faces]
     metadata = [
         (
@@ -33,6 +59,8 @@ def bind_area_faces(props, obj, faces):
         )
         for face in faces
     ]
+    # Adding the face-ID layer invalidates every existing BMFace wrapper, even
+    # while the BMesh is alive, so ``faces`` must not be read after this call.
     face_ids = ensure_bmesh_face_ids(obj, face_indices)
     props.area_source_object = obj
     props.area_faces.clear()
@@ -50,13 +78,17 @@ def bind_area_faces(props, obj, faces):
 
 
 def bind_area_face_indices(props, obj, face_indices):
-    """Bind an Area from face indices in either Object or Mesh Edit Mode."""
+    """Bind an Area from face indices in either Object or Mesh Edit Mode.
+
+    Returns None without changing ``props`` when the source is read-only or an
+    index is out of range.
+    """
     if obj is None or obj.type != "MESH":
         raise ValueError("Area source must be a mesh object")
     indices = sorted(set(int(index) for index in face_indices))
-    if not indices:
+    if not indices or area_source_is_read_only(obj):
         return None
-    if obj.mode == "EDIT":
+    if _in_edit_mode(obj):
         bm = bmesh.from_edit_mesh(obj.data)
         bm.faces.ensure_lookup_table()
         if any(index < 0 or index >= len(bm.faces) for index in indices):
@@ -92,7 +124,7 @@ def evaluate_area_face_indices(obj, face_indices):
     indices = sorted(set(int(index) for index in face_indices))
     if obj is None or obj.type != "MESH" or not indices:
         return None
-    if obj.mode == "EDIT":
+    if _in_edit_mode(obj):
         bm = bmesh.from_edit_mesh(obj.data)
         bm.faces.ensure_lookup_table()
         if any(index < 0 or index >= len(bm.faces) for index in indices):
@@ -110,25 +142,16 @@ def ensure_bmesh_face_ids(obj, face_indices):
     if layer is None:
         layer = bm.faces.layers.int.new(FACE_ID_ATTRIBUTE)
         bm.faces.ensure_lookup_table()
-    next_id = max(
+    changed, face_ids, next_id = _unique_face_ids(
+        [face[layer] for face in bm.faces],
+        face_indices,
         int(obj.data.get(FACE_ID_COUNTER, 1)),
-        max((face[layer] for face in bm.faces), default=0) + 1,
     )
-    values = []
-    counts = {}
-    for face in bm.faces:
-        counts[face[layer]] = counts.get(face[layer], 0) + 1
-    for face_index in face_indices:
-        face = bm.faces[face_index]
-        value = face[layer]
-        if value <= 0 or counts.get(value, 0) > 1:
-            value = next_id
-            next_id += 1
-            face[layer] = value
-        values.append(value)
+    for face_index, value in changed.items():
+        bm.faces[face_index][layer] = value
     obj.data[FACE_ID_COUNTER] = next_id
     bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
-    return values
+    return face_ids
 
 
 def ensure_mesh_face_ids(mesh, face_indices):
@@ -137,24 +160,44 @@ def ensure_mesh_face_ids(mesh, face_indices):
         attribute = mesh.attributes.new(FACE_ID_ATTRIBUTE, "INT", "FACE")
     elif attribute.data_type != "INT" or attribute.domain != "FACE":
         raise ValueError(f"Reserved attribute {FACE_ID_ATTRIBUTE!r} must be an INT FACE attribute")
-    next_id = max(
+    changed, face_ids, next_id = _unique_face_ids(
+        [item.value for item in attribute.data],
+        face_indices,
         int(mesh.get(FACE_ID_COUNTER, 1)),
-        max((item.value for item in attribute.data), default=0) + 1,
     )
-    values = []
-    counts = {}
-    for item in attribute.data:
-        counts[item.value] = counts.get(item.value, 0) + 1
-    for face_index in face_indices:
-        value = attribute.data[face_index].value
-        if value <= 0 or counts.get(value, 0) > 1:
-            value = next_id
-            next_id += 1
-            attribute.data[face_index].value = value
-        values.append(value)
+    for face_index, value in changed.items():
+        attribute.data[face_index].value = value
     mesh[FACE_ID_COUNTER] = next_id
     mesh.update()
-    return values
+    return face_ids
+
+
+def _unique_face_ids(values, face_indices, counter):
+    """Plan IDs so each requested face owns one, returning ``(changed, ids, next_id)``.
+
+    A duplicated ID no longer names one face, so every face sharing it is
+    renumbered. Renumbering only the requested copy would let an existing Area
+    bound to that ID silently resolve to whichever copy kept it.
+    """
+    next_id = max(counter, max(values, default=0) + 1)
+    counts = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    shared = {values[index] for index in face_indices if values[index] > 0 and counts[values[index]] > 1}
+    changed = {}
+    for index, value in enumerate(values):
+        if value in shared:
+            changed[index] = next_id
+            next_id += 1
+    face_ids = []
+    for index in face_indices:
+        value = changed.get(index, values[index])
+        if value <= 0:
+            value = next_id
+            next_id += 1
+            changed[index] = value
+        face_ids.append(value)
+    return changed, face_ids, next_id
 
 
 def evaluate_area_binding(props):
@@ -171,7 +214,8 @@ def evaluate_area_binding(props):
 
     # Hold the Edit Mode BMesh wrapper for the whole evaluation: when it is freed,
     # Blender invalidates every BMFace object created from it.
-    edit_mesh = bmesh.from_edit_mesh(obj.data) if obj.mode == "EDIT" else None
+    editing = _in_edit_mode(obj)
+    edit_mesh = bmesh.from_edit_mesh(obj.data) if editing else None
     faces_by_id = _faces_by_id(obj, edit_mesh)
     resolved = []
     for binding in bindings:
@@ -194,7 +238,7 @@ def evaluate_area_binding(props):
     )
     if not active_modifiers:
         return base_result
-    if obj.mode == "EDIT":
+    if editing:
         return _base_fallback(base_result, "Edit Mode uses base faces while viewport modifiers are active")
 
     try:
@@ -261,7 +305,7 @@ def _evaluate_faces(obj, faces):
 def _faces_by_id(obj, edit_mesh=None):
     """Map persistent face IDs to faces; ``edit_mesh`` must outlive the returned faces."""
     result = {}
-    if obj.mode == "EDIT":
+    if _in_edit_mode(obj):
         bm = edit_mesh if edit_mesh is not None else bmesh.from_edit_mesh(obj.data)
         layer = bm.faces.layers.int.get(FACE_ID_ATTRIBUTE)
         if layer is None:

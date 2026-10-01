@@ -12,7 +12,6 @@ from .construction import (
     construction_segment_world,
     guide_line_world,
     guide_point_world,
-    guide_segment_world,
 )
 from .projected_snap import nearest_visible_projected_vertex
 from .properties import is_guide_object

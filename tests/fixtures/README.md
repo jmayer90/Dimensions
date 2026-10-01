@@ -36,7 +36,9 @@ dimension:
 blender --background --factory-startup --python scripts/create_schema_v15_fixture.py
 ```
 
-`tests/blender_lifecycle.py` verifies the schema-v16 conversion against it.
+`tests/blender_lifecycle.py` verifies the schema-v16 conversion against it, and also builds
+0.6 and 0.7 objects on the fly to check that appended, linked, and shared objects carry
+their own schema stamp and are converted once, never twice.
 
 The settings-only fixture uses the retained 0.4.2 archive and contains a custom
 style and scene settings, but no Dimensions objects:

@@ -10,10 +10,16 @@ from mathutils import Vector
 from .. import messages
 from ..anchors import resolve_anchor
 from ..angle_binding import resolve_angle_source
-from ..area_binding import evaluate_area_binding
+from ..area_binding import area_label_world, evaluate_area_binding
 from ..dimension_geometry import get_dimension_world_geometry
 from ..drawing import clear_preview_state, set_preview_state
-from ..interaction import axis_from_event, is_confirm_event, update_distance_text
+from ..interaction import (
+    axis_from_event,
+    is_confirm_event,
+    is_navigation_event,
+    set_tool_status_text,
+    update_distance_text,
+)
 from ..manipulation import (
     angle_radius_from_world,
     apply_area_label_position,
@@ -67,6 +73,10 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
         self._update_candidate(context)
         self._update_preview(context)
         context.window_manager.modal_handler_add(self)
+        set_tool_status_text(
+            context,
+            "Adjust Handle: move and click to place · X/Y/Z lock direction · type a distance · Esc cancels",
+        )
         return {"RUNNING_MODAL"}
 
     @modal_cleanup_on_exception
@@ -128,7 +138,7 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
             self.state.cancel()
             clear_preview_state(key=getattr(self, "_session_viewport_key", None))
             return {"CANCELLED"}
-        if event.type in {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE"}:
+        if is_navigation_event(event):
             return {"PASS_THROUGH"}
         return {"RUNNING_MODAL"}
 
@@ -144,16 +154,20 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
         return None
 
     def _current_world(self, annotation):
+        """Return the handle's displayed position, including the presentation offset."""
         props = annotation.dimension_props
+        offset = Vector(props.presentation_offset)
         if self.handle_kind == "AREA_LABEL":
-            return resolve_anchor(props.end) + Vector(props.presentation_offset)
+            result = evaluate_area_binding(props)
+            center = resolve_anchor(props.start) if result is None else result["center"]
+            return area_label_world(props, center, resolve_anchor(props.end)) + offset
         if self.handle_kind == "ANGLE_RADIUS":
             source = resolve_angle_source(props)
             if source is None:
                 return None
             direction = Vector(source["start"]) - Vector(source["center"])
             direction = direction.normalized() if direction.length > 1e-6 else Vector((1.0, 0.0, 0.0))
-            return Vector(source["center"]) + direction * props.angle_radius
+            return Vector(source["center"]) + offset + direction * props.angle_radius
         start, end = resolve_anchor(props.start), resolve_anchor(props.end)
         if start is None or end is None:
             return None
@@ -161,7 +175,7 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
             props.dimension_type, start, end, Vector(props.offset_plane_normal),
             props.offset_distance, props.offset_angle, props.measurement_mode,
         )
-        return None if geometry is None else geometry["line_mid_world"]
+        return None if geometry is None else geometry["line_mid_world"] + offset
 
     def _mouse_world(self, context, annotation, event):
         props = annotation.dimension_props
@@ -179,13 +193,15 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
                 include_free=True, plane_point=result["center"], plane_normal=result["normal"],
             )
             return None if snap is None else snap["world_co"]
+        offset = Vector(props.presentation_offset)
         if self.handle_kind == "ANGLE_RADIUS":
             source = resolve_angle_source(props)
             if source is None:
                 return None
+            center = Vector(source["center"]) + offset
             if self.state.axis in {"X", "Y", "Z"}:
                 return _axis_mouse_world(
-                    context, source["center"], self.state.axis,
+                    context, center, self.state.axis,
                     event.mouse_region_x, event.mouse_region_y,
                 )
             first = Vector(source["start"]) - Vector(source["center"])
@@ -194,7 +210,7 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
             normal = normal.normalized() if normal.length > 1e-6 else Vector((0.0, 0.0, 1.0))
             snap = find_nearest_snap_point(
                 context, event.mouse_region_x, event.mouse_region_y,
-                include_free=True, plane_point=source["center"], plane_normal=normal,
+                include_free=True, plane_point=center, plane_normal=normal,
             )
             return None if snap is None else snap["world_co"]
         start, end = resolve_anchor(props.start), resolve_anchor(props.end)
@@ -206,15 +222,16 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
         )
         if base is None:
             return None
+        middle = base["line_mid_world"] + offset
         if self.state.axis in {"X", "Y", "Z"}:
             return _axis_mouse_world(
-                context, base["line_mid_world"], self.state.axis,
+                context, middle, self.state.axis,
                 event.mouse_region_x, event.mouse_region_y,
             )
         snap = find_nearest_snap_point(
             context, event.mouse_region_x, event.mouse_region_y,
             include_free=True,
-            plane_point=base["line_mid_world"],
+            plane_point=middle,
             plane_normal=base["plane_normal_world"],
         )
         return None if snap is None else snap["world_co"]
@@ -231,14 +248,18 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
             return
         props = annotation.dimension_props
         typed = self._typed_distance(context)
+        offset = Vector(props.presentation_offset)
         if self.handle_kind == "LINEAR_OFFSET":
-            value = linear_offset_from_world(props, self.raw_world) if self.raw_world is not None else None
+            value = (
+                linear_offset_from_world(props, self.raw_world - offset)
+                if self.raw_world is not None else None
+            )
             self.candidate_value = typed if typed is not None else value
         elif self.handle_kind == "ANGLE_RADIUS":
             source = resolve_angle_source(props)
             value = (
                 None if source is None or self.raw_world is None
-                else angle_radius_from_world(source["center"], self.raw_world)
+                else angle_radius_from_world(Vector(source["center"]) + offset, self.raw_world)
             )
             self.candidate_value = typed if typed is not None else value
         elif self.handle_kind == "AREA_LABEL":
@@ -275,6 +296,7 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
             "distance_text": self.state.numeric_text,
             "distance_input_valid": self.state.numeric_valid,
         }
+        offset = Vector(props.presentation_offset)
         if self.handle_kind == "LINEAR_OFFSET":
             preview.update({
                 "start_world": resolve_anchor(props.start),
@@ -284,15 +306,16 @@ class DIMENSIONS_OT_DragAnnotationHandle(bpy.types.Operator):
                 "offset_plane_normal": tuple(props.offset_plane_normal),
                 "offset_distance": self.candidate_value,
                 "offset_angle": props.offset_angle,
+                "presentation_offset": tuple(offset),
             })
         elif self.handle_kind == "ANGLE_RADIUS":
             source = resolve_angle_source(props)
             if source is not None:
                 preview.update({
                     "annotation_kind": "ANGLE",
-                    "start_world": source["start"],
-                    "center_world": source["center"],
-                    "end_world": source["end"],
+                    "start_world": Vector(source["start"]) + offset,
+                    "center_world": Vector(source["center"]) + offset,
+                    "end_world": Vector(source["end"]) + offset,
                     "angle_radius": self.candidate_value,
                     "angle_mode": source.get("arc_mode", "MINOR"),
                 })

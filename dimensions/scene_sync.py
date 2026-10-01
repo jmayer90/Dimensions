@@ -1,5 +1,7 @@
 """Scene data synchronization and dependency-graph cache invalidation."""
 
+from contextlib import contextmanager
+
 import bpy
 from bpy.app.handlers import persistent
 from mathutils import Vector
@@ -65,6 +67,18 @@ def schedule_scene_sync():
     bpy.app.timers.register(_run_scheduled_sync, first_interval=0.0)
 
 
+@contextmanager
+def scene_sync_suspended():
+    """Keep depsgraph updates requested by migration from re-entering synchronization."""
+    global _sync_active
+    previous = _sync_active
+    _sync_active = True
+    try:
+        yield
+    finally:
+        _sync_active = previous
+
+
 def _subscribe_selection_sync():
     """Schedule manager-index synchronization when a viewport active object changes."""
     bpy.msgbus.clear_by_owner(_selection_sync_owner)
@@ -118,9 +132,12 @@ def sync_scene_objects(scene):
         return
     _sync_active = True
     try:
-        from .migrations import stamp_scene_if_needed
+        from .migrations import scene_is_newer_than_supported, stamp_scene_if_needed
 
         stamp_scene_if_needed(scene)
+        if scene_is_newer_than_supported(scene):
+            # A newer Dimensions release owns this scene's data; never rewrite it.
+            return
         remove_orphan_measurement_snap_proxies(scene)
         remove_orphan_guide_point_snap_proxies(scene)
         for obj in list(scene.objects):

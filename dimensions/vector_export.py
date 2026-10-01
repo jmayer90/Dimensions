@@ -37,6 +37,7 @@ class VectorDocument:
     strokes: tuple
     annotation_count: int = 0
     skipped_count: int = 0
+    outside_count: int = 0
 
 
 def _normalized_color(color):
@@ -134,6 +135,25 @@ def _clip_segment(first, second):
     )
 
 
+def _framed_segments(scene, camera, stroke):
+    """Yield the parts of a world stroke inside the normalized camera frame."""
+    projected = [world_to_camera_view(scene, camera, Vector(point)) for point in stroke.points]
+    for first, second in zip(projected, projected[1:]):
+        if first.z < 0.0 or second.z < 0.0:
+            continue
+        clipped = _clip_segment((first.x, first.y), (second.x, second.y))
+        if clipped is not None:
+            yield clipped
+
+
+def strokes_inside_camera_frame(scene, camera, strokes):
+    """Return whether any part of ``strokes`` would appear on the exported page."""
+    return any(
+        next(_framed_segments(scene, camera, stroke), None) is not None
+        for stroke in strokes
+    )
+
+
 def build_vector_document(
     scene,
     camera,
@@ -175,13 +195,7 @@ def build_vector_document(
         if not isinstance(stroke, OutputStroke):
             raise TypeError("strokes must contain OutputStroke values")
         color = _normalized_color(stroke.color)
-        projected = [world_to_camera_view(scene, camera, Vector(point)) for point in stroke.points]
-        for first, second in zip(projected, projected[1:]):
-            if first.z < 0.0 or second.z < 0.0:
-                continue
-            clipped = _clip_segment((first.x, first.y), (second.x, second.y))
-            if clipped is None:
-                continue
+        for clipped in _framed_segments(scene, camera, stroke):
             page_points = tuple(
                 (
                     left + point[0] * frame_width_mm,
