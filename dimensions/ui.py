@@ -298,6 +298,9 @@ def _inherited_style_text(style, property_name, label=None):
         value = ", ".join(f"{channel:.2f}" for channel in value)
     if property_name in {"arrow_end_style", "start_end_style", "end_end_style", "unit_style", "secondary_unit_style", "dual_unit_arrangement", "label_orientation", "label_line_mode"}:
         value = value.replace("_", " ").title()
+    if isinstance(value, float):
+        # Single-precision properties would otherwise print as 1.600000023841858.
+        value = f"{round(value, 4):g}"
     return f"{display_name}: inherited {value}"
 
 

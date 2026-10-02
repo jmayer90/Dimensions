@@ -1936,6 +1936,15 @@ class DimensionsNamedStyleTests(unittest.TestCase):
         self.created.append(obj)
         return obj
 
+    def test_inherited_style_text_shows_floats_as_entered(self):
+        from dimensions.ui import _inherited_style_text
+
+        self.settings.dimension_line_width = 1.6
+        props = self._dimension("DIM Inherited Float").dimension_props
+        style = resolve_dimension_style(self.settings, props)
+        self.assertEqual(_inherited_style_text(style, "line_width"), "Line Width: inherited 1.6")
+        self.assertEqual(_inherited_style_text(style, "arrow_size"), f"Arrow Size: inherited {style.arrow_size:g}")
+
     def test_resolution_is_per_property_override_then_style_then_scene(self):
         self.settings.dimension_line_width = 2.0
         self.settings.dimension_text_size = 14

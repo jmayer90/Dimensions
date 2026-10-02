@@ -2,6 +2,11 @@
 
 All notable user-visible changes are recorded here. Versions before 0.2.0 were rapid pre-release iteration and are summarized rather than listed individually.
 
+## 0.7.1 — Unreleased
+
+- The **Selected** panel showed inherited decimal style values with single-precision noise, such as `Line Width: inherited 1.600000023841858`. They now read as entered, such as `1.6`.
+- This is a patch release: it fixes a display bug without changing saved data or the interaction contract.
+
 ## 0.7.0 — Unreleased
 
 This release narrows Dimensions to a smaller set of tools that each work predictably. It is a minor release under both versioning triggers 1 and 2: older files are converted and some annotation kinds are removed (saved-data break), and documented tools, operators, and the active-plane X/Y/Z remapping are gone (interaction-contract break).
