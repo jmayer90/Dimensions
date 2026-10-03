@@ -30,4 +30,4 @@ in [UX-10](tickets/UX-10-focused-toolset.md).
 
 The release gate in [DESIGN.md](DESIGN.md#release-gate) applies, plus
 `tests/foreground_workflows.py` in a foreground Blender on each supported version.
-Schema v16 must ship in a release before the 1.0 schema freeze.
+Schema v16 shipped in 0.7.0.

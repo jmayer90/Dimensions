@@ -97,7 +97,7 @@ Add-on preferences are per-user defaults and interaction tuning. Scene and annot
 | 13 | 0.5.0 | Additive saved guide-plane definitions, bounded presentation extent, plane repair state, dedicated snap/manager defaults, and one scene active-plane frame. The v12 → v13 migration is idempotent and the released schema-v2 fixture exercises the full path. |
 | 14 | 0.5.0 | Additive angular-guide pivot/angle and repeated-spacing mode/interval/count/extent definitions; existing guides remain fixed or retain their prior derived mode. |
 | 15 | 0.6.0 release | Additive scene-owned drawing-sheet toggles, physical margin/title-block dimensions, and title/number/revision/author/date metadata. Existing vector export remains furniture-free by default. |
-| 16 | 0.7.0 | Breaking simplification. Chain/baseline sets become independent linear dimensions; derived, angular, and spaced guides become fixed guide lines at their last position; guide lines and points become transform-defined; guide planes become grid meshes on their last frame; radial, diameter, arc, coordinate, and elevation annotations are deleted with their names printed. Removed fields are read through `bl_system_properties_get()` and then dropped. Steps v6→v7 and v9→v14 that only initialized removed features are now no-ops. Each owned object also stores the schema it was created in or converted to, so later migrations skip it when it is appended, linked, or shown in another scene; conversion keeps hide state per view layer, selectability, and parenting, and removes Grease Pencil output whose source was deleted. The released `schema-v15-0.6.0.blend` fixture verifies the conversion and its idempotence. |
+| 16 | 0.7.0 release | Breaking simplification. Chain/baseline sets become independent linear dimensions; derived, angular, and spaced guides become fixed guide lines at their last position; guide lines and points become transform-defined; guide planes become grid meshes on their last frame; radial, diameter, arc, coordinate, and elevation annotations are deleted with their names printed. Removed fields are read through `bl_system_properties_get()` and then dropped. Steps v6→v7 and v9→v14 that only initialized removed features are now no-ops. Each owned object also stores the schema it was created in or converted to, so later migrations skip it when it is appended, linked, or shown in another scene; conversion keeps hide state per view layer, selectability, and parenting, and removes Grease Pencil output whose source was deleted. The released `schema-v15-0.6.0.blend` fixture verifies the conversion and its idempotence. |
 
 ## Interaction contract
 
@@ -177,10 +177,11 @@ Set `DIMENSIONS_SNAP_PROFILE=1` for the add-on's own per-stage build, reproject,
    under [FND-12](tickets/FND-12-critical-stability-hardening.md),
    [OUT-06](tickets/OUT-06-vector-typography-page-bounds.md), and
    [FND-13](tickets/FND-13-lifecycle-modal-cleanup.md). The 0.6.0 suite passed on Linux
-   Blender 5.1.2 and 5.2.2. The 0.7.0 background suites (315 tests) and release archive
-   pass on Windows Blender 5.1.2 and 5.2.0, as do the 22 foreground workflow checks;
+   Blender 5.1.2 and 5.2.2. The 0.7.0 background suites (358 tests) and the 36 foreground
+   workflow checks pass on Windows Blender 5.1.2 and 5.2.0; the 0.7.1 suites (359 tests)
+   and release archive pass on Windows Blender 5.1.2. Schema v16 shipped in 0.7.0, so
    final 1.0 release QA still needs the supported platform matrix and a deliberate
-   schema freeze after schema v16 ships.
+   schema freeze.
 
 ## Lifecycle behavior matrix
 
